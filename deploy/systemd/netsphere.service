@@ -1,0 +1,39 @@
+# =====================================================================
+# NetSphere Terminal — systemd unit
+# =====================================================================
+#
+# Optional: makes the backend stack start automatically on boot.
+#
+# Install:
+#   sudo cp deploy/systemd/netsphere.service /etc/systemd/system/
+#   sudo sed -i "s|/opt/netsphere|$(pwd)|" /etc/systemd/system/netsphere.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now netsphere.service
+#
+# Manage:
+#   sudo systemctl start  netsphere    # start
+#   sudo systemctl stop   netsphere    # stop
+#   sudo systemctl status netsphere    # current state
+#   sudo systemctl restart netsphere
+#
+# Note: Docker-restart-policy is `unless-stopped` so containers come
+# back even without systemd. This unit is for hands-off boot ordering.
+# =====================================================================
+
+[Unit]
+Description=NetSphere Terminal backend stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory=/opt/netsphere
+EnvironmentFile=/opt/netsphere/.env.production
+ExecStart=/usr/bin/docker compose -f deploy/docker-compose.production.yml --env-file .env.production up -d
+ExecStop=/usr/bin/docker compose -f deploy/docker-compose.production.yml --env-file .env.production down
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

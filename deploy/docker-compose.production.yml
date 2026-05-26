@@ -1,0 +1,130 @@
+# =====================================================================
+# NetSphere Terminal — Production deployment
+# =====================================================================
+#
+# Differences from deployments/docker-compose.yml (which is for development):
+#
+#   - Builds the backend image directly via Dockerfile build context, with
+#     a real version tag instead of relying on dev cache reuse.
+#   - Volumes are NAMED, not bind-mounted, so the host filesystem layout
+#     doesn't leak — data lives under Docker-managed paths and survives
+#     re-creation of containers.
+#   - Postgres + Redis are on a private network only (no host ports).
+#     Only the backend is reachable from outside the network (and only
+#     through nginx).
+#   - Health checks are stricter; the auth service won't be reachable until
+#     it actually answers /healthz with 200.
+#   - All secrets come from .env.production (which YOU create, not stored
+#     in source). No defaults — if a variable is missing, compose refuses
+#     to start instead of silently using "ChangeMe!2026".
+#   - Backup-friendly: postgres volume can be backed up live via
+#     `docker compose exec postgres pg_dump`.
+#
+# Run:
+#   cd deploy
+#   cp .env.production.example ../.env.production
+#   $EDITOR ../.env.production    # set REAL passwords + secrets
+#   docker compose -f docker-compose.production.yml --env-file ../.env.production up -d
+#
+# =====================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: netsphere-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER missing — check .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing — check .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB missing — check .env.production}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: netsphere-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD missing}
+      --appendonly yes
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  auth-service:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: netsphere/auth-service:${APP_VERSION:-1.6.0.1}
+    container_name: netsphere-auth
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # ---- Database -------------------------------------------------
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      # ---- Server ---------------------------------------------------
+      PORT: 8081
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # ---- Crypto secrets (REQUIRED — no defaults) -----------------
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET missing — generate with: openssl rand -hex 64}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET missing}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?MFA_ENCRYPTION_KEY missing — must be exactly 32 bytes hex}
+      # ---- Bootstrap admin ------------------------------------------
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD missing — set a strong initial password}
+      # ---- CORS — allow only the configured frontend origins -------
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
+      # ---- Rate limiting --------------------------------------------
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-60000}
+    ports:
+      # Bind to LOCALHOST ONLY — nginx will reverse-proxy from public 443
+      - "127.0.0.1:8081:8081"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Run migrations on startup
+    command: >
+      sh -c "
+        echo 'Running database migrations...' &&
+        node /app/dist/migrate.js up || exit 1 ;
+        echo 'Starting server...' &&
+        exec node --enable-source-maps /app/dist/server.js
+      "
+
+volumes:
+  postgres-data:
+    name: netsphere-postgres-data
+  redis-data:
+    name: netsphere-redis-data
+
+networks:
+  internal:
+    name: netsphere-internal
