@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.1] — 2026-05-26 — SFTP dialog plugin fix
+
+### Fixed
+- **Desktop SFTP page no longer throws `Cannot read properties of
+  undefined (reading 'invoke')`** when opening the Save / Upload
+  pickers. Root cause: the `@tauri-apps/plugin-dialog` npm wrapper
+  imports `invoke` from `@tauri-apps/api/core`, and on some Tauri 2.x
+  layouts that import resolved to a duplicate copy whose internal IPC
+  binding was undefined. We now call the dialog plugin's IPC commands
+  (`plugin:dialog|save`, `plugin:dialog|open`) directly through the
+  same `invoke` already in use elsewhere on the page — one resolution
+  path, no duplicate module.
+
+### Removed
+- `@tauri-apps/plugin-dialog` from `desktop/package.json` (no longer a
+  runtime dependency — the Rust-side `tauri-plugin-dialog` continues to
+  serve the IPC commands)
+
+### Notes
+- No protocol change. Existing builds with the npm wrapper still work;
+  this release just eliminates the failure mode.
+- Capabilities (`dialog:default`, `dialog:allow-save`,
+  `dialog:allow-open`) are unchanged.
+
+---
+
 ## [1.6.0.1] — 2026-05-26 — Production deployment package + recurring fixes
 
 ### Fixed

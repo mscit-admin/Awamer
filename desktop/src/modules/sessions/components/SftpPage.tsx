@@ -7,7 +7,32 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { save, open as openDialog } from "@tauri-apps/plugin-dialog";
+
+// The npm wrapper `@tauri-apps/plugin-dialog` has historically thrown
+// "Cannot read properties of undefined (reading 'invoke')" when its
+// internal `@tauri-apps/api/core` resolves to a duplicate copy. We call
+// the dialog plugin's IPC commands directly via the single `invoke` we
+// already import — same wire contract, one fewer way to drift.
+interface SaveDialogOptions {
+  defaultPath?: string;
+  title?: string;
+  filters?: { name: string; extensions: string[] }[];
+}
+interface OpenDialogOptions {
+  multiple?: boolean;
+  directory?: boolean;
+  title?: string;
+  defaultPath?: string;
+  filters?: { name: string; extensions: string[] }[];
+}
+function save(options: SaveDialogOptions = {}): Promise<string | null> {
+  return invoke<string | null>("plugin:dialog|save", { options });
+}
+function openDialog(
+  options: OpenDialogOptions = {},
+): Promise<string | string[] | null> {
+  return invoke<string | string[] | null>("plugin:dialog|open", { options });
+}
 
 import { hostsApi, credentialsApi, type Host } from "../api/sessionsApi";
 import { useAuthStore } from "@/modules/auth/store/authStore";
