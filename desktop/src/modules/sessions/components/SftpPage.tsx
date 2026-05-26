@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState, type FormEvent, type DragEvent } from "react";
+import { useEffect, useRef, useState, lazy, Suspense, Fragment, type FormEvent, type DragEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Folder, FileIcon, Link2, ChevronRight, Loader2, Download,
   AlertCircle, Lock, KeyRound, HardDrive, Home, Power,
   Upload, FolderPlus, RefreshCw, Trash2, Edit3, Pencil, X, Save,
+  ShieldCheck,
 } from "lucide-react";
+
+// Monaco is heavy (~3 MB minified) — keep it out of the main bundle and
+// only fetch it the first time the user opens a file for editing.
+const MonacoEditor = lazy(() => import("@monaco-editor/react").then(m => ({ default: m.default })));
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -51,6 +56,18 @@ interface RemoteEntry {
   size: number;
   mtime: number;
   mode: number;
+  uid: number | null;
+  gid: number | null;
+}
+
+interface PermissionsState {
+  entry: RemoteEntry;
+  /** Octal string the user is editing — accepts up to 4 digits. */
+  modeText: string;
+  uidText: string;
+  gidText: string;
+  saving: boolean;
+  error: string | null;
 }
 
 interface ProgressEvent {
@@ -110,6 +127,7 @@ export function SftpPage() {
   // 1.6.0
   const [renaming, setRenaming] = useState<{ entry: RemoteEntry; value: string } | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [permissions, setPermissions] = useState<PermissionsState | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -439,6 +457,69 @@ export function SftpPage() {
     }
   }
 
+  // ---------- 1.7.0: permissions (chmod / chown) --------------------
+  function openPermissions(entry: RemoteEntry) {
+    setPermissions({
+      entry,
+      modeText: (entry.mode & 0o7777).toString(8).padStart(3, "0"),
+      uidText: entry.uid !== null && entry.uid !== undefined ? String(entry.uid) : "",
+      gidText: entry.gid !== null && entry.gid !== undefined ? String(entry.gid) : "",
+      saving: false,
+      error: null,
+    });
+    setContextMenu(null);
+  }
+
+  async function savePermissions() {
+    if (!permissions || !sessionId) return;
+    const { entry, modeText, uidText, gidText } = permissions;
+
+    const parsedMode = /^[0-7]{3,4}$/.test(modeText) ? parseInt(modeText, 8) : NaN;
+    if (Number.isNaN(parsedMode)) {
+      setPermissions(prev => prev ? { ...prev, error: "Mode must be 3–4 octal digits (e.g. 0755 or 644)" } : null);
+      return;
+    }
+
+    const parseId = (s: string): number | null | "invalid" => {
+      const t = s.trim();
+      if (t === "") return null;
+      if (!/^\d+$/.test(t)) return "invalid";
+      const n = Number(t);
+      if (n < 0 || n > 0xFFFF_FFFF) return "invalid";
+      return n;
+    };
+    const uid = parseId(uidText);
+    const gid = parseId(gidText);
+    if (uid === "invalid" || gid === "invalid") {
+      setPermissions(prev => prev ? { ...prev, error: "uid / gid must be non-negative integers" } : null);
+      return;
+    }
+
+    setPermissions(prev => prev ? { ...prev, saving: true, error: null } : null);
+    try {
+      const modeChanged = parsedMode !== (entry.mode & 0o7777);
+      const uidChanged = uid !== (entry.uid ?? null);
+      const gidChanged = gid !== (entry.gid ?? null);
+
+      if (modeChanged) {
+        await invoke("sftp_chmod", { sessionId, path: entry.path, mode: parsedMode });
+      }
+      if (uidChanged || gidChanged) {
+        await invoke("sftp_chown", {
+          sessionId,
+          path: entry.path,
+          uid: uidChanged ? uid : null,
+          gid: gidChanged ? gid : null,
+        });
+      }
+      await listDirectory(sessionId, cwd);
+      setPermissions(null);
+    } catch (e) {
+      const err = parseAppError(e);
+      setPermissions(prev => prev ? { ...prev, saving: false, error: err.message } : null);
+    }
+  }
+
   function refreshListing() {
     if (sessionId) void listDirectory(sessionId, cwd);
   }
@@ -710,6 +791,13 @@ export function SftpPage() {
                         <Edit3 className="size-3.5" />
                       </button>
                       <button
+                        onClick={(ev) => { ev.stopPropagation(); openPermissions(e); }}
+                        className="text-fg-muted hover:text-accent p-0.5"
+                        title="Permissions"
+                      >
+                        <ShieldCheck className="size-3.5" />
+                      </button>
+                      <button
                         onClick={(ev) => { ev.stopPropagation(); void deleteEntry(e); }}
                         className="text-fg-muted hover:text-red-400 p-0.5"
                         title="Delete"
@@ -769,6 +857,12 @@ export function SftpPage() {
               <Edit3 className="size-3.5" /> Rename
             </button>
             <button
+              onClick={() => openPermissions(contextMenu.entry)}
+              className="block w-full text-left px-3 py-1.5 hover:bg-bg-elevated flex items-center gap-2"
+            >
+              <ShieldCheck className="size-3.5" /> Permissions…
+            </button>
+            <button
               onClick={() => { setContextMenu(null); void deleteEntry(contextMenu.entry); }}
               className="block w-full text-left px-3 py-1.5 hover:bg-bg-elevated text-red-400 flex items-center gap-2"
             >
@@ -803,13 +897,31 @@ export function SftpPage() {
                 <X className="size-3.5" /> Close
               </button>
             </header>
-            <textarea
-              value={editor.text}
-              onChange={(e) => setEditor(prev => prev ? { ...prev, text: e.target.value } : null)}
-              className="flex-1 min-h-0 bg-bg text-fg font-mono text-sm p-4 resize-none outline-none border-0 focus:outline-none"
-              spellCheck={false}
-              autoFocus
-            />
+            <div className="flex-1 min-h-0">
+              <Suspense
+                fallback={
+                  <div className="h-full flex items-center justify-center text-fg-muted text-xs gap-2">
+                    <Loader2 className="size-3.5 animate-spin" /> Loading editor…
+                  </div>
+                }
+              >
+                <MonacoEditor
+                  height="100%"
+                  theme="vs-dark"
+                  language={languageFromFilename(editor.filename)}
+                  value={editor.text}
+                  onChange={(value) => setEditor(prev => prev ? { ...prev, text: value ?? "" } : null)}
+                  options={{
+                    fontSize: 13,
+                    minimap: { enabled: false },
+                    automaticLayout: true,
+                    wordWrap: "on",
+                    scrollBeyondLastLine: false,
+                    tabSize: 2,
+                  }}
+                />
+              </Suspense>
+            </div>
             {editor.saveError && (
               <div className="px-4 py-2 bg-red-500/10 border-t border-red-500/30 text-red-300 text-xs flex items-center gap-2">
                 <AlertCircle className="size-3.5" /> {editor.saveError}
@@ -818,8 +930,57 @@ export function SftpPage() {
           </div>
         </div>
       )}
+
+      {/* Permissions modal (1.7.0 — chmod / chown) */}
+      {permissions && (
+        <PermissionsDialog
+          state={permissions}
+          onChange={setPermissions}
+          onSave={() => void savePermissions()}
+          onClose={() => setPermissions(null)}
+        />
+      )}
     </div>
   );
+}
+
+/** Best-effort mapping from filename to a Monaco language id. Unknowns
+ *  fall through to "plaintext" — Monaco still renders, just without
+ *  syntax highlighting. */
+function languageFromFilename(name: string): string {
+  const lower = name.toLowerCase();
+  // Filenames without extension that we still recognize
+  if (lower === "dockerfile" || lower.startsWith("dockerfile.")) return "dockerfile";
+  if (lower === "makefile") return "makefile";
+  const ext = lower.includes(".") ? lower.slice(lower.lastIndexOf(".") + 1) : "";
+  switch (ext) {
+    case "ts": case "tsx": return "typescript";
+    case "js": case "jsx": case "mjs": case "cjs": return "javascript";
+    case "json": return "json";
+    case "yml": case "yaml": return "yaml";
+    case "toml": return "ini";
+    case "md": case "markdown": return "markdown";
+    case "py": return "python";
+    case "rs": return "rust";
+    case "go": return "go";
+    case "rb": return "ruby";
+    case "php": return "php";
+    case "java": return "java";
+    case "kt": case "kts": return "kotlin";
+    case "swift": return "swift";
+    case "c": case "h": return "c";
+    case "cpp": case "cc": case "cxx": case "hpp": case "hh": return "cpp";
+    case "cs": return "csharp";
+    case "sh": case "bash": case "zsh": return "shell";
+    case "sql": return "sql";
+    case "xml": case "html": case "htm": return "html";
+    case "css": return "css";
+    case "scss": case "sass": return "scss";
+    case "conf": case "cfg": case "ini": return "ini";
+    case "log": return "log";
+    case "dockerfile": return "dockerfile";
+    default: return "plaintext";
+  }
 }
 
 // =====================================================================
@@ -968,4 +1129,134 @@ function parseAppError(e: unknown): AppErrorBody {
   }
   if (typeof e === "string") return { code: "unknown", message: e };
   return { code: "unknown", message: String(e) };
+}
+
+// =====================================================================
+// Permissions dialog (1.7.0)
+// =====================================================================
+//
+// Two ways to set the mode:
+//   1. Octal text field (e.g. "0755" or "644")
+//   2. Nine checkboxes for r/w/x × owner/group/other
+// Both are bound to the same modeText state so editing either updates
+// the other. uid/gid are simple numeric fields — blank means "leave
+// this side unchanged" on submit.
+
+function PermissionsDialog({
+  state, onChange, onSave, onClose,
+}: {
+  state: PermissionsState;
+  onChange: (next: PermissionsState | null) => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const parsedMode = /^[0-7]{1,4}$/.test(state.modeText) ? parseInt(state.modeText, 8) : NaN;
+  const modeValid = !Number.isNaN(parsedMode);
+  const bits = modeValid ? parsedMode & 0o777 : 0;
+
+  function setBit(idx: number, on: boolean) {
+    // idx 0..8 maps to owner-r,w,x; group-r,w,x; other-r,w,x
+    const mask = 1 << (8 - idx);
+    const next = on ? bits | mask : bits & ~mask;
+    const special = modeValid ? parsedMode & 0o7000 : 0;
+    onChange({ ...state, modeText: (special | next).toString(8).padStart(3, "0"), error: null });
+  }
+
+  const labels = ["r", "w", "x"];
+  const groups: { name: string; offset: number }[] = [
+    { name: "Owner", offset: 0 },
+    { name: "Group", offset: 3 },
+    { name: "Other", offset: 6 },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 bg-bg/80 flex items-center justify-center p-4">
+      <div className="card w-full max-w-md p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldCheck className="size-4 text-accent" />
+          <h2 className="text-base font-semibold">Permissions</h2>
+        </div>
+        <div className="text-2xs text-fg-muted font-mono truncate mb-4">{state.entry.path}</div>
+
+        <label className="block text-xs text-fg-muted mb-1">Mode (octal)</label>
+        <input
+          value={state.modeText}
+          onChange={(e) => onChange({ ...state, modeText: e.target.value, error: null })}
+          className="input font-mono w-32 mb-3"
+          placeholder="0755"
+          spellCheck={false}
+          autoFocus
+        />
+
+        <div className="grid grid-cols-[80px_repeat(3,1fr)] gap-y-1 text-xs items-center mb-4">
+          <div></div>
+          {labels.map(l => <div key={l} className="text-center text-fg-muted font-mono">{l}</div>)}
+          {groups.map((g, gi) => (
+            <Fragment key={g.name}>
+              <div className="text-fg-muted">{g.name}</div>
+              {[0, 1, 2].map(bi => {
+                const idx = gi * 3 + bi;
+                const mask = 1 << (8 - idx);
+                const checked = (bits & mask) !== 0;
+                return (
+                  <label key={bi} className="flex items-center justify-center">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => setBit(idx, e.target.checked)}
+                      disabled={!modeValid}
+                    />
+                  </label>
+                );
+              })}
+            </Fragment>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className="block text-xs text-fg-muted mb-1">uid (blank = keep)</label>
+            <input
+              value={state.uidText}
+              onChange={(e) => onChange({ ...state, uidText: e.target.value, error: null })}
+              className="input font-mono w-full"
+              placeholder={state.entry.uid !== null && state.entry.uid !== undefined ? String(state.entry.uid) : "—"}
+              inputMode="numeric"
+              spellCheck={false}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-fg-muted mb-1">gid (blank = keep)</label>
+            <input
+              value={state.gidText}
+              onChange={(e) => onChange({ ...state, gidText: e.target.value, error: null })}
+              className="input font-mono w-full"
+              placeholder={state.entry.gid !== null && state.entry.gid !== undefined ? String(state.entry.gid) : "—"}
+              inputMode="numeric"
+              spellCheck={false}
+            />
+          </div>
+        </div>
+
+        {state.error && (
+          <div className="mb-3 px-2 py-1.5 bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2 rounded">
+            <AlertCircle className="size-3.5" /> {state.error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="btn-ghost text-xs" disabled={state.saving}>
+            <X className="size-3.5" /> Cancel
+          </button>
+          <button
+            onClick={onSave}
+            disabled={state.saving || !modeValid}
+            className="btn-primary text-xs"
+          >
+            {state.saving ? <><Loader2 className="size-3.5 animate-spin" /> Saving</> : <><Save className="size-3.5" /> Apply</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

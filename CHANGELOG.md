@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.0] — 2026-05-26 — Monaco editor + chmod/chown UI
+
+### Added
+- **Monaco editor** replaces the plain textarea in the SFTP inline
+  editor. Loaded lazily (`React.lazy` + `Suspense`) so the ~3 MB
+  bundle is only fetched the first time the user opens a file. The
+  1 MB edit limit is unchanged.
+- **Filename → language detection** for syntax highlighting:
+  ts/tsx, js/jsx, json, yaml, toml (as ini), md, py, rs, go, rb, php,
+  java, kt, swift, c/h, cpp/cc/hpp, cs, sh/bash, sql, html, css,
+  scss, conf/ini, dockerfile, makefile. Unknowns render as
+  `plaintext` — still editable, just no highlighting.
+- **Permissions modal (chmod / chown)** reachable from per-row hover
+  action and right-click context menu. Lets the user edit mode in
+  octal **or** via a 3×3 grid of r/w/x checkboxes (both bound to the
+  same value), and set uid/gid numerically. Blank uid/gid means
+  "leave that side unchanged". After a successful write the listing
+  refreshes so the new mode/owner appears immediately.
+- **Rust commands:** `sftp_chmod(session_id, path, mode)` and
+  `sftp_chown(session_id, path, uid, gid)`. Both go through
+  `russh-sftp`'s `set_metadata` with only the fields they intend to
+  change, so SETSTAT's wire bitmask only touches the requested
+  attributes. `chmod` masks `mode & 0o7777` defensively.
+- **`RemoteEntry.uid` / `.gid`** now returned by `sftp_list` so the
+  Permissions modal can show current owner/group.
+
+### Changed
+- `RemoteEntry` (TS + Rust) gains `uid: Option<u32>` and
+  `gid: Option<u32>` — additive, existing consumers ignore them.
+
+### Risks
+- `russh-sftp` write API surface still not compile-verified in the
+  sandbox (same caveat as 1.5.0 / 1.6.0). `set_metadata` and
+  `FileAttributes` field names are the documented public API for
+  the 2.0 crate, but a follow-up `cargo check` on a developer
+  machine is the surest validation.
+- chown via SFTP needs **numeric** uid/gid by design — name → id
+  translation would require either an extra shell round-trip or
+  scraping `/etc/passwd`. Both deferred; the UI shows current
+  numeric ids as placeholders.
+
+### Known limitations
+- No bulk chmod across multiple selected files (single-entry only).
+- chown is silently a no-op when the SFTP server (or POSIX
+  permissions) refuses the request — we surface the server error
+  text but cannot detect "user lacks privilege" upfront.
+
+---
+
 ## [1.6.1] — 2026-05-26 — SFTP dialog plugin fix
 
 ### Fixed

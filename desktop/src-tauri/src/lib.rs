@@ -49,6 +49,8 @@ pub fn run() {
             commands::sftp::sftp_read_text,
             commands::sftp::sftp_write_text,
             commands::sftp::sftp_upload,
+            commands::sftp::sftp_chmod,
+            commands::sftp::sftp_chown,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
