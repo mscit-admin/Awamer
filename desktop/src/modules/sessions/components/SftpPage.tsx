@@ -4,10 +4,22 @@ import {
   ArrowLeft, Folder, FileIcon, Link2, ChevronRight, Loader2, Download,
   AlertCircle, Lock, KeyRound, HardDrive, Home, Power,
   Upload, FolderPlus, RefreshCw, Trash2, Edit3, Pencil, X, Save,
+  Search, FolderDown, ShieldCheck, ArrowUp, ArrowDown,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { save, open as openDialog } from "@tauri-apps/plugin-dialog";
+
+// 1.6.1 — native dialogs are driven from Rust (see commands/dialog.rs).
+// We deliberately do NOT import from `@tauri-apps/plugin-dialog`: on some
+// Tauri 2.x setups that JS plugin throws "Cannot read properties of
+// undefined (reading 'invoke')" when its bundled api version drifts from
+// the app's. These thin wrappers call our own IPC commands instead.
+const dialogSaveFile = (defaultName: string) =>
+  invoke<string | null>("dialog_save_file", { defaultName });
+const dialogOpenFile = () =>
+  invoke<string | null>("dialog_open_file");
+const dialogPickFolder = () =>
+  invoke<string | null>("dialog_pick_folder");
 
 import { hostsApi, credentialsApi, type Host } from "../api/sessionsApi";
 import { useAuthStore } from "@/modules/auth/store/authStore";
@@ -88,6 +100,12 @@ export function SftpPage() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  // 1.7.0
+  const [chmodTarget, setChmodTarget] = useState<{ entry: RemoteEntry; mode: number } | null>(null);
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<{ key: "name" | "size" | "mtime"; dir: "asc" | "desc" }>(
+    { key: "name", dir: "asc" }
+  );
 
   // ---------- 1. Load host metadata ---------------------------------
   useEffect(() => {
@@ -226,10 +244,7 @@ export function SftpPage() {
   async function downloadFile(entry: RemoteEntry) {
     if (!sessionId) return;
     try {
-      const localPath = await save({
-        defaultPath: entry.name,
-        title: `Save ${entry.name}`,
-      });
+      const localPath = await dialogSaveFile(entry.name);
       if (!localPath) return; // user cancelled
       setTransfers(prev => [...prev, {
         direction: "download",
@@ -257,16 +272,48 @@ export function SftpPage() {
     }
   }
 
+  // 1.7.0 — recursive folder download. Pick a destination directory,
+  // then the backend mirrors the remote tree beneath it and streams
+  // aggregate progress over the same channel as single-file downloads.
+  async function downloadFolder(entry: RemoteEntry) {
+    if (!sessionId) return;
+    setContextMenu(null);
+    const localDir = await dialogPickFolder();
+    if (!localDir) return; // user cancelled
+    setTransfers(prev => [...prev, {
+      direction: "download",
+      remotePath: entry.path,
+      localPath: `${localDir}/${entry.name}`,
+      filename: `${entry.name}/`,
+      totalBytes: 0,
+      bytesDone: 0,
+      done: false,
+      error: null,
+    }]);
+    try {
+      await invoke("sftp_download_dir", {
+        sessionId,
+        remotePath: entry.path,
+        localDir: String(localDir),
+      });
+    } catch (e) {
+      const err = parseAppError(e);
+      setTransfers(prev => {
+        const next = [...prev];
+        const i = next.length - 1;
+        if (i >= 0) next[i] = { ...next[i], error: err.message, done: true };
+        return next;
+      });
+    }
+  }
+
   // -----------------------------------------------------------------
   // 1.6.0 write operations
   // -----------------------------------------------------------------
 
   async function uploadFromPicker() {
     if (!sessionId) return;
-    const localPath = await openDialog({
-      multiple: false,
-      title: "Choose file to upload",
-    });
+    const localPath = await dialogOpenFile();
     if (!localPath) return;
     await uploadFile(String(localPath));
   }
@@ -414,6 +461,26 @@ export function SftpPage() {
     }
   }
 
+  // 1.7.0 — chmod. Open a small permissions editor seeded with the
+  // entry's current low-12-bit mode.
+  function startChmod(entry: RemoteEntry) {
+    setContextMenu(null);
+    setChmodTarget({ entry, mode: entry.mode & 0o7777 });
+  }
+
+  async function applyChmod() {
+    if (!chmodTarget || !sessionId) return;
+    const { entry, mode } = chmodTarget;
+    try {
+      await invoke("sftp_chmod", { sessionId, path: entry.path, mode });
+      setChmodTarget(null);
+      await listDirectory(sessionId, cwd);
+    } catch (e) {
+      const err = parseAppError(e);
+      alert(`Could not change permissions: ${err.message}`);
+    }
+  }
+
   function refreshListing() {
     if (sessionId) void listDirectory(sessionId, cwd);
   }
@@ -523,7 +590,30 @@ export function SftpPage() {
     );
   }
 
-  // connected
+  // connected — derive the visible rows: filter by name, then sort while
+  // always keeping directories grouped above files (1.7.0).
+  const needle = filter.trim().toLowerCase();
+  const visibleEntries = entries
+    .filter((e) => needle === "" || e.name.toLowerCase().includes(needle))
+    .slice()
+    .sort((a, b) => {
+      if (a.kind === "dir" && b.kind !== "dir") return -1;
+      if (a.kind !== "dir" && b.kind === "dir") return 1;
+      let cmp: number;
+      if (sort.key === "size") cmp = a.size - b.size;
+      else if (sort.key === "mtime") cmp = a.mtime - b.mtime;
+      else cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      return sort.dir === "asc" ? cmp : -cmp;
+    });
+
+  function toggleSort(key: "name" | "size" | "mtime") {
+    setSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" }
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-bg">
       {/* Header */}
@@ -555,6 +645,25 @@ export function SftpPage() {
           <BreadcrumbPath path={cwd} onNavigate={(p) => sessionId && (setCwd(p), listDirectory(sessionId, p))} />
         )}
         <div className="flex-1" />
+        {/* Filter current directory (1.7.0) */}
+        <div className="relative">
+          <Search className="size-3 text-fg-muted absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter…"
+            className="input text-xs py-1 pl-6 pr-2 w-40"
+          />
+          {filter && (
+            <button
+              onClick={() => setFilter("")}
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg"
+              title="Clear filter"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
         {/* Toolbar (1.6.0) */}
         <button onClick={refreshListing} className="btn-ghost text-xs" title="Refresh listing">
           <RefreshCw className="size-3.5" />
@@ -592,15 +701,17 @@ export function SftpPage() {
           <div className="flex items-center justify-center p-6 text-sm text-fg-muted">
             <Loader2 className="size-4 animate-spin mr-2" /> Loading…
           </div>
-        ) : entries.length === 0 ? (
-          <div className="p-8 text-center text-sm text-fg-muted">Empty directory</div>
+        ) : visibleEntries.length === 0 ? (
+          <div className="p-8 text-center text-sm text-fg-muted">
+            {filter ? `No entries match "${filter}"` : "Empty directory"}
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="text-2xs uppercase text-fg-muted">
               <tr className="border-b border-border">
-                <th className="text-left px-4 py-1.5 font-medium">Name</th>
-                <th className="text-right px-4 py-1.5 font-medium w-24">Size</th>
-                <th className="text-right px-4 py-1.5 font-medium w-32">Modified</th>
+                <SortHeader label="Name" col="name" sort={sort} onClick={toggleSort} className="text-left px-4 py-1.5" />
+                <SortHeader label="Size" col="size" sort={sort} onClick={toggleSort} className="text-right px-4 py-1.5 w-24" />
+                <SortHeader label="Modified" col="mtime" sort={sort} onClick={toggleSort} className="text-right px-4 py-1.5 w-32" />
                 <th className="text-right px-4 py-1.5 font-medium w-20">Mode</th>
                 <th className="w-12"></th>
               </tr>
@@ -618,7 +729,7 @@ export function SftpPage() {
                   <td colSpan={4}></td>
                 </tr>
               )}
-              {entries.map((e) => (
+              {visibleEntries.map((e) => (
                 <tr
                   key={e.path}
                   onClick={() => renaming?.entry.path !== e.path && handleEntryClick(e)}
@@ -677,6 +788,22 @@ export function SftpPage() {
                           <Download className="size-3.5" />
                         </button>
                       )}
+                      {e.kind === "dir" && (
+                        <button
+                          onClick={(ev) => { ev.stopPropagation(); void downloadFolder(e); }}
+                          className="text-fg-muted hover:text-accent p-0.5"
+                          title="Download folder"
+                        >
+                          <FolderDown className="size-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={(ev) => { ev.stopPropagation(); startChmod(e); }}
+                        className="text-fg-muted hover:text-accent p-0.5"
+                        title="Permissions"
+                      >
+                        <ShieldCheck className="size-3.5" />
+                      </button>
                       <button
                         onClick={(ev) => { ev.stopPropagation(); startRename(e); }}
                         className="text-fg-muted hover:text-accent p-0.5"
@@ -737,6 +864,20 @@ export function SftpPage() {
                 <Download className="size-3.5" /> Download
               </button>
             )}
+            {contextMenu.entry.kind === "dir" && (
+              <button
+                onClick={() => void downloadFolder(contextMenu.entry)}
+                className="block w-full text-left px-3 py-1.5 hover:bg-bg-elevated flex items-center gap-2"
+              >
+                <FolderDown className="size-3.5" /> Download folder
+              </button>
+            )}
+            <button
+              onClick={() => startChmod(contextMenu.entry)}
+              className="block w-full text-left px-3 py-1.5 hover:bg-bg-elevated flex items-center gap-2"
+            >
+              <ShieldCheck className="size-3.5" /> Permissions…
+            </button>
             <button
               onClick={() => startRename(contextMenu.entry)}
               className="block w-full text-left px-3 py-1.5 hover:bg-bg-elevated flex items-center gap-2"
@@ -793,6 +934,17 @@ export function SftpPage() {
           </div>
         </div>
       )}
+
+      {/* Permissions (chmod) modal — 1.7.0 */}
+      {chmodTarget && (
+        <ChmodModal
+          entry={chmodTarget.entry}
+          mode={chmodTarget.mode}
+          onChange={(mode) => setChmodTarget((prev) => prev ? { ...prev, mode } : null)}
+          onApply={() => void applyChmod()}
+          onClose={() => setChmodTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -829,6 +981,103 @@ function EntryIcon({ kind }: { kind: string }) {
   if (kind === "dir") return <Folder className="size-3.5 text-accent" />;
   if (kind === "symlink") return <Link2 className="size-3.5 text-amber-400" />;
   return <FileIcon className="size-3.5 text-fg-muted" />;
+}
+
+type SortKey = "name" | "size" | "mtime";
+
+function SortHeader({ label, col, sort, onClick, className }: {
+  label: string;
+  col: SortKey;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  onClick: (k: SortKey) => void;
+  className?: string;
+}) {
+  const active = sort.key === col;
+  return (
+    <th className={`${className ?? ""} font-medium select-none`}>
+      <button
+        onClick={() => onClick(col)}
+        className={`inline-flex items-center gap-1 hover:text-fg ${active ? "text-fg" : ""}`}
+      >
+        {label}
+        {active && (sort.dir === "asc"
+          ? <ArrowUp className="size-3" />
+          : <ArrowDown className="size-3" />)}
+      </button>
+    </th>
+  );
+}
+
+/** Permission editor — checkbox grid + octal field, kept in sync. */
+function ChmodModal({ entry, mode, onChange, onApply, onClose }: {
+  entry: RemoteEntry;
+  mode: number;
+  onChange: (mode: number) => void;
+  onApply: () => void;
+  onClose: () => void;
+}) {
+  const classes = [
+    { label: "Owner", shift: 6 },
+    { label: "Group", shift: 3 },
+    { label: "Others", shift: 0 },
+  ];
+  const bits = [
+    { label: "Read", bit: 4 },
+    { label: "Write", bit: 2 },
+    { label: "Exec", bit: 1 },
+  ];
+  const octal = (mode & 0o7777).toString(8).padStart(3, "0");
+  return (
+    <div className="fixed inset-0 z-50 bg-bg/80 flex items-center justify-center p-4">
+      <div className="card w-full max-w-sm p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldCheck className="size-4 text-accent" />
+          <h2 className="text-base font-semibold">Permissions</h2>
+        </div>
+        <p className="text-xs text-fg-muted font-mono truncate mb-4">{entry.path}</p>
+        <table className="w-full text-sm mb-4">
+          <thead className="text-2xs uppercase text-fg-muted">
+            <tr>
+              <th className="text-left font-medium py-1"></th>
+              {bits.map((b) => <th key={b.bit} className="font-medium py-1">{b.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {classes.map((c) => (
+              <tr key={c.shift}>
+                <td className="py-1 text-fg-muted">{c.label}</td>
+                {bits.map((b) => (
+                  <td key={b.bit} className="text-center py-1">
+                    <input
+                      type="checkbox"
+                      checked={(mode & (b.bit << c.shift)) !== 0}
+                      onChange={() => onChange(mode ^ (b.bit << c.shift))}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-xs text-fg-muted">Octal</span>
+          <input
+            value={octal}
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^0-7]/g, "").slice(0, 4);
+              onChange(v === "" ? 0 : parseInt(v, 8));
+            }}
+            className="input font-mono text-sm w-20 py-1"
+          />
+          <span className="font-mono text-xs text-fg-muted">{formatMode(mode)}</span>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onClose} className="btn-ghost text-xs">Cancel</button>
+          <button onClick={onApply} className="btn-primary text-xs">Apply</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function TransferRow({ transfer }: { transfer: TransferState }) {
