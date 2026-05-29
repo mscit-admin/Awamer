@@ -22,6 +22,10 @@ const dialogPickFolder = () =>
   invoke<string | null>("dialog_pick_folder");
 
 import { hostsApi, credentialsApi, type Host } from "../api/sessionsApi";
+import {
+  type RemoteEntry, type SortKey, type SortState,
+  sortAndFilterEntries, formatBytes, formatMode, maskMode, togglePermissionBit,
+} from "../lib/sftpFiles";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8081";
@@ -30,15 +34,6 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?
 const MAX_EDIT_BYTES = 1024 * 1024; // 1 MB
 
 type Phase = "loading" | "credential_prompt" | "passphrase_prompt" | "connecting" | "connected" | "error";
-
-interface RemoteEntry {
-  name: string;
-  path: string;
-  kind: "file" | "dir" | "symlink" | "other";
-  size: number;
-  mtime: number;
-  mode: number;
-}
 
 interface ProgressEvent {
   type: "start" | "progress" | "done" | "error";
@@ -103,9 +98,7 @@ export function SftpPage() {
   // 1.7.0
   const [chmodTarget, setChmodTarget] = useState<{ entry: RemoteEntry; mode: number } | null>(null);
   const [filter, setFilter] = useState("");
-  const [sort, setSort] = useState<{ key: "name" | "size" | "mtime"; dir: "asc" | "desc" }>(
-    { key: "name", dir: "asc" }
-  );
+  const [sort, setSort] = useState<SortState>({ key: "name", dir: "asc" });
 
   // ---------- 1. Load host metadata ---------------------------------
   useEffect(() => {
@@ -465,7 +458,7 @@ export function SftpPage() {
   // entry's current low-12-bit mode.
   function startChmod(entry: RemoteEntry) {
     setContextMenu(null);
-    setChmodTarget({ entry, mode: entry.mode & 0o7777 });
+    setChmodTarget({ entry, mode: maskMode(entry.mode) });
   }
 
   async function applyChmod() {
@@ -592,21 +585,9 @@ export function SftpPage() {
 
   // connected — derive the visible rows: filter by name, then sort while
   // always keeping directories grouped above files (1.7.0).
-  const needle = filter.trim().toLowerCase();
-  const visibleEntries = entries
-    .filter((e) => needle === "" || e.name.toLowerCase().includes(needle))
-    .slice()
-    .sort((a, b) => {
-      if (a.kind === "dir" && b.kind !== "dir") return -1;
-      if (a.kind !== "dir" && b.kind === "dir") return 1;
-      let cmp: number;
-      if (sort.key === "size") cmp = a.size - b.size;
-      else if (sort.key === "mtime") cmp = a.mtime - b.mtime;
-      else cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-      return sort.dir === "asc" ? cmp : -cmp;
-    });
+  const visibleEntries = sortAndFilterEntries(entries, filter, sort);
 
-  function toggleSort(key: "name" | "size" | "mtime") {
+  function toggleSort(key: SortKey) {
     setSort((prev) =>
       prev.key === key
         ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
@@ -983,12 +964,10 @@ function EntryIcon({ kind }: { kind: string }) {
   return <FileIcon className="size-3.5 text-fg-muted" />;
 }
 
-type SortKey = "name" | "size" | "mtime";
-
 function SortHeader({ label, col, sort, onClick, className }: {
   label: string;
   col: SortKey;
-  sort: { key: SortKey; dir: "asc" | "desc" };
+  sort: SortState;
   onClick: (k: SortKey) => void;
   className?: string;
 }) {
@@ -1026,7 +1005,7 @@ function ChmodModal({ entry, mode, onChange, onApply, onClose }: {
     { label: "Write", bit: 2 },
     { label: "Exec", bit: 1 },
   ];
-  const octal = (mode & 0o7777).toString(8).padStart(3, "0");
+  const octal = maskMode(mode).toString(8).padStart(3, "0");
   return (
     <div className="fixed inset-0 z-50 bg-bg/80 flex items-center justify-center p-4">
       <div className="card w-full max-w-sm p-5">
@@ -1051,7 +1030,7 @@ function ChmodModal({ entry, mode, onChange, onApply, onClose }: {
                     <input
                       type="checkbox"
                       checked={(mode & (b.bit << c.shift)) !== 0}
-                      onChange={() => onChange(mode ^ (b.bit << c.shift))}
+                      onChange={() => onChange(togglePermissionBit(mode, c.shift, b.bit))}
                     />
                   </td>
                 ))}
@@ -1156,13 +1135,6 @@ function PromptCard({
 // Formatting helpers
 // =====================================================================
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
 function formatTime(unix: number): string {
   if (unix <= 0) return "";
   const d = new Date(unix * 1000);
@@ -1175,15 +1147,6 @@ function formatTime(unix: number): string {
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
   }
   return d.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
-}
-
-function formatMode(mode: number): string {
-  // Convert POSIX mode to rwxrwxrwx-style string
-  const perms = ["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"];
-  const owner = perms[(mode >> 6) & 0b111];
-  const group = perms[(mode >> 3) & 0b111];
-  const other = perms[mode & 0b111];
-  return `${owner}${group}${other}`;
 }
 
 function parseAppError(e: unknown): AppErrorBody {
