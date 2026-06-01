@@ -53,6 +53,7 @@ pub fn run() {
             commands::sftp::sftp_write_text,
             commands::sftp::sftp_upload,
             commands::sftp::sftp_chmod,
+            commands::sftp::sftp_chown,
             commands::sftp::sftp_download_dir,
         ])
         .setup(|app| {
