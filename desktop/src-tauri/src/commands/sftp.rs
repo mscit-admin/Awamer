@@ -31,7 +31,7 @@ use std::time::Duration;
 use once_cell::sync::Lazy;
 use russh::client::{self, Config};
 use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::FileType;
+use russh_sftp::protocol::{FileAttributes, FileType};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -593,6 +593,184 @@ pub async fn sftp_upload(
 
 // =====================================================================
 // End 1.6.0 additions
+// =====================================================================
+
+// =====================================================================
+// 1.7.0 — chmod + recursive folder download
+// =====================================================================
+
+/// Change the POSIX permission bits of a remote file or directory.
+///
+/// We build a *fresh* `FileAttributes` carrying only the permission
+/// field. This is important: an SFTP SETSTAT applies every field that is
+/// present, so reusing the file's current attributes (which include
+/// `size`) could ask the server to truncate the file. By sending only
+/// `permissions`, the server performs a pure chmod.
+///
+/// `mode` is masked to the low 12 bits (rwx for owner/group/other plus
+/// the setuid/setgid/sticky bits); the file-type bits are never touched.
+#[tauri::command]
+pub async fn sftp_chmod(session_id: String, path: String, mode: u32) -> Result<(), AppError> {
+    let map = SESSIONS.lock().await;
+    let session = map.get(&session_id).ok_or_else(|| {
+        AppError::new("sftp_session_not_found", format!("no SFTP session {session_id}"))
+    })?;
+    let attrs = FileAttributes {
+        permissions: Some(mode & 0o7777),
+        ..Default::default()
+    };
+    session.sftp.set_metadata(&path, attrs).await
+        .map_err(|e| AppError::new("sftp_chmod_failed",
+            format!("chmod {path} to {:o}: {e}", mode & 0o7777)))?;
+    tracing::info!(session_id = %session_id, %path, mode = format!("{:o}", mode & 0o7777),
+        "sftp chmod");
+    Ok(())
+}
+
+/// A single file discovered while walking a remote directory tree, with
+/// its path relative to the download root so we can recreate the layout
+/// locally.
+struct PlannedFile {
+    remote_path: String,
+    rel_path: String,
+}
+
+/// Depth-first walk that records every regular file under `remote_root`
+/// (relative paths are accumulated in `rel_prefix`). Directories are
+/// recorded implicitly via their children's relative paths. Symlinks are
+/// treated as files — we copy whatever they resolve to, same as a single
+/// download.
+fn plan_download<'a>(
+    sftp: &'a SftpSession,
+    remote_dir: &'a str,
+    rel_prefix: &'a str,
+    out: &'a mut Vec<PlannedFile>,
+    total: &'a mut u64,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + Send + 'a>> {
+    Box::pin(async move {
+        let entries = sftp.read_dir(remote_dir).await
+            .map_err(|e| AppError::new("sftp_readdir_failed",
+                format!("read_dir {remote_dir} during folder download: {e}")))?;
+        for e in entries {
+            let name = e.file_name();
+            if name == "." || name == ".." { continue; }
+            let child_remote = format!("{}/{}", remote_dir.trim_end_matches('/'), name);
+            let child_rel = if rel_prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel_prefix}/{name}")
+            };
+            match e.metadata().file_type() {
+                FileType::Dir => {
+                    plan_download(sftp, &child_remote, &child_rel, out, total).await?;
+                }
+                _ => {
+                    *total += e.metadata().size.unwrap_or(0);
+                    out.push(PlannedFile {
+                        remote_path: child_remote,
+                        rel_path: child_rel,
+                    });
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Recursively download a remote directory into `local_dir`. A subfolder
+/// named after the remote directory's basename is created inside
+/// `local_dir`, and the remote tree is mirrored beneath it.
+///
+/// Progress events use the same `sftp:progress:{session_id}` channel and
+/// the same shape as single-file transfers — `total_bytes` is the sum of
+/// all files discovered during a pre-walk, and `bytes_done` accumulates
+/// across the whole tree so the renderer's existing progress bar works
+/// unchanged.
+#[tauri::command]
+pub async fn sftp_download_dir(
+    app: AppHandle,
+    session_id: String,
+    remote_path: String,
+    local_dir: String,
+) -> Result<u64, AppError> {
+    let event_channel = format!("sftp:progress:{}", session_id);
+    let emit = |evt: SftpProgressEvent| {
+        let _ = app.emit(&event_channel, evt);
+    };
+
+    let map = SESSIONS.lock().await;
+    let session = map.get(&session_id).ok_or_else(|| {
+        AppError::new("sftp_session_not_found", format!("no SFTP session {session_id}"))
+    })?;
+
+    // Pre-walk: discover every file and the grand total of bytes.
+    let mut files: Vec<PlannedFile> = Vec::new();
+    let mut total: u64 = 0;
+    if let Err(e) = plan_download(&session.sftp, &remote_path, "", &mut files, &mut total).await {
+        emit(SftpProgressEvent::Error { message: e.message.clone() });
+        return Err(e);
+    }
+
+    emit(SftpProgressEvent::Start { total_bytes: total });
+
+    // Local destination: <local_dir>/<basename of remote_path>
+    let base = remote_path.trim_end_matches('/').rsplit('/').next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("download");
+    let root = PathBuf::from(&local_dir).join(base);
+    tokio::fs::create_dir_all(&root).await.map_err(|e| {
+        let err = AppError::new("local_create_failed",
+            format!("could not create {}: {}", root.display(), e));
+        emit(SftpProgressEvent::Error { message: err.message.clone() });
+        err
+    })?;
+
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut bytes_done: u64 = 0;
+    for file in &files {
+        let dest = root.join(&file.rel_path);
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                let err = AppError::new("local_create_failed",
+                    format!("could not create {}: {}", parent.display(), e));
+                emit(SftpProgressEvent::Error { message: err.message.clone() });
+                err
+            })?;
+        }
+        let mut remote_file = session.sftp.open(&file.remote_path).await
+            .map_err(|e| {
+                let err = AppError::new("sftp_open_failed",
+                    format!("open {}: {e}", file.remote_path));
+                emit(SftpProgressEvent::Error { message: err.message.clone() });
+                err
+            })?;
+        let mut local_file = tokio::fs::File::create(&dest).await
+            .map_err(|e| {
+                let err = AppError::new("local_create_failed",
+                    format!("create {}: {}", dest.display(), e));
+                emit(SftpProgressEvent::Error { message: err.message.clone() });
+                err
+            })?;
+        loop {
+            let n = remote_file.read(&mut buf).await
+                .map_err(|e| AppError::new("sftp_read_failed", format!("read: {e}")))?;
+            if n == 0 { break; }
+            local_file.write_all(&buf[..n]).await
+                .map_err(|e| AppError::new("local_write_failed", format!("write: {e}")))?;
+            bytes_done += n as u64;
+            emit(SftpProgressEvent::Progress { bytes_done });
+        }
+        local_file.flush().await.ok();
+    }
+
+    emit(SftpProgressEvent::Done { bytes_done });
+    tracing::info!(session_id = %session_id, %remote_path, files = files.len(),
+        bytes = bytes_done, "sftp_download_dir complete");
+    Ok(bytes_done)
+}
+
+// =====================================================================
+// End 1.7.0 additions
 // =====================================================================
 
 #[tauri::command]
