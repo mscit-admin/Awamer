@@ -5,6 +5,72 @@ process and the fix applied. Entries are append-only.
 
 ---
 
+## 1.7.0 — 2026-05-29 — Phase 4 polish (+ the 1.6.1 dialog fix)
+
+**Codename:** Finishing Touches
+
+This is a **desktop-client** release. The backend / deployment stack is
+unchanged and stays at 1.6.0.1.
+
+### The headline: the dialog crash is gone for good
+
+The known issue carried in 1.6.0.1 — the SFTP page throwing
+`Cannot read properties of undefined (reading 'invoke')` — is fixed.
+
+Root cause: the renderer imported `save()` / `open()` from the JS
+`@tauri-apps/plugin-dialog` package. That package resolves its `invoke`
+off a global that is only populated when the bundled `@tauri-apps/api`
+version matches the host app's. On setups where those drift, the global
+is `undefined` and the dialog throws on first use.
+
+Rather than chase the version alignment (fragile, regressed before), we
+**removed the JS dialog dependency entirely** and drive the native
+pickers from Rust:
+
+- `dialog_save_file(defaultName)` — "Save as…" for downloads
+- `dialog_open_file()` — file picker for uploads
+- `dialog_pick_folder()` — destination picker for folder downloads
+
+The Rust `tauri-plugin-dialog` API is stable across the 2.x line, so
+this cannot drift the same way. `@tauri-apps/plugin-dialog` was dropped
+from `package.json`.
+
+### Also fixed: the desktop crate couldn't build from a clean checkout
+
+`desktop/src-tauri/Cargo.toml` declared `version = "1.6.0.1"`, which is
+not valid SemVer (four numeric components). `cargo` refuses to parse the
+manifest at all, so a fresh checkout could not build the desktop client.
+Corrected to `1.7.0` across `Cargo.toml`, `package.json`, and
+`tauri.conf.json`.
+
+### New in Phase 4 polish
+
+| Feature | Notes |
+|---|---|
+| chmod / permissions UI | Right-click → *Permissions…* or the shield icon. Checkbox grid (owner/group/other × r/w/x) synced with an octal field. Backed by `sftp_chmod`, which sends a pure SETSTAT carrying only permission bits — it can never truncate the file. |
+| Recursive folder download | *Download folder* on any directory. Pre-walks the tree for an accurate total, then mirrors it under a chosen local directory with aggregate progress. Backed by `sftp_download_dir`. |
+| Filter current directory | Toolbar search box; filters the listing by name as you type. |
+| Sortable columns | Click Name / Size / Modified to sort; click again to reverse. Directories stay grouped above files. |
+
+### Verification performed
+
+- Frontend `tsc --noEmit`: clean
+- Frontend `vite build`: clean
+- Rust: every new API call (`set_metadata` with `FileAttributes`,
+  `DialogExt`, `FileDialogBuilder::{save_file,pick_file,pick_folder,
+  set_file_name}`, `FilePath::into_path`) verified against the cached
+  crate sources (russh-sftp 2.3, tauri-plugin-dialog 2.7). A full
+  `cargo check` was not possible in the build container because the GTK
+  system libraries (`gdk-3.0`, `webkit2gtk`) are unavailable there.
+
+### Still deferred
+
+- chown (uid/gid) ownership editing — usually needs root
+- Cross-host copy/move
+- Syntax highlighting in the in-app editor
+
+---
+
 ## 1.6.0.1 — 2026-05-26 — Production deployment package
 
 This is the **production-ready release** for self-hosting NetSphere on

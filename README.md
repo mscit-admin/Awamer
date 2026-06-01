@@ -1,4 +1,4 @@
-# NetSphere Terminal — v1.6.0.1
+# NetSphere Terminal — v1.7.0
 
 > Enterprise Remote Administration & Terminal Management Platform
 
@@ -197,7 +197,7 @@ Open `http://localhost:1420`. Login works; the catch is that token persistence a
 
 ---
 
-## What works in Phase 1 + Phase 2
+## What works (Phases 1–4)
 
 | Feature | Status |
 |---|---|
@@ -214,10 +214,11 @@ Open `http://localhost:1420`. Login works; the catch is that token persistence a
 | **Credentials store (plaintext, dev-only)** | ✅ Phase 2 |
 | **Connection history view** | ✅ Phase 2 |
 | **Favorites, search, filters** | ✅ Phase 2 |
+| **SSH terminal (password + key + agent, TOFU, multi-tab)** | ✅ Phase 3 |
+| **SFTP browser (browse, download, upload, rename, delete, mkdir, edit)** | ✅ Phase 4 |
+| **SFTP chmod, recursive folder download, filter & sort** | ✅ Phase 4 (1.7.0) |
 | Self-service password change | ❌ Phase 2.x |
-| **SSH terminal** | ❌ Phase 3 |
-| SFTP | ❌ Phase 4 |
-| SSH tunnels | ❌ Phase 5 |
+| SSH tunnels / port forwarding | ❌ Phase 5 |
 | RDP / VNC | ❌ Phase 6 |
 | Serial | ❌ Phase 7 |
 | **Encrypted credential vault** | ❌ Phase 10 |

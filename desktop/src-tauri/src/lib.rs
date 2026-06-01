@@ -30,6 +30,9 @@ pub fn run() {
             commands::keyring::keyring_delete,
             commands::app::app_version,
             commands::app::app_log,
+            commands::dialog::dialog_save_file,
+            commands::dialog::dialog_open_file,
+            commands::dialog::dialog_pick_folder,
             commands::ssh::ssh_connect,
             commands::ssh::ssh_write,
             commands::ssh::ssh_resize,
@@ -51,6 +54,7 @@ pub fn run() {
             commands::sftp::sftp_upload,
             commands::sftp::sftp_chmod,
             commands::sftp::sftp_chown,
+            commands::sftp::sftp_download_dir,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

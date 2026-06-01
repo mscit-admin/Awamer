@@ -81,6 +81,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this release just eliminates the failure mode.
 - Capabilities (`dialog:default`, `dialog:allow-save`,
   `dialog:allow-open`) are unchanged.
+## [1.7.0] — 2026-05-29 — Phase 4 polish: chmod, recursive download, search & sort (+ 1.6.1 dialog fix)
+
+### Fixed
+- **SFTP file dialogs no longer crash with `Cannot read properties of
+  undefined (reading 'invoke')`.** The renderer previously called
+  `save()` / `open()` from the JS `@tauri-apps/plugin-dialog` package.
+  On some Tauri 2.x setups that plugin's bundled `@tauri-apps/api`
+  drifts from the app's and its internal `invoke` reference resolves off
+  an `undefined` global. We now drive the native dialogs from Rust via
+  new `dialog_save_file` / `dialog_open_file` / `dialog_pick_folder`
+  IPC commands (the Rust `tauri-plugin-dialog` API is stable across the
+  2.x line). The JS `@tauri-apps/plugin-dialog` dependency was removed
+  entirely so the failure mode can't recur. (This is the fix that was
+  tracked as 1.6.1.)
+- **Invalid crate version `1.6.0.1`** in `desktop/src-tauri/Cargo.toml`
+  is not valid SemVer (four components) and made `cargo` refuse to even
+  parse the manifest — the desktop client could not build from a clean
+  checkout. Bumped to a valid `1.7.0` across `Cargo.toml`,
+  `package.json`, and `tauri.conf.json`.
+
+### Added
+- **chmod / permissions UI.** Right-click → *Permissions…* (or the
+  shield icon on row hover) opens an editor with an owner/group/other ×
+  read/write/execute checkbox grid kept in sync with an octal field.
+  Backed by a new `sftp_chmod` command that issues a pure SETSTAT
+  carrying only the permission bits (so it can never accidentally
+  truncate the file).
+- **Recursive folder download.** Directories now have a *Download
+  folder* action that picks a local destination and mirrors the remote
+  tree beneath it, streaming aggregate progress over the existing
+  transfer channel. Backed by `sftp_download_dir`, which pre-walks the
+  tree to compute the total byte count first so the progress bar is
+  accurate.
+- **Filter current directory.** A search box in the toolbar filters the
+  listing by name as you type.
+- **Sortable columns.** Click the Name / Size / Modified headers to sort
+  (click again to reverse). Directories stay grouped above files.
+
+### Known issues
+- `chmod`/`chown` ownership (uid/gid) editing is not exposed — only
+  permission bits. Changing owner usually needs root and is deferred.
+- Cross-host copy/move is still deferred to a later release.
 
 ---
 

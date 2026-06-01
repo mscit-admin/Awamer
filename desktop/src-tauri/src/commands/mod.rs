@@ -1,4 +1,5 @@
 pub mod app;
+pub mod dialog;
 pub mod keyring;
 pub mod ssh;
 pub mod known_hosts;
