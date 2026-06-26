@@ -82,23 +82,27 @@ services:
     environment:
       # ---- Database -------------------------------------------------
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       # ---- Server ---------------------------------------------------
-      PORT: 8081
+      # Variable names must match backend/src/config/index.ts exactly.
+      APP_ENV: production
       NODE_ENV: production
+      AUTH_HTTP_HOST: 0.0.0.0
+      AUTH_HTTP_PORT: 8081
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # ---- Crypto secrets (REQUIRED — no defaults) -----------------
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET missing — generate with: openssl rand -hex 64}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET missing}
-      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?MFA_ENCRYPTION_KEY missing — must be exactly 32 bytes hex}
+      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET missing — openssl rand -hex 64}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET missing}"
+      # Phase 10 — encrypts credential secrets at rest (32 bytes, base64 or hex).
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY missing — openssl rand -base64 32}"
       # ---- Bootstrap admin ------------------------------------------
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD missing — set a strong initial password}
+      BOOTSTRAP_ADMIN_PASSWORD: "${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD missing — set a strong initial password}"
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@netsphere.local}
       # ---- CORS — allow only the configured frontend origins -------
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://localhost,tauri://localhost,https://tauri.localhost}
       # ---- Rate limiting --------------------------------------------
-      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
-      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-60000}
+      RATE_LIMIT_LOGIN_PER_MIN: ${RATE_LIMIT_LOGIN_PER_MIN:-10}
+      RATE_LIMIT_API_PER_MIN: ${RATE_LIMIT_API_PER_MIN:-120}
     ports:
       # Bind to LOCALHOST ONLY — nginx will reverse-proxy from public 443
       - "127.0.0.1:8081:8081"

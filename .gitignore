@@ -10,10 +10,14 @@
 !.env.production.example
 !.env.example
 
-# Database backups
+# Database backups (dumps only — NOT schema migrations)
 backups/
 *.sql.gz
 *.sql
+# Keep schema migrations under version control. The broad *.sql rule
+# above previously swallowed these, so they were never committed.
+!backend/migrations/
+!backend/migrations/*.sql
 
 # Dependency directories
 node_modules/

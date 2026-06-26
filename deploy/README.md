@@ -66,16 +66,17 @@ chmod 600 .env.production
 ```
 
 **Critical: back up `.env.production` to a secure password manager
-or encrypted backup before proceeding.** Losing this file means
-losing the ability to decrypt MFA secrets — your users would have
-to re-enroll their authenticator apps.
+or encrypted backup before proceeding.** Losing
+`CREDENTIAL_ENCRYPTION_KEY` means every stored credential secret
+becomes undecryptable — your users would have to re-enter all their
+saved passwords and keys.
 
 ### 3. Edit `.env.production`
 
 Review the generated file. Things you may want to change:
 
-- `CORS_ORIGINS` — set to your real domain (and `tauri://localhost`
-  for desktop clients in dev mode)
+- `CORS_ALLOWED_ORIGINS` — set to your real domain (and
+  `tauri://localhost` for desktop clients in dev mode)
 - `LOG_LEVEL` — `info` is default; `debug` for troubleshooting
 - `BOOTSTRAP_ADMIN_PASSWORD` — change it; you'll use this for first
   login then create real accounts
@@ -183,7 +184,7 @@ sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.prod
 
 ### Rotate JWT secrets
 
-If you suspect token leakage, rotate `JWT_SECRET` and
+If you suspect token leakage, rotate `JWT_ACCESS_SECRET` and
 `JWT_REFRESH_SECRET` in `.env.production`. **This logs out all
 users immediately.** They must sign in again.
 
@@ -192,10 +193,10 @@ users immediately.** They must sign in again.
 sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production restart auth-service
 ```
 
-Do **NOT** rotate `MFA_ENCRYPTION_KEY` — doing so will make all
-stored MFA secrets undecryptable, forcing every user to re-enroll
-their authenticator app. Only do this if you suspect that specific
-key was compromised.
+Do **NOT** rotate `CREDENTIAL_ENCRYPTION_KEY` — doing so makes every
+stored credential secret undecryptable, forcing users to re-enter all
+their saved passwords/keys. Only rotate it if you suspect that specific
+key was compromised, and re-save every credential afterward.
 
 ### Firewall
 
@@ -305,8 +306,8 @@ Common causes:
 - **`POSTGRES_PASSWORD missing`** — you didn't set the .env file
 - **Migration error** — Postgres schema is in a bad state, possibly from
   a botched upgrade. Restore from backup then re-attempt the upgrade.
-- **JWT_SECRET wrong length** — must be ≥ 32 bytes
-- **MFA_ENCRYPTION_KEY wrong length** — must be exactly 32 bytes (64 hex chars)
+- **JWT_ACCESS_SECRET wrong length** — must be ≥ 32 chars
+- **CREDENTIAL_ENCRYPTION_KEY wrong length** — must decode to exactly 32 bytes (base64 or hex)
 
 ### "502 Bad Gateway" from nginx
 
@@ -323,7 +324,7 @@ sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.prod
 ### "CORS error" in the desktop client
 
 The desktop client's origin (typically `tauri://localhost` for the
-production app) must be in `CORS_ORIGINS`. Edit `.env.production`
+production app) must be in `CORS_ALLOWED_ORIGINS`. Edit `.env.production`
 and restart:
 
 ```bash

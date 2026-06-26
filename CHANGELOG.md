@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.8.0] — 2026-06-26 — Phase 10: encrypted credential secrets at rest
 
+### Fixed (deployability)
+- **Reconstructed the missing SQL migrations.** `backend/migrations/`
+  was absent from the repository, so `migrate.js up` created no tables
+  and the Docker image build (`COPY migrations`) failed outright. Added
+  `001_auth` (users, mfa_devices, refresh_sessions, audit_logs) and
+  `002_sessions` (folders, tags, credentials, hosts, host_tags,
+  connection_history), derived from the repository column contracts and
+  verified end-to-end against PostgreSQL 16 (apply, rollback,
+  idempotent re-run, login, and credential round-trip).
+- **Aligned production deploy env vars with the code.** The
+  `deploy/` files used variable names the backend never reads, which
+  meant the documented production deploy could not start:
+  `JWT_SECRET` → `JWT_ACCESS_SECRET`, `CORS_ORIGINS` →
+  `CORS_ALLOWED_ORIGINS`, `NODE_ENV`-only → also set `APP_ENV`,
+  `PORT` → `AUTH_HTTP_PORT`, `RATE_LIMIT_MAX/WINDOW` →
+  `RATE_LIMIT_{LOGIN,API}_PER_MIN`. Updated
+  `docker-compose.production.yml`, `.env.production.example`,
+  `generate-secrets.sh`, `install.sh`, and `deploy/README.md`.
+- Fixed invalid YAML in `docker-compose.production.yml` (a `:?...`
+  default-error hint contained a colon, breaking the parser).
+
 ### Added
 - **Credential secrets are now encrypted at rest** with AES-256-GCM.
   The `secret_data` payload is sealed in an authenticated-encryption
