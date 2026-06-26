@@ -211,7 +211,7 @@ Open `http://localhost:1420`. Login works; the catch is that token persistence a
 | **Host management (CRUD)** | ✅ Phase 2 |
 | **Folder tree organization** | ✅ Phase 2 |
 | **Tag management** | ✅ Phase 2 |
-| **Credentials store (plaintext, dev-only)** | ✅ Phase 2 |
+| **Credentials store** | ✅ Phase 2 |
 | **Connection history view** | ✅ Phase 2 |
 | **Favorites, search, filters** | ✅ Phase 2 |
 | **SSH terminal (password + key + agent, TOFU, multi-tab)** | ✅ Phase 3 |
@@ -221,7 +221,8 @@ Open `http://localhost:1420`. Login works; the catch is that token persistence a
 | SSH tunnels / port forwarding | ❌ Phase 5 |
 | RDP / VNC | ❌ Phase 6 |
 | Serial | ❌ Phase 7 |
-| **Encrypted credential vault** | ❌ Phase 10 |
+| **Encrypted credential secrets at rest (AES-256-GCM)** | ✅ Phase 10 |
+| Vault unlock / KMS-backed master key | ❌ Phase 10.x |
 
 The dashboard tiles are placeholders; the working flows are **Hosts**,
 **Credentials**, **Folders**, **Tags** (Phase 2) plus **Settings →

@@ -21,6 +21,10 @@ const envSchema = z.object({
   JWT_REFRESH_TTL: z.string().default("168h"),
   JWT_ISSUER: z.string().default("netsphere"),
 
+  // Credential encryption (Phase 10) — 32 bytes, base64 or hex.
+  // Optional in dev (derived from JWT_REFRESH_SECRET); required in production.
+  CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
+
   // Argon2id
   ARGON2_MEMORY_KB: z.coerce.number().int().positive().default(65536),
   ARGON2_ITERATIONS: z.coerce.number().int().positive().default(3),

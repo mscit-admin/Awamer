@@ -1,6 +1,6 @@
 {
   "name": "netsphere-auth-service",
-  "version": "1.6.0.1",
+  "version": "1.8.0",
   "private": true,
   "description": "NetSphere Terminal — auth service (Node.js / TypeScript)",
   "license": "Apache-2.0",
@@ -16,7 +16,8 @@
     "migrate:up": "tsx src/migrate.ts up",
     "migrate:down": "tsx src/migrate.ts down",
     "lint": "eslint . --ext .ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test 'src/**/*.test.ts'"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

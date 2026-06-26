@@ -73,7 +73,10 @@ export interface Credential {
   name: string;
   credentialType: CredentialType;
   username: string | null;
-  /** Plaintext JSON in Phase 2. Phase 10 will encrypt at rest. */
+  /**
+   * Decrypted secret payload. Stored encrypted at rest (AES-256-GCM,
+   * Phase 10) and transparently decrypted by CredentialRepository.
+   */
   secretData: Record<string, unknown>;
   description: string | null;
   createdAt: Date;
