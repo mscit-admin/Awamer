@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.8.0] — 2026-06-26 — Phase 10: encrypted credential secrets at rest
+
+### Added
+- **Credential secrets are now encrypted at rest** with AES-256-GCM.
+  The `secret_data` payload is sealed in an authenticated-encryption
+  envelope (`{__enc__, iv, tag, ct}`) before it touches PostgreSQL and
+  is decrypted transparently on read. Routes and the desktop are
+  unchanged — they still send and receive a plain `secretData` object.
+  Implemented with Node's built-in `crypto`; no new dependency.
+- **`CREDENTIAL_ENCRYPTION_KEY`** config (32 bytes, base64 or hex).
+  Required in production. In development it is optional: when unset the
+  key is derived deterministically from `JWT_REFRESH_SECRET` via
+  HKDF-SHA256 (with a startup warning) so existing dev setups keep
+  working and encrypted rows survive restarts.
+- `backend/src/crypto/secretBox.ts` — `createSecretBox`,
+  `resolveSecretKey`, `isSecretEnvelope`, plus a 14-case unit suite
+  (`secretBox.test.ts`) covering round-trip, nonce freshness, GCM
+  tamper rejection, wrong-key rejection, and key resolution.
+- `npm test` script for the backend (Node's built-in test runner via
+  `tsx`).
+
+### Changed
+- `CredentialRepository` takes a `SecretBox` and seals secrets on
+  create/update, opens them on read.
+- Empty secret objects (`{}`) are stored as-is rather than encrypting
+  an empty payload — keeps "no secret" rows trivially readable.
+
+### Compatibility
+- **Backward compatible.** Pre-Phase-10 plaintext JSONB rows are
+  detected (no `__enc__` marker) and passed through unchanged on read,
+  then re-encrypted the next time they are saved. No migration or
+  backfill is required.
+
+### Risks / notes
+- The dev-mode derived key is tied to `JWT_REFRESH_SECRET`; rotating
+  that secret without first setting a dedicated
+  `CREDENTIAL_ENCRYPTION_KEY` would make previously-encrypted secrets
+  unreadable. Production refuses to start without an explicit key.
+- Key rotation tooling and a KMS-backed master key are deferred to a
+  later Phase 10.x slice.
+
+---
+
 ## [1.7.0] — 2026-05-26 — Monaco editor + chmod/chown UI
 
 ### Added

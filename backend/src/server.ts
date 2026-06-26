@@ -8,6 +8,7 @@ import { loadConfig } from "./config/index.js";
 import { createLogger } from "./logger/index.js";
 import { createPool } from "./db/index.js";
 import { createArgon2 } from "./crypto/argon2.js";
+import { createSecretBox, resolveSecretKey } from "./crypto/secretBox.js";
 import { createJwt } from "./jwt/index.js";
 
 import { UserRepository } from "./repos/userRepo.js";
@@ -35,6 +36,8 @@ async function main() {
 
   const argon2 = createArgon2(cfg);
   const jwt = createJwt(cfg);
+  // Phase 10: encryption at rest for credential secrets.
+  const secretBox = createSecretBox(resolveSecretKey(cfg, log));
 
   // Repositories
   const users = new UserRepository(pool);
@@ -45,7 +48,7 @@ async function main() {
   // Phase 2 repos
   const folders = new FolderRepository(pool);
   const tags = new TagRepository(pool);
-  const credentials = new CredentialRepository(pool);
+  const credentials = new CredentialRepository(pool, secretBox);
   const hosts = new HostRepository(pool);
   const history = new ConnectionHistoryRepository(pool);
 

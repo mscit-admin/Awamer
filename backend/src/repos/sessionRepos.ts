@@ -6,6 +6,7 @@
  */
 
 import type { Pool, PoolClient } from "../db/index.js";
+import type { SecretBox } from "../crypto/secretBox.js";
 import {
   type Folder, type Tag, type Credential, type Host, type ConnectionHistoryEntry,
   type HostProtocol, type CredentialType, type ConnectionStatus,
@@ -223,26 +224,28 @@ interface CredRow {
 
 const CRED_COLS = `id, user_id, name, credential_type, username, secret_data, description, created_at, updated_at`;
 
-function rowToCredential(r: CredRow): Credential {
+function rowToCredential(r: CredRow, box: SecretBox): Credential {
   return {
     id: r.id, userId: r.user_id, name: r.name,
     credentialType: r.credential_type as CredentialType,
     username: r.username,
-    secretData: r.secret_data ?? {},
+    // Phase 10: secret_data is stored encrypted; decrypt transparently.
+    // Legacy plaintext rows pass through unchanged.
+    secretData: box.open(r.secret_data ?? {}),
     description: r.description,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
 
 export class CredentialRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly pool: Pool, private readonly box: SecretBox) {}
 
   async listForUser(userId: string): Promise<Credential[]> {
     const { rows } = await this.pool.query<CredRow>(
       `SELECT ${CRED_COLS} FROM credentials WHERE user_id = $1 ORDER BY name`,
       [userId],
     );
-    return rows.map(rowToCredential);
+    return rows.map((r) => rowToCredential(r, this.box));
   }
 
   async getById(userId: string, id: string): Promise<Credential> {
@@ -251,7 +254,7 @@ export class CredentialRepository {
       [id, userId],
     );
     if (!rows[0]) throw PhaseTwoErrors.CredentialNotFound();
-    return rowToCredential(rows[0]);
+    return rowToCredential(rows[0], this.box);
   }
 
   async create(input: { userId: string; name: string; credentialType: CredentialType; username?: string | null; secretData?: Record<string, unknown>; description?: string | null }): Promise<Credential> {
@@ -261,9 +264,9 @@ export class CredentialRepository {
          VALUES ($1, $2, $3, $4, $5::jsonb, $6)
          RETURNING ${CRED_COLS}`,
         [input.userId, input.name, input.credentialType, input.username ?? null,
-         JSON.stringify(input.secretData ?? {}), input.description ?? null],
+         JSON.stringify(this.box.seal(input.secretData ?? {})), input.description ?? null],
       );
-      return rowToCredential(rows[0]!);
+      return rowToCredential(rows[0]!, this.box);
     } catch (e) {
       throw wrapUniqueViolation(e, PhaseTwoErrors.CredentialNameTaken);
     }
@@ -289,12 +292,12 @@ export class CredentialRepository {
           id, userId,
           patch.name ?? null,
           patch.username === undefined ? "__nochange__" : (patch.username === null ? "__null__" : patch.username),
-          patch.secretData === undefined ? "__nochange__" : JSON.stringify(patch.secretData),
+          patch.secretData === undefined ? "__nochange__" : JSON.stringify(this.box.seal(patch.secretData)),
           patch.description === undefined ? "__nochange__" : (patch.description === null ? "__null__" : patch.description),
         ],
       );
       if (!rows[0]) throw PhaseTwoErrors.CredentialNotFound();
-      return rowToCredential(rows[0]);
+      return rowToCredential(rows[0], this.box);
     } catch (e) {
       if (e instanceof Error && e.message.includes("credential_not_found")) throw e;
       throw wrapUniqueViolation(e, PhaseTwoErrors.CredentialNameTaken);
