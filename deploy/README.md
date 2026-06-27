@@ -205,8 +205,8 @@ sudo apt install ufw
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow 22/tcp     # SSH
-sudo ufw allow 80/tcp     # HTTP (redirects to HTTPS)
-sudo ufw allow 443/tcp    # HTTPS
+sudo ufw allow 80/tcp     # HTTP (redirects to HTTPS; also used for cert renewal)
+sudo ufw allow 6655/tcp   # HTTPS (nginx serves the API here)
 sudo ufw enable
 sudo ufw status
 ```
