@@ -22,6 +22,8 @@ import { FoldersPage } from "@/modules/sessions/components/FoldersPage";
 import { TerminalWorkspace } from "@/modules/sessions/components/TerminalWorkspace";
 // Phase 4 (1.5.0) — SFTP file browser
 import { SftpPage } from "@/modules/sessions/components/SftpPage";
+import { WebSftpPage } from "@/modules/sessions/components/WebSftpPage";
+import { isTauri } from "@/shared/lib/tauri";
 
 export default function App() {
   const restore = useAuthStore((s) => s.restore);
@@ -53,7 +55,7 @@ export default function App() {
         <Route path="/hosts/:id" element={<HostDetailPage />} />
         <Route path="/hosts/:id/edit" element={<HostFormPage mode="edit" />} />
         <Route path="/hosts/:id/terminal" element={<TerminalWorkspace />} />
-        <Route path="/hosts/:id/sftp" element={<SftpPage />} />
+        <Route path="/hosts/:id/sftp" element={isTauri ? <SftpPage /> : <WebSftpPage />} />
         <Route path="/terminal" element={<TerminalWorkspace />} />
         <Route path="/credentials" element={<CredentialsPage />} />
         <Route path="/tags" element={<TagsPage />} />

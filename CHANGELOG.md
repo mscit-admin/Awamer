@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.11.0] — 2026-06-27 — Browser SFTP file browser
+
+### Added
+- **Browser-based SFTP.** A session-based REST gateway on the backend
+  (`/api/v1/sftp/*`) holds the SSH+SFTP connection (via `ssh2`) and the
+  web UI issues authenticated HTTP calls against a `session_id`, so the
+  browser build can browse files without the native desktop app.
+  - `backend/src/ssh/sftpGateway.ts` — connect, list, read, write, mkdir,
+    rename, delete, download (streamed), upload (base64), disconnect.
+    Sessions are bound to the owning user and reaped after 10 min idle.
+    Supports password and private-key auth.
+  - `WebSftpPage.tsx` + `webSftpApi.ts` — file browser with navigate,
+    view/edit text (≤1 MB), download, upload, mkdir, rename, delete, and
+    a password-prompt fallback when no credential is stored.
+  - The `/hosts/:id/sftp` route renders the web browser in a browser and
+    the native page in the desktop app.
+  - Verified end-to-end against a real SFTP server (connect → list → read
+    → mkdir → write → download → upload → rename → delete → disconnect).
+
+### Known limitations
+- chmod/chown and recursive folder download remain desktop-only.
+- Inline view/edit is capped at 1 MB; larger files download instead.
+
+---
+
 ## [1.10.0] — 2026-06-27 — Self-service password change (Phase 2.x)
 
 ### Added
