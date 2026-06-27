@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
+import websocket from "@fastify/websocket";
 import { v4 as uuid } from "uuid";
 
 import { loadConfig } from "./config/index.js";
@@ -28,6 +29,7 @@ import { makeAuthedRoutes } from "./routes/users.js";
 import { makeAdminRoutes } from "./routes/admin.js";
 import { makeFolderRoutes, makeTagRoutes, makeCredentialRoutes } from "./routes/sessionMeta.js";
 import { makeHostRoutes, makeHistoryRoutes } from "./routes/sessionRoutes.js";
+import { makeSshGateway } from "./ssh/gateway.js";
 
 async function main() {
   const cfg = loadConfig();
@@ -69,6 +71,7 @@ async function main() {
     disableRequestLogging: false,
   });
 
+  await app.register(websocket);
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, {
     origin: cfg.corsOrigins,
@@ -99,6 +102,9 @@ async function main() {
   await app.register(makeCredentialRoutes({ credentials, audit, jwt }), { prefix: "/api/v1/credentials" });
   await app.register(makeHostRoutes({ hosts, audit, jwt }), { prefix: "/api/v1/hosts" });
   await app.register(makeHistoryRoutes({ history, hosts, audit, jwt }), { prefix: "/api/v1/history" });
+
+  // Phase 5 — browser SSH gateway (WebSocket).
+  await app.register(makeSshGateway({ jwt, hosts, credentials, history, log }), { prefix: "/api/v1/ssh" });
 
   const closeOn = (sig: NodeJS.Signals) => async () => {
     log.info({ sig }, "shutdown signal received");

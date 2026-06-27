@@ -4,7 +4,9 @@ import { X, Plus, Server } from "lucide-react";
 
 import { useTerminalTabs } from "../store/terminalTabsStore";
 import { TerminalPane } from "./TerminalPane";
+import { WebTerminalPane } from "./WebTerminalPane";
 import { hostsApi } from "../api/sessionsApi";
+import { isTauri } from "@/shared/lib/tauri";
 
 /**
  * Top-level terminal workspace.
@@ -102,7 +104,7 @@ export function TerminalWorkspace() {
             className="absolute inset-0"
             style={{ display: tab.tabId === activeTabId ? "block" : "none" }}
           >
-            <TerminalPane tab={tab} />
+            {isTauri ? <TerminalPane tab={tab} /> : <WebTerminalPane tab={tab} />}
           </div>
         ))}
       </div>

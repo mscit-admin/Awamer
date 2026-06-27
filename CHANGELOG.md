@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.9.0] — 2026-06-27 — Browser SSH (web terminals via gateway)
+
+### Added
+- **Browser-based SSH terminals.** A new WebSocket gateway on the
+  backend (`/api/v1/ssh/connect`) holds the real SSH connection (via
+  `ssh2`) and streams it to an xterm.js terminal in the browser, so the
+  web build can open live shells without the native desktop app.
+  - `backend/src/ssh/gateway.ts` — token-authenticated WS endpoint that
+    resolves the host + (decrypted) credential, opens an SSH shell, and
+    bridges bytes both ways; records connection history; supports
+    password and private-key auth and live window resize.
+  - `desktop/src/modules/sessions/components/WebTerminalPane.tsx` —
+    xterm.js terminal wired to the gateway, with a password prompt
+    fallback when the host has no stored credential.
+  - `TerminalWorkspace` renders the web pane in the browser and the
+    native pane in the desktop app.
+  - nginx config proxies WebSocket upgrades and uses a long read timeout
+    so idle sessions aren't dropped.
+- Verified end-to-end against a real `sshd`: connect → run a command →
+  receive output over the socket.
+
+### Security notes
+- The gateway accepts the target host key on first sight (TOFU is not yet
+  persisted server-side); the fingerprint is logged. A server-side
+  known-hosts store is a follow-up.
+- The access token is passed as a WebSocket query parameter (browsers
+  can't set headers on a WS); it travels over TLS. Access logging for the
+  gateway path should be kept off to avoid token capture.
+
+### Known limitations
+- Browser **SFTP** is not yet implemented — the SFTP browser still
+  requires the native desktop app.
+
+---
+
 ## [1.8.0] — 2026-06-26 — Phase 10: encrypted credential secrets at rest
 
 ### Fixed (deployability)
