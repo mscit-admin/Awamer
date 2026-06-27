@@ -36,11 +36,14 @@ cat <<EOF
 # Paste into .env.production and KEEP THIS FILE SAFE.
 # =====================================================================
 
+# NOTE: POSTGRES_PASSWORD and REDIS_PASSWORD are embedded in connection
+# URLs (postgres://user:PASS@host, redis://:PASS@host), so they must be
+# URL-safe. Use hex (no +, /, or = to break URL parsing).
 POSTGRES_USER=netsphere
-POSTGRES_PASSWORD=$(generate_b64 32)
+POSTGRES_PASSWORD=$(generate_hex 32)
 POSTGRES_DB=netsphere
 
-REDIS_PASSWORD=$(generate_b64 32)
+REDIS_PASSWORD=$(generate_hex 32)
 
 # Crypto secrets — variable names match backend/src/config/index.ts.
 JWT_ACCESS_SECRET=$(generate_hex 64)
