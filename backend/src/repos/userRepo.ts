@@ -115,6 +115,14 @@ export class UserRepository {
     await this.pool.query(`UPDATE users SET failed_attempts = 0 WHERE id = $1`, [id]);
   }
 
+  async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
+    const r = await this.pool.query(
+      `UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1`,
+      [id, passwordHash],
+    );
+    if (r.rowCount === 0) throw Errors.UserNotFound();
+  }
+
   async setLocked(id: string, locked: boolean): Promise<void> {
     await this.pool.query(
       `UPDATE users SET is_locked = $2, updated_at = NOW() WHERE id = $1`,

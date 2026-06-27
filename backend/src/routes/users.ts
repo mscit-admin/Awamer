@@ -4,12 +4,14 @@ import { userView } from "./auth.js";
 import { DomainError } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
 import type { MFAUseCase } from "../usecases/mfa.js";
+import type { ChangePasswordUseCase } from "../usecases/changePassword.js";
 import { makeAuthMiddleware } from "../middleware/auth.js";
 import type { JwtService } from "../jwt/index.js";
 
 interface Deps {
   users: UserRepository;
   mfa: MFAUseCase;
+  changePassword: ChangePasswordUseCase;
   jwt: JwtService;
 }
 
@@ -45,6 +47,36 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
       if (parsed.data.email !== undefined) user.email = parsed.data.email;
       await deps.users.update(user);
       return reply.send(userView(user));
+    });
+
+    // ---------- Self-service password change ----------------------------
+    const changePwSchema = z.object({
+      current_password: z.string().min(1),
+      new_password: z.string().min(1),
+    });
+
+    app.post("/auth/change-password", async (req, reply) => {
+      const parsed = changePwSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
+      }
+      try {
+        await deps.changePassword.execute(
+          req.auth!.sub,
+          parsed.data.current_password,
+          parsed.data.new_password,
+        );
+        return reply.send({ status: "ok" });
+      } catch (e) {
+        if (e instanceof DomainError) {
+          const status =
+            e.code === "invalid_credentials" ? 401 :
+            e.code === "weak_password" ? 422 :
+            e.code === "password_unchanged" ? 409 : 400;
+          return reply.code(status).send({ error: { code: e.code, message: e.message } });
+        }
+        throw e;
+      }
     });
 
     // ---------- MFA enroll/activate -------------------------------------

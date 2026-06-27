@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.10.0] — 2026-06-27 — Self-service password change (Phase 2.x)
+
+### Added
+- **Self-service password change.** `POST /api/v1/auth/change-password`
+  (authenticated) re-verifies the current password, enforces the password
+  policy (≥12 chars, mixed character classes), rejects reusing the current
+  password, stores the new Argon2 hash, and **revokes all refresh
+  sessions** so other devices must sign in again.
+  - `usecases/changePassword.ts` + `userRepo.updatePasswordHash` + unit
+    tests (correct change, wrong current → 401, weak → 422, unchanged →
+    409). Verified end-to-end (old password rejected, new accepted).
+  - The desktop/web **Change password** page is now a working form
+    (was a "coming in Phase 2" placeholder); on success it signs out and
+    redirects to login.
+
+---
+
 ## [1.9.0] — 2026-06-27 — Browser SSH (web terminals via gateway)
 
 ### Added

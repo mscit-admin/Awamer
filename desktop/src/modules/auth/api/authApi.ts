@@ -113,4 +113,12 @@ export const authApi = {
       body: { password },
     });
   },
+
+  /** Self-service password change. Revokes other sessions on success. */
+  changePassword(currentPassword: string, newPassword: string) {
+    return request<{ status: string }>("/api/v1/auth/change-password", {
+      method: "POST",
+      body: { current_password: currentPassword, new_password: newPassword },
+    });
+  },
 };

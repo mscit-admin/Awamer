@@ -23,6 +23,7 @@ import { LoginUseCase } from "./usecases/login.js";
 import { RefreshUseCase } from "./usecases/refresh.js";
 import { MFAUseCase } from "./usecases/mfa.js";
 import { RegisterUseCase } from "./usecases/register.js";
+import { ChangePasswordUseCase } from "./usecases/changePassword.js";
 
 import { makeAuthRoutes } from "./routes/auth.js";
 import { makeAuthedRoutes } from "./routes/users.js";
@@ -59,6 +60,7 @@ async function main() {
   const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log);
   const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2);
   const registerUC = new RegisterUseCase(users, audit, argon2);
+  const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2);
 
   // Bootstrap admin (only if there are no users)
   await bootstrapAdmin(users, argon2, cfg, log);
@@ -93,7 +95,7 @@ async function main() {
     login: loginUC, refresh: refreshUC, mfa: mfaUC, users, jwt,
   }), { prefix: "/api/v1/auth" });
 
-  await app.register(makeAuthedRoutes({ users, mfa: mfaUC, jwt }), { prefix: "/api/v1" });
+  await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
   await app.register(makeAdminRoutes({ users, register: registerUC, jwt }), { prefix: "/api/v1/admin" });
 
   // Phase 2 — Session Management routes
