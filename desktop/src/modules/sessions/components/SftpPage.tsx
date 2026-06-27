@@ -36,6 +36,7 @@ import {
   sortAndFilterEntries, formatBytes, formatMode, maskMode, togglePermissionBit,
 } from "../lib/sftpFiles";
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { isTauri, DESKTOP_ONLY_MESSAGE } from "@/shared/lib/tauri";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8081";
 
@@ -191,6 +192,11 @@ export function SftpPage() {
   // ---------- 3. Connect --------------------------------------------
   async function doConnect(opts: { password?: string; passphrase?: string }) {
     if (!accessToken || !hostId) return;
+    if (!isTauri) {
+      setError(DESKTOP_ONLY_MESSAGE);
+      setPhase("error");
+      return;
+    }
     setPhase("connecting");
     setError(null);
     try {

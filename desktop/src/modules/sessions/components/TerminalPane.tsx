@@ -9,6 +9,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { isTauri, DESKTOP_ONLY_MESSAGE } from "@/shared/lib/tauri";
 import { hostsApi, credentialsApi, type Host } from "../api/sessionsApi";
 import {
   useTerminalTabs,
@@ -186,6 +187,10 @@ export function TerminalPane({ tab }: { tab: TerminalTab }) {
   // ---------- 4. Connect ---------------------------------------------
   async function doConnect(opts: { password?: string; passphrase?: string }) {
     if (!accessToken) return;
+    if (!isTauri) {
+      updateTab(tab.tabId, { phase: "error", errorMessage: DESKTOP_ONLY_MESSAGE, errorCode: "desktop_only" });
+      return;
+    }
     setBusy(true);
     updateTab(tab.tabId, { phase: "connecting", errorMessage: null, errorCode: null });
     try {
