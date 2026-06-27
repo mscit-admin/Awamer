@@ -4,7 +4,6 @@ import {
   ArrowLeft, Folder, FileIcon, Link2, ChevronRight, Loader2, Download,
   AlertCircle, Lock, KeyRound, HardDrive, Home, Power,
   Upload, FolderPlus, RefreshCw, Trash2, Edit3, Pencil, X, Save,
-  ShieldCheck,
   Search, FolderDown, ShieldCheck, ArrowUp, ArrowDown,
 } from "lucide-react";
 
@@ -19,26 +18,6 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 // internal `@tauri-apps/api/core` resolves to a duplicate copy. We call
 // the dialog plugin's IPC commands directly via the single `invoke` we
 // already import — same wire contract, one fewer way to drift.
-interface SaveDialogOptions {
-  defaultPath?: string;
-  title?: string;
-  filters?: { name: string; extensions: string[] }[];
-}
-interface OpenDialogOptions {
-  multiple?: boolean;
-  directory?: boolean;
-  title?: string;
-  defaultPath?: string;
-  filters?: { name: string; extensions: string[] }[];
-}
-function save(options: SaveDialogOptions = {}): Promise<string | null> {
-  return invoke<string | null>("plugin:dialog|save", { options });
-}
-function openDialog(
-  options: OpenDialogOptions = {},
-): Promise<string | string[] | null> {
-  return invoke<string | string[] | null>("plugin:dialog|open", { options });
-}
 // 1.6.1 — native dialogs are driven from Rust (see commands/dialog.rs).
 // We deliberately do NOT import from `@tauri-apps/plugin-dialog`: on some
 // Tauri 2.x setups that JS plugin throws "Cannot read properties of
@@ -64,17 +43,6 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?
 const MAX_EDIT_BYTES = 1024 * 1024; // 1 MB
 
 type Phase = "loading" | "credential_prompt" | "passphrase_prompt" | "connecting" | "connected" | "error";
-
-interface RemoteEntry {
-  name: string;
-  path: string;
-  kind: "file" | "dir" | "symlink" | "other";
-  size: number;
-  mtime: number;
-  mode: number;
-  uid: number | null;
-  gid: number | null;
-}
 
 interface PermissionsState {
   entry: RemoteEntry;
@@ -566,6 +534,9 @@ export function SftpPage() {
     } catch (e) {
       const err = parseAppError(e);
       setPermissions(prev => prev ? { ...prev, saving: false, error: err.message } : null);
+    }
+  }
+
   // 1.7.0 — chmod. Open a small permissions editor seeded with the
   // entry's current low-12-bit mode.
   function startChmod(entry: RemoteEntry) {
@@ -1066,6 +1037,9 @@ export function SftpPage() {
           onChange={setPermissions}
           onSave={() => void savePermissions()}
           onClose={() => setPermissions(null)}
+        />
+      )}
+
       {/* Permissions (chmod) modal — 1.7.0 */}
       {chmodTarget && (
         <ChmodModal
