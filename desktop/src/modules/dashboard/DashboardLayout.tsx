@@ -12,6 +12,7 @@ import {
   Network,
   Shield,
   Activity,
+  Users,
 } from "lucide-react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
@@ -43,6 +44,11 @@ const COMING_NAV: NavItem[] = [
 const SECONDARY_NAV: NavItem[] = [
   { to: "/settings", label: "Settings", icon: <Settings className="size-4" />, available: true },
   { to: "/settings/security/mfa", label: "Security", icon: <Shield className="size-4" />, available: true },
+];
+
+// Shown only to admin / super_admin.
+const ADMIN_NAV: NavItem[] = [
+  { to: "/users", label: "Users", icon: <Users className="size-4" />, available: true },
 ];
 
 export function DashboardLayout() {
@@ -90,6 +96,17 @@ export function DashboardLayout() {
           {COMING_NAV.map((item) => (
             <NavItemLink key={item.to} item={item} />
           ))}
+
+          {(user?.role === "admin" || user?.role === "super_admin") && (
+            <>
+              <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 mt-4 font-mono">
+                Administration
+              </div>
+              {ADMIN_NAV.map((item) => (
+                <NavItemLink key={item.to} item={item} />
+              ))}
+            </>
+          )}
 
           <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 mt-4 font-mono">
             Account

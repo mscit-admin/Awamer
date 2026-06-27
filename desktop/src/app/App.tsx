@@ -10,6 +10,7 @@ import { ProtectedRoute } from "@/modules/auth/components/ProtectedRoute";
 import { DashboardLayout } from "@/modules/dashboard/DashboardLayout";
 import { DashboardHome } from "@/modules/dashboard/DashboardHome";
 import { SettingsPage } from "@/modules/settings/SettingsPage";
+import { UsersPage } from "@/modules/users/UsersPage";
 
 // Phase 2 — Session Management
 import { HostsPage } from "@/modules/sessions/components/HostsPage";
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/tags" element={<TagsPage />} />
         <Route path="/folders" element={<FoldersPage />} />
 
+        <Route path="/users" element={<UsersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/security/password" element={<ChangePasswordPage />} />
         <Route path="/settings/security/mfa" element={<MFASetupPage />} />

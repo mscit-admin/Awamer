@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.12.0] — 2026-06-27 — User management UI (add non-admin users)
+
+### Added
+- **Users admin page.** Admins (and super-admins) can now list, create,
+  re-role, enable/disable, and delete users from the UI — including
+  **non-admin** accounts (user / read-only / auditor / admin /
+  super-admin). The backend `/api/v1/admin/users` endpoints already
+  existed; this adds the missing front-end.
+  - `modules/users/UsersPage.tsx` + `usersAdminApi.ts`
+  - role-gated **Administration → Users** sidebar entry and `/users`
+    route (visible only to admin / super_admin; the backend enforces the
+    same with `requireRole`)
+  - guards against changing or deleting your own account from the list
+- Verified end-to-end: create a `user`-role account, it logs in with the
+  right role, is correctly 403-forbidden from admin endpoints, and shows
+  up in the admin listing.
+
+---
+
 ## [1.11.0] — 2026-06-27 — Browser SFTP file browser
 
 ### Added
