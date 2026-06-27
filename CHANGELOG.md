@@ -9,7 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.9.0] — 2026-06-27 — Browser SSH (web terminals via gateway)
+
+### Added
+- **Browser-based SSH terminals.** A new WebSocket gateway on the
+  backend (`/api/v1/ssh/connect`) holds the real SSH connection (via
+  `ssh2`) and streams it to an xterm.js terminal in the browser, so the
+  web build can open live shells without the native desktop app.
+  - `backend/src/ssh/gateway.ts` — token-authenticated WS endpoint that
+    resolves the host + (decrypted) credential, opens an SSH shell, and
+    bridges bytes both ways; records connection history; supports
+    password and private-key auth and live window resize.
+  - `desktop/src/modules/sessions/components/WebTerminalPane.tsx` —
+    xterm.js terminal wired to the gateway, with a password prompt
+    fallback when the host has no stored credential.
+  - `TerminalWorkspace` renders the web pane in the browser and the
+    native pane in the desktop app.
+  - nginx config proxies WebSocket upgrades and uses a long read timeout
+    so idle sessions aren't dropped.
+- Verified end-to-end against a real `sshd`: connect → run a command →
+  receive output over the socket.
+
+### Security notes
+- The gateway accepts the target host key on first sight (TOFU is not yet
+  persisted server-side); the fingerprint is logged. A server-side
+  known-hosts store is a follow-up.
+- The access token is passed as a WebSocket query parameter (browsers
+  can't set headers on a WS); it travels over TLS. Access logging for the
+  gateway path should be kept off to avoid token capture.
+
+### Known limitations
+- Browser **SFTP** is not yet implemented — the SFTP browser still
+  requires the native desktop app.
+
+---
+
 ## [1.8.0] — 2026-06-26 — Phase 10: encrypted credential secrets at rest
+
+### Fixed (deployability)
+- **Reconstructed the missing SQL migrations.** `backend/migrations/`
+  was absent from the repository, so `migrate.js up` created no tables
+  and the Docker image build (`COPY migrations`) failed outright. Added
+  `001_auth` (users, mfa_devices, refresh_sessions, audit_logs) and
+  `002_sessions` (folders, tags, credentials, hosts, host_tags,
+  connection_history), derived from the repository column contracts and
+  verified end-to-end against PostgreSQL 16 (apply, rollback,
+  idempotent re-run, login, and credential round-trip).
+- **Aligned production deploy env vars with the code.** The
+  `deploy/` files used variable names the backend never reads, which
+  meant the documented production deploy could not start:
+  `JWT_SECRET` → `JWT_ACCESS_SECRET`, `CORS_ORIGINS` →
+  `CORS_ALLOWED_ORIGINS`, `NODE_ENV`-only → also set `APP_ENV`,
+  `PORT` → `AUTH_HTTP_PORT`, `RATE_LIMIT_MAX/WINDOW` →
+  `RATE_LIMIT_{LOGIN,API}_PER_MIN`. Updated
+  `docker-compose.production.yml`, `.env.production.example`,
+  `generate-secrets.sh`, `install.sh`, and `deploy/README.md`.
+- Fixed invalid YAML in `docker-compose.production.yml` (a `:?...`
+  default-error hint contained a colon, breaking the parser).
 
 ### Added
 - **Credential secrets are now encrypted at rest** with AES-256-GCM.

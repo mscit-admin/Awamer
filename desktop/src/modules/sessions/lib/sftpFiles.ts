@@ -13,6 +13,10 @@ export interface RemoteEntry {
   size: number;
   mtime: number;
   mode: number;
+  // 1.7.0 — returned by sftp_list for the chmod/chown UI. Optional so older
+  // listings (and non-POSIX servers) that omit them still type-check.
+  uid?: number | null;
+  gid?: number | null;
 }
 
 export type SortKey = "name" | "size" | "mtime";
