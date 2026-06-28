@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.21.2] — 2026-06-28 — Export users to a file
+
+### Added
+- **Export users (admin).** The Users page now has **CSV** and **JSON** export
+  buttons that download the account list (username, email, full name, role,
+  active/locked/MFA flags, last login, created-at, id). Client-side and
+  non-destructive; no secrets are included. CSV is RFC-4180-quoted with a
+  UTF-8 BOM so it opens cleanly in Excel.
+
+---
+
 ## [1.21.1] — 2026-06-28 — Terminal username watermark
 
 ### Added

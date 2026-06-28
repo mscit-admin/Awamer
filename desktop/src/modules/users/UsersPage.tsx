@@ -6,9 +6,10 @@
  * the backend enforces it too).
  */
 import { useEffect, useState, type FormEvent } from "react";
-import { UserPlus, Loader2, AlertCircle, Trash2, ShieldCheck, X } from "lucide-react";
+import { UserPlus, Loader2, AlertCircle, Trash2, ShieldCheck, X, Download } from "lucide-react";
 
 import { usersAdminApi, ROLES, type AdminUser, type Role } from "./usersAdminApi";
+import { exportUsersCsv, exportUsersJson } from "./exportUsers";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { ApiError } from "@/shared/lib/api";
 
@@ -67,9 +68,27 @@ export function UsersPage() {
           <h1 className="text-xl font-semibold">Users</h1>
           <p className="text-sm text-fg-muted mt-0.5">Manage accounts and roles.</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="btn-primary">
-          <UserPlus className="size-4" /> Add user
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => exportUsersCsv(users)}
+            disabled={users.length === 0}
+            className="btn-ghost text-xs"
+            title="Export the user list as CSV"
+          >
+            <Download className="size-3.5" /> CSV
+          </button>
+          <button
+            onClick={() => exportUsersJson(users)}
+            disabled={users.length === 0}
+            className="btn-ghost text-xs"
+            title="Export the user list as JSON"
+          >
+            <Download className="size-3.5" /> JSON
+          </button>
+          <button onClick={() => setShowCreate(true)} className="btn-primary">
+            <UserPlus className="size-4" /> Add user
+          </button>
+        </div>
       </div>
 
       {error && (
