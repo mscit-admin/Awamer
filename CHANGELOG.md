@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.15.0] — 2026-06-28 — Per-user host sharing
+
+### Added
+- **Share an asset with specific users** (in addition to share-with-all).
+  A host can now be shared with a chosen set of users; they can see and
+  connect to it (via the owner's credential) but not edit it. Others still
+  can't see it at all.
+  - migration `004_host_shares` (host_id × user_id join table)
+  - host visibility is now `owner OR shared-with-all OR shared-with-you`;
+    `getById`/`touch` honor it; `update`/`delete` stay owner-only
+  - owner-managed endpoints `GET`/`PUT /api/v1/hosts/:id/shares`
+  - `GET /api/v1/users/directory` — minimal user list for the share picker
+    (any authenticated user)
+  - host form: "Share with specific users" checklist alongside the
+    share-with-all toggle; selections load on edit and save on submit
+  - verified end-to-end: shared with one user → that user sees & connects,
+    a third user is fully 404'd, neither non-owner can edit.
+
+---
+
 ## [1.14.0] — 2026-06-27 — Shared hosts (Assets) + screen rename
 
 ### Added

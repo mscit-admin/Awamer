@@ -49,6 +49,14 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
       return reply.send(userView(user));
     });
 
+    // ---------- User directory (minimal, for share pickers) -------------
+    app.get("/users/directory", async (_req, reply) => {
+      const { users } = await deps.users.list(500, 0);
+      return reply.send({
+        data: users.map((u) => ({ id: u.id, username: u.username, full_name: u.fullName })),
+      });
+    });
+
     // ---------- Self-service password change ----------------------------
     const changePwSchema = z.object({
       current_password: z.string().min(1),

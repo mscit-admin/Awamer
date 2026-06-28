@@ -74,6 +74,13 @@ export const authApi = {
     return request<User>("/api/v1/users/me");
   },
 
+  /** Minimal user directory for share pickers (any authenticated user). */
+  directory() {
+    return request<{ data: { id: string; username: string; full_name: string | null }[] }>(
+      "/api/v1/users/directory",
+    );
+  },
+
   updateMe(input: { full_name?: string; email?: string }) {
     return request<User>("/api/v1/users/me", {
       method: "PATCH",

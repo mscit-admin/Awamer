@@ -232,6 +232,15 @@ export const hostsApi = {
   delete(id: string) {
     return request<void>(`/api/v1/hosts/${id}`, { method: "DELETE" });
   },
+  getShares(id: string) {
+    return request<{ user_ids: string[] }>(`/api/v1/hosts/${id}/shares`);
+  },
+  setShares(id: string, userIds: string[]) {
+    return request<{ user_ids: string[] }>(`/api/v1/hosts/${id}/shares`, {
+      method: "PUT",
+      body: { user_ids: userIds },
+    });
+  },
   toggleFavorite(id: string) {
     return request<{ is_favorite: boolean }>(`/api/v1/hosts/${id}/favorite`, { method: "POST" });
   },

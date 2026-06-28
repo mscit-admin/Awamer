@@ -6,6 +6,8 @@ import {
   type Folder, type Tag, type CredentialPublic,
   type HostProtocol,
 } from "../api/sessionsApi";
+import { authApi } from "@/modules/auth/api/authApi";
+import { useAuthStore } from "@/modules/auth/store/authStore";
 
 const PROTOCOLS: HostProtocol[] = ["ssh", "sftp", "rdp", "vnc", "telnet", "serial", "http", "https", "custom"];
 const DEFAULT_PORTS: Record<HostProtocol, number> = {
@@ -26,6 +28,8 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
   const [credentialId, setCredentialId] = useState<string>("");
   const [description, setDescription] = useState("");
   const [isShared, setIsShared] = useState(false);
+  const [shareUserIds, setShareUserIds] = useState<string[]>([]);
+  const [directory, setDirectory] = useState<{ id: string; username: string; full_name: string | null }[]>([]);
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -33,14 +37,17 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const myId = useAuthStore((s) => s.user?.id);
+
   useEffect(() => {
     void (async () => {
-      const [f, t, c] = await Promise.all([
-        foldersApi.list(), tagsApi.list(), credentialsApi.list(),
+      const [f, t, c, dir] = await Promise.all([
+        foldersApi.list(), tagsApi.list(), credentialsApi.list(), authApi.directory(),
       ]);
       setFolders(f.data);
       setTags(t.data);
       setCredentials(c.data);
+      setDirectory(dir.data.filter((u) => u.id !== myId));
 
       if (isEdit && params.id) {
         try {
@@ -54,6 +61,10 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
           setDescription(host.description ?? "");
           setIsShared(host.is_shared);
           setTagIds(host.tags.map((tg) => tg.id));
+          try {
+            const sh = await hostsApi.getShares(params.id);
+            setShareUserIds(sh.user_ids);
+          } catch { /* not owner / none */ }
         } catch (e) {
           setError(e instanceof Error ? e.message : "Failed to load host");
         }
@@ -82,10 +93,16 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
         is_shared: isShared,
         tag_ids: tagIds,
       };
+      let hostId = params.id;
       if (isEdit && params.id) {
         await hostsApi.update(params.id, payload);
       } else {
-        await hostsApi.create(payload);
+        const created = await hostsApi.create(payload);
+        hostId = created.id;
+      }
+      // Persist the explicit per-user share list (additive to is_shared).
+      if (hostId) {
+        await hostsApi.setShares(hostId, shareUserIds);
       }
       navigate("/hosts");
     } catch (e) {
@@ -202,6 +219,40 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
               </span>
             </span>
           </label>
+
+          <div className="mt-3">
+            <div className="text-xs text-fg-muted mb-1">
+              {isShared ? "Already shared with everyone." : "Or share with specific users:"}
+            </div>
+            {!isShared && (
+              <div className="max-h-40 overflow-y-auto border border-border rounded divide-y divide-border">
+                {directory.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-fg-muted">No other users.</div>
+                )}
+                {directory.map((u) => {
+                  const checked = shareUserIds.includes(u.id);
+                  return (
+                    <label key={u.id} className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-bg-elevated/40">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) =>
+                          setShareUserIds((prev) =>
+                            e.target.checked ? [...prev, u.id] : prev.filter((x) => x !== u.id),
+                          )
+                        }
+                      />
+                      <span className="text-sm">{u.username}</span>
+                      {u.full_name && <span className="text-xs text-fg-muted">· {u.full_name}</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {!isShared && shareUserIds.length > 0 && (
+              <div className="text-xs text-fg-muted mt-1">{shareUserIds.length} user(s) selected.</div>
+            )}
+          </div>
         </Field>
 
         <Field label="Tags">

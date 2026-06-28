@@ -239,6 +239,33 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
         throw e;
       }
     });
+
+    // --- Per-user shares (owner-managed) ------------------------------
+    app.get("/:id/shares", async (req, reply) => {
+      const { id } = req.params as { id: string };
+      try {
+        const userIds = await deps.hosts.getShareUserIds(req.auth!.sub, id);
+        return reply.send({ user_ids: userIds });
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
+
+    const sharesSchema = z.object({ user_ids: z.array(z.string().uuid()) });
+    app.put("/:id/shares", async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = sharesSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
+      try {
+        await deps.hosts.setShares(req.auth!.sub, id, parsed.data.user_ids);
+        await deps.audit.log({ userId: req.auth!.sub, action: "host_update", success: true, resourceType: "host", resourceId: id });
+        return reply.send({ user_ids: parsed.data.user_ids });
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
   };
 }
 

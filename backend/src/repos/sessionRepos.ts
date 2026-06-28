@@ -352,8 +352,10 @@ export class HostRepository {
   constructor(private readonly pool: Pool) {}
 
   async list(userId: string, filters: HostListFilters = {}): Promise<{ hosts: Host[]; total: number }> {
-    // Visible hosts = your own OR any host shared instance-wide.
-    const where: string[] = ["(h.user_id = $1 OR h.is_shared = TRUE)"];
+    // Visible hosts = your own OR shared instance-wide OR shared with you.
+    const where: string[] = [
+      "(h.user_id = $1 OR h.is_shared = TRUE OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = h.id AND hs.user_id = $1))",
+    ];
     const params: unknown[] = [userId];
     let p = 1;
 
@@ -415,7 +417,9 @@ export class HostRepository {
 
   async getById(userId: string, id: string): Promise<Host> {
     const { rows } = await this.pool.query<HostRow>(
-      `SELECT ${HOST_COLS} FROM hosts WHERE id = $1 AND (user_id = $2 OR is_shared = TRUE)`,
+      `SELECT ${HOST_COLS} FROM hosts
+       WHERE id = $1 AND (user_id = $2 OR is_shared = TRUE
+                          OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = hosts.id AND hs.user_id = $2))`,
       [id, userId],
     );
     if (!rows[0]) throw PhaseTwoErrors.HostNotFound();
@@ -513,10 +517,47 @@ export class HostRepository {
     // Shared hosts can be connected (and thus touched) by non-owners too.
     const r = await this.pool.query(
       `UPDATE hosts SET last_used_at = NOW(), use_count = use_count + 1
-       WHERE id = $1 AND (user_id = $2 OR is_shared = TRUE)`,
+       WHERE id = $1 AND (user_id = $2 OR is_shared = TRUE
+                          OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = hosts.id AND hs.user_id = $2))`,
       [id, userId],
     );
     if (r.rowCount === 0) throw PhaseTwoErrors.HostNotFound();
+  }
+
+  // ---- per-user sharing (owner-managed) -----------------------------
+
+  /** Replace the set of users a host is explicitly shared with. Owner only. */
+  async setShares(ownerId: string, hostId: string, userIds: string[]): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const own = await client.query(`SELECT id FROM hosts WHERE id = $1 AND user_id = $2`, [hostId, ownerId]);
+      if (own.rowCount === 0) throw PhaseTwoErrors.HostNotFound();
+      await client.query(`DELETE FROM host_shares WHERE host_id = $1`, [hostId]);
+      // Never share with the owner themselves; de-dup.
+      const targets = [...new Set(userIds)].filter((u) => u && u !== ownerId);
+      if (targets.length > 0) {
+        const values = targets.map((_, i) => `($1, $${i + 2}::uuid)`).join(",");
+        await client.query(`INSERT INTO host_shares (host_id, user_id) VALUES ${values}`, [hostId, ...targets]);
+      }
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** User ids a host is explicitly shared with. Owner only. */
+  async getShareUserIds(ownerId: string, hostId: string): Promise<string[]> {
+    const own = await this.pool.query(`SELECT id FROM hosts WHERE id = $1 AND user_id = $2`, [hostId, ownerId]);
+    if (own.rowCount === 0) throw PhaseTwoErrors.HostNotFound();
+    const { rows } = await this.pool.query<{ user_id: string }>(
+      `SELECT user_id FROM host_shares WHERE host_id = $1`,
+      [hostId],
+    );
+    return rows.map((r) => r.user_id);
   }
 
   // ---- tags M2M -----------------------------------------------------
