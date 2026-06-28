@@ -26,6 +26,7 @@ import { TerminalWorkspace } from "@/modules/sessions/components/TerminalWorkspa
 // Phase 4 (1.5.0) — SFTP file browser
 import { SftpPage } from "@/modules/sessions/components/SftpPage";
 import { WebSftpPage } from "@/modules/sessions/components/WebSftpPage";
+import { VncPage } from "@/modules/sessions/components/VncPage";
 import { FilesPage } from "@/modules/sessions/components/FilesPage";
 import { NetworkPage } from "@/modules/sessions/components/NetworkPage";
 import { isTauri } from "@/shared/lib/tauri";
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/hosts/:id/edit" element={<HostFormPage mode="edit" />} />
         <Route path="/hosts/:id/terminal" element={<TerminalWorkspace />} />
         <Route path="/hosts/:id/sftp" element={isTauri ? <SftpPage /> : <WebSftpPage />} />
+        <Route path="/hosts/:id/vnc" element={<VncPage />} />
         <Route path="/terminal" element={<TerminalWorkspace />} />
         <Route path="/files" element={<FilesPage />} />
         <Route path="/network" element={<NetworkPage />} />

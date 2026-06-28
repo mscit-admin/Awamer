@@ -34,6 +34,7 @@ import { makeAuditRoutes } from "./routes/audit.js";
 import { makeNetworkRoutes } from "./routes/network.js";
 import { makeSshGateway } from "./ssh/gateway.js";
 import { makeSftpGateway } from "./ssh/sftpGateway.js";
+import { makeVncGateway } from "./vnc/gateway.js";
 
 async function main() {
   const cfg = loadConfig();
@@ -114,6 +115,8 @@ async function main() {
   await app.register(makeSshGateway({ jwt, hosts, credentials, history, log }), { prefix: "/api/v1/ssh" });
   // Phase 4 — browser SFTP gateway (REST, session-based).
   await app.register(makeSftpGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/sftp" });
+  // Phase 6 — browser VNC gateway (WebSocket byte relay).
+  await app.register(makeVncGateway({ jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
 
   const closeOn = (sig: NodeJS.Signals) => async () => {
     log.info({ sig }, "shutdown signal received");

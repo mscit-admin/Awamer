@@ -174,7 +174,7 @@ export function HostDetailPage() {
         )}
       </div>
 
-      {/* Connect / SFTP buttons — Phase 3 + 4 */}
+      {/* Connect buttons */}
       {canConnect && (
       <div className="card p-4 mb-6 flex items-center gap-3">
         <div className="size-9 rounded bg-accent/10 grid place-items-center">
@@ -185,31 +185,29 @@ export function HostDetailPage() {
           <div className="text-xs text-fg-muted">
             {host.protocol === "ssh"
               ? "Open an interactive SSH terminal, or browse files over SFTP."
-              : `${host.protocol.toUpperCase()} support arrives in a later phase. SSH is supported as of 1.2.0.`}
+              : host.protocol === "vnc"
+                ? "Open the remote desktop over VNC."
+                : `${host.protocol.toUpperCase()} support arrives in a later phase.`}
           </div>
         </div>
-        <button
-          disabled={host.protocol !== "ssh"}
-          onClick={() => navigate(`/hosts/${host.id}/sftp`)}
-          className={
-            "btn-ghost " +
-            (host.protocol !== "ssh" ? "opacity-40 cursor-not-allowed" : "")
-          }
-          title={host.protocol !== "ssh" ? "Not yet supported" : "Browse files via SFTP"}
-        >
-          <HardDriveIcon className="size-3.5" /> SFTP
-        </button>
-        <button
-          disabled={host.protocol !== "ssh"}
-          onClick={() => navigate(`/hosts/${host.id}/terminal`)}
-          className={
-            "btn-primary " +
-            (host.protocol !== "ssh" ? "opacity-40 cursor-not-allowed" : "")
-          }
-          title={host.protocol !== "ssh" ? "Not yet supported" : "Open SSH terminal"}
-        >
-          Connect
-        </button>
+        {host.protocol === "ssh" && (
+          <>
+            <button onClick={() => navigate(`/hosts/${host.id}/sftp`)} className="btn-ghost" title="Browse files via SFTP">
+              <HardDriveIcon className="size-3.5" /> SFTP
+            </button>
+            <button onClick={() => navigate(`/hosts/${host.id}/terminal`)} className="btn-primary" title="Open SSH terminal">
+              Connect
+            </button>
+          </>
+        )}
+        {host.protocol === "vnc" && (
+          <button onClick={() => navigate(`/hosts/${host.id}/vnc`)} className="btn-primary" title="Open remote desktop">
+            Open desktop
+          </button>
+        )}
+        {host.protocol !== "ssh" && host.protocol !== "vnc" && (
+          <span className="text-xs text-fg-muted">Not yet supported</span>
+        )}
       </div>
       )}
 

@@ -36,7 +36,8 @@ export default defineConfig(async () => ({
   envPrefix: ["VITE_", "TAURI_"],
 
   build: {
-    target: ["es2021", "chrome105", "safari13"],
+    // es2022 for top-level await + BigInt (used by @novnc/novnc).
+    target: ["es2022", "chrome105", "safari15"],
     minify: process.env.TAURI_DEBUG ? false : "esbuild",
     sourcemap: !!process.env.TAURI_DEBUG,
   },

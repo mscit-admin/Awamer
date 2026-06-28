@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.18.0] — 2026-06-28 — VNC remote desktop (Phase 6)
+
+### Added
+- **Browser VNC** — open a host's remote desktop in the browser. A backend
+  WebSocket↔TCP relay (`/api/v1/vnc/connect`, websockify-style) shuttles
+  bytes between the browser's **noVNC** client and the target VNC server;
+  the RFB protocol (incl. VNC auth) runs end-to-end. Gated by
+  `sessions:connect`; records connection history (protocol `vnc`).
+  - `backend/src/vnc/gateway.ts`
+  - `desktop` adds `@novnc/novnc`; `VncPage` (`/hosts/:id/vnc`) renders the
+    desktop, scales to fit, supports Ctrl+Alt+Del and fullscreen, and uses
+    the host's stored credential password when revealable (else prompts).
+  - Host detail shows **Open desktop** for `vnc` assets (SSH still shows
+    Terminal + SFTP).
+  - build target raised to es2022 (noVNC uses top-level await + BigInt).
+
+### Notes
+- VNC auth is end-to-end between noVNC and the server; for shared hosts
+  where the connecting user can't reveal the owner's credential, they're
+  prompted for the VNC password.
+
+---
+
 ## [1.17.0] — 2026-06-28 — Files manager + Network tools
 
 ### Added
