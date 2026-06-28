@@ -5,6 +5,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import App from "@/app/App";
 import "@/styles/global.css";
+import { initTheme } from "@/shared/lib/theme";
+import { APP_NAME } from "@/shared/branding";
+
+initTheme();
+document.title = APP_NAME;
 
 const queryClient = new QueryClient({
   defaultOptions: {

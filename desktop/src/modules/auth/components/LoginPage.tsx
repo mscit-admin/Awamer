@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Loader2, Lock, User as UserIcon, AlertCircle } from "lucide-react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { Logo, APP_NAME } from "@/shared/branding";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -42,7 +43,7 @@ export function LoginPage() {
         <div className="flex items-center gap-3 mb-10">
           <BrandMark />
           <div>
-            <div className="font-display font-semibold tracking-tight text-lg leading-none">NetSphere</div>
+            <div className="font-display font-semibold tracking-tight text-lg leading-none">{APP_NAME}</div>
             <div className="text-2xs text-fg-subtle font-mono uppercase tracking-widest mt-1">terminal</div>
           </div>
         </div>
@@ -146,15 +147,7 @@ function Field({ id, label, icon, type = "text", value, onChange, autoComplete, 
 function BrandMark() {
   return (
     <div className="size-9 rounded-md bg-bg-elevated border border-border-strong grid place-items-center shadow-glow">
-      <svg viewBox="0 0 24 24" fill="none" className="size-5">
-        <path
-          d="M12 2L3 7l9 5 9-5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5"
-          stroke="rgb(125 211 160)"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <Logo className="size-5" />
     </div>
   );
 }
