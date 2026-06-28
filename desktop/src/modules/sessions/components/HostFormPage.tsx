@@ -25,6 +25,7 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
   const [folderId, setFolderId] = useState<string>("");
   const [credentialId, setCredentialId] = useState<string>("");
   const [description, setDescription] = useState("");
+  const [isShared, setIsShared] = useState(false);
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -51,6 +52,7 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
           setFolderId(host.folder_id ?? "");
           setCredentialId(host.credential_id ?? "");
           setDescription(host.description ?? "");
+          setIsShared(host.is_shared);
           setTagIds(host.tags.map((tg) => tg.id));
         } catch (e) {
           setError(e instanceof Error ? e.message : "Failed to load host");
@@ -77,6 +79,7 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
         folder_id: folderId || null,
         credential_id: credentialId || null,
         description: description.trim() || null,
+        is_shared: isShared,
         tag_ids: tagIds,
       };
       if (isEdit && params.id) {
@@ -181,6 +184,24 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
             rows={2} maxLength={1000}
             className="input resize-y"
           />
+        </Field>
+
+        <Field label="Sharing">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isShared}
+              onChange={(e) => setIsShared(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span className="text-sm">
+              Share with all users
+              <span className="block text-xs text-fg-muted">
+                Everyone can see and connect to this asset using its linked
+                credential. Only you can edit or delete it.
+              </span>
+            </span>
+          </label>
         </Field>
 
         <Field label="Tags">

@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.14.0] — 2026-06-27 — Shared hosts (Assets) + screen rename
+
+### Added
+- **Host sharing — define once, use everywhere.** A host can be marked
+  *shared*; shared hosts are visible and connectable by every user on the
+  instance, with **no duplication**. Connecting users authenticate with
+  the owner's linked credential (resolved server-side — the secret is
+  never exposed to them). Shared hosts remain **editable/deletable only by
+  their owner**.
+  - migration `003_shared_hosts` (adds `hosts.is_shared` + partial index)
+  - host visibility query is now `owner OR shared`; `getById`/`touch`
+    honor shared; `update`/`delete` stay owner-scoped
+  - SSH & SFTP gateways resolve credentials via the host owner
+  - `is_shared` on create/update; `is_shared` + `owner_id` in responses
+  - a "Share with all users" toggle in the host form; "Shared" /
+    "Shared with you" badges; non-owners can connect but don't see
+    edit/delete on shared hosts
+  - verified end-to-end: a second user sees a shared host, connects via
+    SFTP using the owner's credential, and is 404'd on edit/delete.
+- **"Hosts" screen renamed to "Assets"** in the sidebar and page copy
+  (routes unchanged).
+
+---
+
 ## [1.13.0] — 2026-06-27 — Roles & Permissions (RBAC)
 
 ### Added

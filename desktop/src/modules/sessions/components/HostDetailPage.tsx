@@ -12,6 +12,7 @@ import {
   type HostProtocol,
 } from "../api/sessionsApi";
 import { useCan } from "@/shared/lib/permissions";
+import { useAuthStore } from "@/modules/auth/store/authStore";
 
 const PROTOCOL_ICONS: Record<HostProtocol, string> = {
   ssh: "🔒", sftp: "📁", rdp: "🖥️", vnc: "📺",
@@ -29,6 +30,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function HostDetailPage() {
   const navigate = useNavigate();
+  const myId = useAuthStore((s) => s.user?.id);
   const canWrite = useCan("resources:write");
   const canConnect = useCan("sessions:connect");
   const canReveal = useCan("credentials:reveal");
@@ -127,6 +129,8 @@ export function HostDetailPage() {
     );
   }
 
+  const isOwner = !host.owner_id || host.owner_id === myId;
+
   return (
     <div className="max-w-3xl mx-auto py-8 px-6 animate-fade-in">
       <button onClick={() => navigate("/hosts")} className="btn-ghost -ml-3 mb-4 text-xs">
@@ -142,6 +146,11 @@ export function HostDetailPage() {
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight">{host.name}</h1>
             {host.is_favorite && <Star className="size-4 text-yellow-400 fill-yellow-400" />}
+            {host.is_shared && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent/15 border border-accent/30 text-accent">
+                {isOwner ? "Shared" : "Shared with you"}
+              </span>
+            )}
           </div>
           <div className="text-sm text-fg-muted font-mono">
             {host.protocol}://{host.hostname}:{host.port}
@@ -150,7 +159,7 @@ export function HostDetailPage() {
             <div className="text-sm text-fg-muted mt-1">{host.description}</div>
           )}
         </div>
-        {canWrite && (
+        {canWrite && isOwner && (
         <div className="flex gap-2">
           <button onClick={toggleFavorite} className="btn-ghost" title="Toggle favorite">
             <Star className={"size-4 " + (host.is_favorite ? "text-yellow-400 fill-yellow-400" : "")} />

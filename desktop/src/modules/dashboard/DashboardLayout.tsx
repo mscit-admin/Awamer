@@ -28,7 +28,7 @@ interface NavItem {
 
 const PRIMARY_NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: <Home className="size-4" />, available: true },
-  { to: "/hosts", label: "Hosts", icon: <Server className="size-4" />, available: true },
+  { to: "/hosts", label: "Assets", icon: <Server className="size-4" />, available: true },
   { to: "/terminal", label: "Terminal", icon: <TerminalIcon className="size-4" />, available: true },
   { to: "/credentials", label: "Credentials", icon: <KeyRound className="size-4" />, available: true },
   { to: "/folders", label: "Folders", icon: <Folder className="size-4" />, available: true },

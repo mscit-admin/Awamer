@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Server, Plus, Search, Star, Trash2, Edit3,
-  Folder as FolderIcon, ChevronRight,
+  Folder as FolderIcon, ChevronRight, Users2,
 } from "lucide-react";
 import {
   hostsApi, foldersApi, tagsApi,
   type Host, type FolderTreeNode, type Tag, type HostProtocol,
 } from "../api/sessionsApi";
 import { useCan } from "@/shared/lib/permissions";
+import { useAuthStore } from "@/modules/auth/store/authStore";
 
 const PROTOCOL_ICONS: Record<HostProtocol, string> = {
   ssh: "🔒", sftp: "📁", rdp: "🖥️", vnc: "📺",
@@ -154,7 +155,7 @@ export function HostsPage() {
               type="search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search hosts…"
+              placeholder="Search assets…"
               className="w-full pl-8 pr-3 py-1.5 text-sm bg-bg-elevated border border-border rounded
                          focus:outline-none focus:border-accent"
             />
@@ -174,7 +175,7 @@ export function HostsPage() {
               to="/hosts/new"
               className="btn-primary flex items-center gap-1"
             >
-              <Plus className="size-4" /> New host
+              <Plus className="size-4" /> New asset
             </Link>
           )}
         </header>
@@ -271,7 +272,11 @@ function HostCard({
   onDelete: () => void;
 }) {
   const navigate = useNavigate();
+  const myId = useAuthStore((s) => s.user?.id);
   const canWrite = useCan("resources:write");
+  // Shared hosts owned by someone else: viewable & connectable, not editable.
+  const isOwner = !host.owner_id || host.owner_id === myId;
+  const canManage = canWrite && isOwner;
   return (
     <div
       className="card p-4 hover:border-accent/50 transition-colors cursor-pointer group"
@@ -285,6 +290,11 @@ function HostCard({
           <div className="flex items-center gap-1.5">
             <div className="font-medium truncate">{host.name}</div>
             {host.is_favorite && <Star className="size-3.5 text-yellow-400 fill-yellow-400" />}
+            {host.is_shared && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/15 border border-accent/30 text-accent flex items-center gap-0.5 shrink-0">
+                <Users2 className="size-2.5" /> {isOwner ? "Shared" : "Shared with you"}
+              </span>
+            )}
           </div>
           <div className="text-xs text-fg-muted font-mono truncate">
             {host.protocol}://{host.hostname}:{host.port}
@@ -302,7 +312,7 @@ function HostCard({
             </div>
           )}
         </div>
-        {canWrite && (
+        {canManage && (
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
           <button
             className="btn-icon"
@@ -338,12 +348,12 @@ function EmptyState() {
       <div className="size-14 mx-auto rounded-full bg-bg-elevated grid place-items-center mb-4">
         <Server className="size-7 text-fg-muted" />
       </div>
-      <div className="text-base font-medium mb-1">No hosts yet</div>
+      <div className="text-base font-medium mb-1">No assets yet</div>
       <p className="text-sm text-fg-muted mb-4 max-w-xs mx-auto">
-        Add your first remote host to get started. Phase 3 will add the SSH terminal that connects to it.
+        Add your first remote asset to get started, then open an SSH terminal or SFTP browser.
       </p>
       <Link to="/hosts/new" className="btn-primary inline-flex items-center gap-1">
-        <Plus className="size-4" /> New host
+        <Plus className="size-4" /> New asset
       </Link>
     </div>
   );

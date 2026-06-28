@@ -27,6 +27,8 @@ function serializeHost(h: Host, tags: Tag[] = []) {
     credential_id: h.credentialId,
     description: h.description,
     is_favorite: h.isFavorite,
+    is_shared: h.isShared,
+    owner_id: h.userId,
     options: h.options,
     last_used_at: h.lastUsedAt,
     use_count: h.useCount,
@@ -100,6 +102,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
       credential_id: z.string().uuid().nullable().optional(),
       description: z.string().max(1000).nullable().optional(),
       options: z.record(z.unknown()).optional(),
+      is_shared: z.boolean().optional(),
       tag_ids: z.array(z.string().uuid()).optional(),
     });
 
@@ -120,6 +123,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
           credentialId: parsed.data.credential_id ?? null,
           description: parsed.data.description ?? null,
           options: parsed.data.options ?? {},
+          isShared: parsed.data.is_shared ?? false,
         });
         let tags: Tag[] = [];
         if (parsed.data.tag_ids?.length) {
@@ -159,6 +163,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
       description: z.string().max(1000).nullable().optional(),
       options: z.record(z.unknown()).optional(),
       is_favorite: z.boolean().optional(),
+      is_shared: z.boolean().optional(),
       tag_ids: z.array(z.string().uuid()).optional(),
     });
 
@@ -178,6 +183,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
           description: parsed.data.description,
           options: parsed.data.options,
           isFavorite: parsed.data.is_favorite,
+          isShared: parsed.data.is_shared,
         });
         let tags: Tag[];
         if (parsed.data.tag_ids !== undefined) {

@@ -145,12 +145,12 @@ export function makeSftpGateway(deps: SftpGatewayDeps) {
       try {
         if (password) {
           if (host.credentialId) {
-            const c = await deps.credentials.getById(userId, host.credentialId);
+            const c = await deps.credentials.getById(host.userId, host.credentialId);
             username = c.username || "root";
           }
           auth = { password };
         } else if (host.credentialId) {
-          const cred = await deps.credentials.getById(userId, host.credentialId);
+          const cred = await deps.credentials.getById(host.userId, host.credentialId);
           username = cred.username || "root";
           const secret = cred.secretData ?? {};
           if (cred.credentialType === "password") {
