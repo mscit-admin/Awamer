@@ -132,17 +132,35 @@ export function VncPage() {
   // so they're never typed by hand on the remote screen.
   const XK_TAB = 0xff09;
   const XK_RETURN = 0xff0d;
+  const XK_SHIFT_L = 0xffe1;
+  // Symbols that require Shift on a US keyboard layout.
+  const SHIFTED = new Set("~!@#$%^&*()_+{}|:\"<>?".split(""));
 
-  function sendString(s: string) {
+  function keysymFor(ch: string): number {
+    const cp = ch.codePointAt(0)!;
+    // Latin-1 keysyms equal the codepoint; others use the Unicode keysym range.
+    return cp < 0x100 ? cp : 0x01000000 + cp;
+  }
+
+  /**
+   * Type a string into the remote desktop as keystrokes. Shift is held around
+   * uppercase letters and shifted symbols so they aren't mistyped, and a small
+   * delay between keys avoids the server dropping/merging fast input.
+   */
+  async function sendString(s: string) {
     const rfb = rfbRef.current;
     if (!rfb) return;
     for (const ch of s) {
-      const cp = ch.codePointAt(0)!;
-      const keysym = cp < 0x100 ? cp : 0x01000000 + cp;
-      rfb.sendKey(keysym, "Unidentified", true);
-      rfb.sendKey(keysym, "Unidentified", false);
+      const shift = (ch >= "A" && ch <= "Z") || SHIFTED.has(ch);
+      if (shift) rfb.sendKey(XK_SHIFT_L, "ShiftLeft", true);
+      const ks = keysymFor(ch);
+      rfb.sendKey(ks, "Unidentified", true);
+      rfb.sendKey(ks, "Unidentified", false);
+      if (shift) rfb.sendKey(XK_SHIFT_L, "ShiftLeft", false);
+      await new Promise((r) => setTimeout(r, 15));
     }
   }
+
   function sendKeysym(keysym: number) {
     const rfb = rfbRef.current;
     if (!rfb) return;
@@ -210,10 +228,10 @@ export function VncPage() {
             <input type="password" value={osPass} onChange={(e) => setOsPass(e.target.value)} className="input w-full text-sm" autoComplete="off" />
           </div>
           <div className="flex flex-wrap gap-1.5">
-            <button onClick={() => sendString(osUser)} disabled={!osUser} className="btn-ghost text-xs disabled:opacity-40">Type username</button>
-            <button onClick={() => sendString(osPass)} disabled={!osPass} className="btn-ghost text-xs disabled:opacity-40">Type password</button>
+            <button onClick={() => void sendString(osUser)} disabled={!osUser} className="btn-ghost text-xs disabled:opacity-40">Type username</button>
+            <button onClick={() => void sendString(osPass)} disabled={!osPass} className="btn-ghost text-xs disabled:opacity-40">Type password</button>
             <button
-              onClick={() => { sendString(osUser); sendKeysym(XK_TAB); sendString(osPass); sendKeysym(XK_RETURN); }}
+              onClick={async () => { await sendString(osUser); sendKeysym(XK_TAB); await sendString(osPass); sendKeysym(XK_RETURN); }}
               disabled={!osPass}
               className="btn-primary text-xs"
             >
