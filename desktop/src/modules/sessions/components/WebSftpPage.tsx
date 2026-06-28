@@ -217,7 +217,7 @@ export function WebSftpPage({ hostId: hostIdProp }: { hostId?: string } = {}) {
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-elevated/40">
+      <div className="flex items-center gap-1.5 md:gap-2 px-2 md:px-4 py-2 border-b border-border bg-bg-elevated/40 flex-wrap">
         <button onClick={() => navigate(-1)} className="btn-ghost text-xs"><ArrowLeft className="size-3.5" /></button>
         <button onClick={() => sessionId && listDir(sessionId, "/")} className="btn-ghost text-xs" title="Root"><Home className="size-3.5" /></button>
         <button onClick={() => sessionId && listDir(sessionId, parentOf(cwd))} className="btn-ghost text-xs" disabled={cwd === "/"}>Up</button>

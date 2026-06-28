@@ -216,7 +216,7 @@ export function VncPage() {
 
   return (
     <div className="relative flex flex-col h-full bg-[#0b0e14]">
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-elevated/40">
+      <div className="flex items-center gap-1.5 md:gap-2 px-2 md:px-4 py-2 border-b border-border bg-bg-elevated/40 flex-wrap">
         <button onClick={() => navigate(-1)} className="btn-ghost text-xs"><ArrowLeft className="size-3.5" /></button>
         <span className="text-sm font-medium">{hostName || "VNC"}</span>
         <span className="text-xs text-fg-muted">remote desktop</span>
@@ -261,7 +261,7 @@ export function VncPage() {
 
       {/* Auto-type panel: inject the guest OS login without typing on screen */}
       {showInject && phase === "connected" && (
-        <div className="absolute right-4 top-12 z-20 card p-4 w-72 space-y-3 shadow-xl">
+        <div className="absolute right-2 md:right-4 top-14 z-20 card p-4 w-72 max-w-[calc(100vw-1rem)] space-y-3 shadow-xl">
           <div className="flex items-center gap-2">
             <Keyboard className="size-4 text-accent" />
             <span className="text-sm font-medium">Type login into desktop</span>
@@ -296,7 +296,7 @@ export function VncPage() {
 
       {/* Clipboard panel: copy/paste between host and the remote desktop */}
       {showClip && phase === "connected" && (
-        <div className="absolute right-4 top-12 z-20 card p-4 w-80 space-y-3 shadow-xl">
+        <div className="absolute right-2 md:right-4 top-14 z-20 card p-4 w-80 max-w-[calc(100vw-1rem)] space-y-3 shadow-xl">
           <div className="flex items-center gap-2">
             <ClipboardIcon className="size-4 text-accent" />
             <span className="text-sm font-medium">Clipboard</span>

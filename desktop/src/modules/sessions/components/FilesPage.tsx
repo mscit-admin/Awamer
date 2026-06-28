@@ -47,9 +47,9 @@ export function FilesPage() {
   }
 
   return (
-    <div className="h-full grid grid-cols-[260px_1fr]">
-      {/* Asset list */}
-      <aside className="border-r border-border flex flex-col bg-bg-surface min-h-0">
+    <div className="h-full flex flex-col md:grid md:grid-cols-[260px_1fr]">
+      {/* Asset list — top strip on mobile, side column on md+ */}
+      <aside className="border-b md:border-b-0 md:border-r border-border flex flex-col bg-bg-surface min-h-0 max-h-48 md:max-h-none">
         <div className="px-3 py-3 border-b border-border">
           <div className="flex items-center gap-2 mb-2">
             <FolderTree className="size-4 text-accent" />
@@ -93,7 +93,7 @@ export function FilesPage() {
       </aside>
 
       {/* Browser */}
-      <main className="min-h-0">
+      <main className="flex-1 min-h-0">
         {selected ? (
           <WebSftpPage key={selected} hostId={selected} />
         ) : (

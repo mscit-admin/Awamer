@@ -93,8 +93,8 @@ export function HostsPage() {
 
   return (
     <div className="flex h-full">
-      {/* Sidebar: folders + tags filter */}
-      <aside className="w-56 border-r border-border bg-bg-elevated/40 p-3 overflow-y-auto">
+      {/* Sidebar: folders + tags filter (hidden on small screens) */}
+      <aside className="hidden md:block w-56 border-r border-border bg-bg-elevated/40 p-3 overflow-y-auto">
         <FilterButton
           active={selectedFolder === null && !favoritesOnly}
           onClick={() => { setSelectedFolder(null); setFavoritesOnly(false); }}
@@ -148,8 +148,8 @@ export function HostsPage() {
 
       {/* Main: list */}
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="px-6 py-4 border-b border-border flex items-center gap-3">
-          <div className="flex-1 relative">
+        <header className="px-4 md:px-6 py-3 md:py-4 border-b border-border flex items-center gap-2 md:gap-3 flex-wrap">
+          <div className="flex-1 min-w-[140px] relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-fg-muted" />
             <input
               type="search"

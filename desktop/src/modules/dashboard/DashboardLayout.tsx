@@ -13,7 +13,10 @@ import {
   Shield,
   Activity,
   Users,
+  Menu,
+  X,
 } from "lucide-react";
+import { useState } from "react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { roleCan } from "@/shared/lib/permissions";
@@ -55,6 +58,7 @@ export function DashboardLayout() {
   const logout = useAuthStore((s) => s.logout);
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const canAudit = roleCan(user?.role, "audit:read");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   async function handleLogout() {
     await logout();
@@ -62,11 +66,22 @@ export function DashboardLayout() {
   }
 
   return (
-    <div className="h-full grid grid-cols-[220px_1fr] bg-bg">
-      {/* Sidebar */}
-      <aside className="border-r border-border flex flex-col bg-bg-surface">
-        <div className="px-4 py-4 border-b border-border">
-          <Link to="/" className="flex items-center gap-2">
+    <div className="h-full flex md:grid md:grid-cols-[220px_1fr] bg-bg">
+      {/* Backdrop (mobile only, when drawer is open) */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* Sidebar — drawer on mobile, fixed column on md+ */}
+      <aside
+        className={cn(
+          "fixed md:static inset-y-0 left-0 z-40 w-[220px] h-full border-r border-border flex flex-col bg-bg-surface",
+          "transition-transform md:translate-x-0",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
+        <div className="px-4 py-4 border-b border-border flex items-center justify-between">
+          <Link to="/" onClick={() => setSidebarOpen(false)} className="flex items-center gap-2">
             <div className="size-7 rounded bg-bg-elevated border border-border-strong grid place-items-center">
               <svg viewBox="0 0 24 24" fill="none" className="size-4">
                 <path
@@ -80,9 +95,12 @@ export function DashboardLayout() {
             </div>
             <div className="font-display font-semibold text-sm">NetSphere</div>
           </Link>
+          <button onClick={() => setSidebarOpen(false)} className="btn-ghost md:hidden -mr-2" aria-label="Close menu">
+            <X className="size-4" />
+          </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
+        <nav onClick={() => setSidebarOpen(false)} className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
           <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 font-mono">
             Workspace
           </div>
@@ -132,10 +150,19 @@ export function DashboardLayout() {
         </div>
       </aside>
 
-      {/* Main */}
-      <main className="overflow-y-auto">
-        <Outlet />
-      </main>
+      {/* Main column */}
+      <div className="flex-1 min-w-0 flex flex-col h-full">
+        {/* Mobile top bar with hamburger */}
+        <div className="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-surface">
+          <button onClick={() => setSidebarOpen(true)} className="btn-ghost" aria-label="Open menu">
+            <Menu className="size-5" />
+          </button>
+          <span className="font-display font-semibold text-sm">NetSphere</span>
+        </div>
+        <main className="flex-1 min-h-0 overflow-y-auto">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
