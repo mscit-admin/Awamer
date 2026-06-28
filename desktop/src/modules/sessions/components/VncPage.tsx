@@ -48,6 +48,24 @@ export function VncPage() {
   const [osUser, setOsUser] = useState("");
   const [osPass, setOsPass] = useState("");
 
+  // Display sizing mode.
+  type DisplayMode = "fit" | "actual" | "resize";
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("fit");
+
+  function applyDisplay(rfb: RFB | null, mode: DisplayMode) {
+    if (!rfb) return;
+    if (mode === "fit") {
+      // Scale the remote framebuffer to fit the window (may look soft on low-res).
+      rfb.scaleViewport = true; rfb.resizeSession = false; rfb.clipViewport = false;
+    } else if (mode === "actual") {
+      // 1:1 pixels with scrollbars.
+      rfb.scaleViewport = false; rfb.resizeSession = false; rfb.clipViewport = true;
+    } else {
+      // Ask the server to match the window size (crispest; needs server support).
+      rfb.resizeSession = true; rfb.scaleViewport = true; rfb.clipViewport = false;
+    }
+  }
+
   // Load host name + (optionally) the stored VNC username/password.
   const prefillRef = useRef<string | undefined>(undefined);
   const prefillUserRef = useRef<string | undefined>(undefined);
@@ -90,11 +108,11 @@ export function VncPage() {
       setError(e instanceof Error ? e.message : "failed to start VNC");
       return;
     }
-    rfb.scaleViewport = true;
     rfb.background = "#0b0e14";
+    applyDisplay(rfb, displayMode);
     rfbRef.current = rfb;
 
-    const onConnect = () => setPhase("connected");
+    const onConnect = () => { setPhase("connected"); applyDisplay(rfb, displayMode); };
     const onDisconnect = (e: any) => {
       if (phase === "connected") {
         setPhase("error");
@@ -188,6 +206,17 @@ export function VncPage() {
         <span className="text-sm font-medium">{hostName || "VNC"}</span>
         <span className="text-xs text-fg-muted">remote desktop</span>
         <div className="flex-1" />
+        <select
+          value={displayMode}
+          onChange={(e) => { const m = e.target.value as DisplayMode; setDisplayMode(m); applyDisplay(rfbRef.current, m); }}
+          disabled={phase !== "connected"}
+          className="input text-xs py-1 disabled:opacity-40"
+          title="Display sizing"
+        >
+          <option value="fit">Fit to screen</option>
+          <option value="actual">Actual size (1:1)</option>
+          <option value="resize">Resize remote</option>
+        </select>
         <button
           onClick={() => {
             if (!showInject) { setOsUser(prefillUserRef.current ?? ""); setOsPass(prefillRef.current ?? ""); }
