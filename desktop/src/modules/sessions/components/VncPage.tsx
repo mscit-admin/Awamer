@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, AlertCircle, Lock, Power, Maximize2, Keyboard } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, Lock, Power, Maximize2, Keyboard, Clipboard as ClipboardIcon } from "lucide-react";
 import RFB from "@novnc/novnc";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
@@ -47,6 +47,10 @@ export function VncPage() {
   const [showInject, setShowInject] = useState(false);
   const [osUser, setOsUser] = useState("");
   const [osPass, setOsPass] = useState("");
+
+  // Clipboard panel.
+  const [showClip, setShowClip] = useState(false);
+  const [clipText, setClipText] = useState("");
 
   // Display sizing mode.
   type DisplayMode = "fit" | "actual" | "resize";
@@ -128,17 +132,28 @@ export function VncPage() {
       setPhase("need_password");
     };
     const onSecurityFailure = (e: any) => { setPhase("error"); setError(e?.detail?.reason || "VNC authentication failed"); };
+    // Remote → host: when the remote clipboard changes, mirror it into the
+    // panel and (best-effort) the host clipboard.
+    const onClipboard = (e: any) => {
+      const text = e?.detail?.text;
+      if (typeof text === "string") {
+        setClipText(text);
+        navigator.clipboard?.writeText(text).catch(() => {});
+      }
+    };
 
     rfb.addEventListener("connect", onConnect);
     rfb.addEventListener("disconnect", onDisconnect);
     rfb.addEventListener("credentialsrequired", onCredentials);
     rfb.addEventListener("securityfailure", onSecurityFailure);
+    rfb.addEventListener("clipboard", onClipboard);
 
     return () => {
       rfb.removeEventListener("connect", onConnect);
       rfb.removeEventListener("disconnect", onDisconnect);
       rfb.removeEventListener("credentialsrequired", onCredentials);
       rfb.removeEventListener("securityfailure", onSecurityFailure);
+      rfb.removeEventListener("clipboard", onClipboard);
       try { rfb.disconnect(); } catch { /* ignore */ }
       rfbRef.current = null;
     };
@@ -210,12 +225,12 @@ export function VncPage() {
           value={displayMode}
           onChange={(e) => { const m = e.target.value as DisplayMode; setDisplayMode(m); applyDisplay(rfbRef.current, m); }}
           disabled={phase !== "connected"}
-          className="input text-xs py-1 disabled:opacity-40"
+          className="bg-bg-elevated border border-border rounded text-xs py-1 pl-1.5 pr-1 w-24 disabled:opacity-40"
           title="Display sizing"
         >
-          <option value="fit">Fit to screen</option>
-          <option value="actual">Actual size (1:1)</option>
-          <option value="resize">Resize remote</option>
+          <option value="fit">Fit</option>
+          <option value="actual">1:1</option>
+          <option value="resize">Resize</option>
         </select>
         <button
           onClick={() => {
@@ -227,6 +242,14 @@ export function VncPage() {
           title="Type login credentials into the remote screen"
         >
           <Keyboard className="size-3.5" /> Send login
+        </button>
+        <button
+          onClick={() => { setShowClip((v) => !v); setShowInject(false); }}
+          disabled={phase !== "connected"}
+          className="btn-ghost text-xs disabled:opacity-40"
+          title="Copy / paste"
+        >
+          <ClipboardIcon className="size-3.5" /> Clipboard
         </button>
         <button onClick={() => rfbRef.current?.sendCtrlAltDel()} disabled={phase !== "connected"} className="btn-ghost text-xs disabled:opacity-40">
           Ctrl+Alt+Del
@@ -267,6 +290,60 @@ export function VncPage() {
               Username ⇥ Password ⏎
             </button>
             <button onClick={() => sendKeysym(XK_RETURN)} className="btn-ghost text-xs">Enter</button>
+          </div>
+        </div>
+      )}
+
+      {/* Clipboard panel: copy/paste between host and the remote desktop */}
+      {showClip && phase === "connected" && (
+        <div className="absolute right-4 top-12 z-20 card p-4 w-80 space-y-3 shadow-xl">
+          <div className="flex items-center gap-2">
+            <ClipboardIcon className="size-4 text-accent" />
+            <span className="text-sm font-medium">Clipboard</span>
+          </div>
+          <p className="text-2xs text-fg-muted leading-relaxed">
+            Text copied on the remote desktop appears here. To paste a command,
+            put it below then either send it to the remote clipboard or type it
+            into the focused window.
+          </p>
+          <textarea
+            value={clipText}
+            onChange={(e) => setClipText(e.target.value)}
+            rows={4}
+            placeholder="Paste or type text…"
+            className="input w-full text-xs font-mono resize-y"
+          />
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={async () => { try { setClipText(await navigator.clipboard.readText()); } catch { /* denied */ } }}
+              className="btn-ghost text-xs"
+            >
+              From my device
+            </button>
+            <button
+              onClick={() => rfbRef.current?.clipboardPasteFrom(clipText)}
+              disabled={!clipText}
+              className="btn-ghost text-xs disabled:opacity-40"
+              title="Send to the remote clipboard (then paste on the desktop)"
+            >
+              → Remote clipboard
+            </button>
+            <button
+              onClick={() => void sendString(clipText)}
+              disabled={!clipText}
+              className="btn-primary text-xs disabled:opacity-40"
+              title="Type the text into the focused remote window"
+            >
+              Type into screen
+            </button>
+            <button
+              onClick={() => { navigator.clipboard?.writeText(clipText).catch(() => {}); }}
+              disabled={!clipText}
+              className="btn-ghost text-xs disabled:opacity-40"
+              title="Copy to my device clipboard"
+            >
+              Copy here
+            </button>
           </div>
         </div>
       )}

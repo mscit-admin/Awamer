@@ -19,6 +19,7 @@ declare module "@novnc/novnc" {
     disconnect(): void;
     sendCredentials(creds: { username?: string; password?: string; target?: string }): void;
     sendCtrlAltDel(): void;
+    clipboardPasteFrom(text: string): void;
     sendKey(keysym: number, code: string, down?: boolean): void;
     focus(): void;
     blur(): void;
