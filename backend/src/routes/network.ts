@@ -27,6 +27,85 @@ const hostSchema = z.string().min(1).max(253).regex(HOST_RE, "invalid host");
 
 const MAX_OUTPUT = 64 * 1024;
 
+// ----- LAN discovery helpers ----------------------------------------
+const DEFAULT_SCAN_PORTS = [22, 80, 443, 445, 3389, 5900, 8080];
+const MAX_SCAN_HOSTS = 256;
+
+function ipToInt(ip: string): number | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip);
+  if (!m) return null;
+  const o = m.slice(1).map(Number);
+  if (o.some((n) => n > 255)) return null;
+  return ((o[0]! << 24) | (o[1]! << 16) | (o[2]! << 8) | o[3]!) >>> 0;
+}
+function intToIp(n: number): string {
+  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+}
+
+/** Expand an IPv4 CIDR (prefix ≥ /24) into its usable host addresses. */
+function expandCidr(cidr: string): string[] | { error: string } {
+  const m = /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/.exec(cidr.trim());
+  if (!m) return { error: "use CIDR notation, e.g. 192.168.1.0/24" };
+  const base = ipToInt(m[1]!);
+  const prefix = Number(m[2]);
+  if (base === null || prefix < 24 || prefix > 32) {
+    return { error: "prefix must be between /24 and /32" };
+  }
+  const size = 2 ** (32 - prefix);
+  if (size > MAX_SCAN_HOSTS) return { error: "range too large (max /24 = 256 addresses)" };
+  const network = base & (size === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0);
+  const ips: string[] = [];
+  for (let i = 0; i < size; i++) {
+    // Skip network & broadcast for /24..../30; keep both for /31,/32.
+    if (size >= 4 && (i === 0 || i === size - 1)) continue;
+    ips.push(intToIp((network + i) >>> 0));
+  }
+  return ips;
+}
+
+/** Probe one host across a few TCP ports; "up" if anything responds. */
+async function probeHost(ip: string, ports: number[], timeoutMs: number): Promise<{ ip: string; open: number[]; up: boolean; hostname: string | null } | null> {
+  let up = false;
+  const open: number[] = [];
+  await Promise.all(
+    ports.map(
+      (port) =>
+        new Promise<void>((resolve) => {
+          const sock = new net.Socket();
+          let done = false;
+          const fin = () => { if (done) return; done = true; sock.destroy(); resolve(); };
+          sock.setTimeout(timeoutMs);
+          sock.once("connect", () => { up = true; open.push(port); fin(); });
+          sock.once("timeout", fin);
+          sock.once("error", (e: NodeJS.ErrnoException) => {
+            // A refusal/reset means the host is alive (port just closed).
+            if (e.code === "ECONNREFUSED" || e.code === "ECONNRESET") up = true;
+            fin();
+          });
+          sock.connect(port, ip);
+        }),
+    ),
+  );
+  if (!up) return null;
+  let hostname: string | null = null;
+  try { const names = await dns.reverse(ip); hostname = names[0] ?? null; } catch { /* none */ }
+  return { ip, open: open.sort((a, b) => a - b), up, hostname };
+}
+
+/** Run probes with a bounded concurrency pool. */
+async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx]!);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 /** Run a binary with arg array (no shell), bounded by time and output size. */
 function runCommand(cmd: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; output: string; error?: string }> {
   return new Promise((resolve) => {
@@ -129,6 +208,23 @@ export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
         socket.connect(port, host);
       });
       return reply.send(result);
+    });
+
+    // ---- LAN device discovery (scan a /24..../32) --------------------
+    app.post("/scan", async (req, reply) => {
+      const parsed = z.object({
+        cidr: z.string().min(1).max(64),
+        ports: z.array(z.number().int().min(1).max(65535)).max(12).optional(),
+      }).safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
+
+      const ips = expandCidr(parsed.data.cidr);
+      if (!Array.isArray(ips)) return reply.code(400).send({ error: { code: "invalid_cidr", message: ips.error } });
+
+      const ports = parsed.data.ports?.length ? parsed.data.ports : DEFAULT_SCAN_PORTS;
+      const results = await pool(ips, 48, (ip) => probeHost(ip, ports, 700));
+      const devices = results.filter(Boolean);
+      return reply.send({ scanned: ips.length, found: devices.length, ports, devices });
     });
   };
 }

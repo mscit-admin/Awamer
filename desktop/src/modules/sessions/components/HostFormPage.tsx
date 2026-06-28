@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";
 import {
   hostsApi, foldersApi, tagsApi, credentialsApi,
@@ -18,12 +18,15 @@ const DEFAULT_PORTS: Record<HostProtocol, number> = {
 export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
   const navigate = useNavigate();
   const params = useParams<{ id: string }>();
+  const location = useLocation();
   const isEdit = mode === "edit";
+  // Prefill from "Add as asset" (network discovery).
+  const prefill = (location.state as { prefill?: { name?: string; hostname?: string; protocol?: HostProtocol; port?: number } } | null)?.prefill;
 
-  const [name, setName] = useState("");
-  const [hostname, setHostname] = useState("");
-  const [port, setPort] = useState<number | "">("");
-  const [protocol, setProtocol] = useState<HostProtocol>("ssh");
+  const [name, setName] = useState(prefill?.name ?? "");
+  const [hostname, setHostname] = useState(prefill?.hostname ?? "");
+  const [port, setPort] = useState<number | "">(prefill?.port ?? "");
+  const [protocol, setProtocol] = useState<HostProtocol>(prefill?.protocol ?? "ssh");
   const [folderId, setFolderId] = useState<string>("");
   const [credentialId, setCredentialId] = useState<string>("");
   const [description, setDescription] = useState("");
