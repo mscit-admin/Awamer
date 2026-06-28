@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.22.0] — 2026-06-28 — Backup & Restore
+
+### Added
+- **Backup & Restore screen.** Export your own hosts, credentials, folders and
+  tags — with folder hierarchy, host→folder/credential links and tag
+  assignments preserved — to a portable file, and restore them later.
+  - `POST /api/v1/backup/export` — self-scoped; optional **"include credential
+    secrets"**. When secrets are included the whole file is **encrypted with a
+    user-chosen passphrase** (scrypt + AES-256-GCM) and `credentials:reveal` is
+    required; otherwise it's metadata-only plaintext.
+  - `POST /api/v1/backup/import` — requires `resources:write`. Decrypts if
+    needed, then restores **additively** (never deletes/overwrites): on a name
+    clash either **merge** (rename incoming `… (restored)`) or **skip** (link
+    to the existing item). IDs are remapped so relationships survive; runs in a
+    transaction with per-row SAVEPOINTs.
+  - `BackupRepository` (owner-scoped export/import) + `backupCrypto`
+    (passphrase KDF + authenticated encryption).
+  - frontend **Backup & Restore** page (sidebar): export options + passphrase,
+    file picker with encrypted-file detection, conflict mode, and a restore
+    summary (added/skipped per type).
+  - verified end-to-end against PostgreSQL 16: export with/without secrets,
+    encryption round-trip + wrong-passphrase rejection, import preserving
+    folder hierarchy/credential secrets/tags, merge-suffix, and skip.
+
+---
+
 ## [1.21.2] — 2026-06-28 — Export users to a file
 
 ### Added

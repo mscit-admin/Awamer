@@ -31,6 +31,7 @@ import { VncPage } from "@/modules/sessions/components/VncPage";
 import { FilesPage } from "@/modules/sessions/components/FilesPage";
 import { NetworkPage } from "@/modules/sessions/components/NetworkPage";
 import { TunnelsPage } from "@/modules/sessions/components/TunnelsPage";
+import { BackupPage } from "@/modules/sessions/components/BackupPage";
 import { isTauri } from "@/shared/lib/tauri";
 
 export default function App() {
@@ -69,6 +70,7 @@ export default function App() {
         <Route path="/files" element={<FilesPage />} />
         <Route path="/network" element={<NetworkPage />} />
         <Route path="/tunnels" element={<TunnelsPage />} />
+        <Route path="/backup" element={<BackupPage />} />
         <Route path="/credentials" element={<CredentialsPage />} />
         <Route path="/tags" element={<TagsPage />} />
         <Route path="/folders" element={<FoldersPage />} />

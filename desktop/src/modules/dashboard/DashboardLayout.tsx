@@ -11,6 +11,7 @@ import {
   FolderTree,
   Network,
   Cable,
+  DatabaseBackup,
   Shield,
   Activity,
   Users,
@@ -49,6 +50,7 @@ const PRIMARY_NAV: NavItem[] = [
 ];
 
 const SECONDARY_NAV: NavItem[] = [
+  { to: "/backup", label: "Backup & Restore", icon: <DatabaseBackup className="size-4" />, available: true },
   { to: "/settings", label: "Settings", icon: <Settings className="size-4" />, available: true },
   { to: "/settings/security/mfa", label: "Security", icon: <Shield className="size-4" />, available: true },
 ];
