@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.16.0] — 2026-06-28 — Audit log viewer
+
+### Added
+- **Audit log page** (`/audit`) — a read-only, filterable view of recorded
+  security and resource events (login success/failure, MFA, user/host/
+  credential create/update/delete, token reuse, etc.) with timestamp,
+  user, action, resource, IP, and outcome; paginated.
+  - backend: `GET /api/v1/audit` gated by the `audit:read` permission
+    (admin / auditor), `AuditRepository.list` with action/outcome/user
+    filters + a users join for usernames.
+  - widened the audited-action allow-list so host/folder/tag mutations are
+    recorded with their real action (were collapsing to `config_change`).
+  - sidebar: **Audit** moves out of "Coming soon" into Administration,
+    visible to anyone with `audit:read` (so auditors see it too).
+  - verified end-to-end: admin reads & filters the log, a read-only user
+    is 403, and failed logins are recorded as `login_failed`.
+
+---
+
 ## [1.15.0] — 2026-06-28 — Per-user host sharing
 
 ### Added

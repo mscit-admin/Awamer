@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { roleCan } from "@/shared/lib/permissions";
 import { cn } from "@/shared/lib/cn";
 
 interface NavItem {
@@ -38,7 +39,6 @@ const PRIMARY_NAV: NavItem[] = [
 const COMING_NAV: NavItem[] = [
   { to: "/files", label: "Files", icon: <FolderTree className="size-4" /> },
   { to: "/network", label: "Network", icon: <Network className="size-4" /> },
-  { to: "/audit", label: "Audit", icon: <Activity className="size-4" /> },
 ];
 
 const SECONDARY_NAV: NavItem[] = [
@@ -56,6 +56,8 @@ export function DashboardLayout() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const canAudit = roleCan(user?.role, "audit:read");
 
   async function handleLogout() {
     await logout();
@@ -98,14 +100,17 @@ export function DashboardLayout() {
             <NavItemLink key={item.to} item={item} />
           ))}
 
-          {(user?.role === "admin" || user?.role === "super_admin") && (
+          {(isAdmin || canAudit) && (
             <>
               <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 mt-4 font-mono">
                 Administration
               </div>
-              {ADMIN_NAV.map((item) => (
+              {isAdmin && ADMIN_NAV.map((item) => (
                 <NavItemLink key={item.to} item={item} />
               ))}
+              {canAudit && (
+                <NavItemLink item={{ to: "/audit", label: "Audit", icon: <Activity className="size-4" />, available: true }} />
+              )}
             </>
           )}
 
