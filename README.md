@@ -217,10 +217,12 @@ Open `http://localhost:1420`. Login works; the catch is that token persistence a
 | **SSH terminal (password + key + agent, TOFU, multi-tab)** | ✅ Phase 3 |
 | **SFTP browser (browse, download, upload, rename, delete, mkdir, edit)** | ✅ Phase 4 |
 | **SFTP chmod, recursive folder download, filter & sort** | ✅ Phase 4 (1.7.0) |
-| Self-service password change | ❌ Phase 2.x |
-| SSH tunnels / port forwarding | ❌ Phase 5 |
-| RDP / VNC | ❌ Phase 6 |
+| **Self-service password change** | ✅ Phase 2.x (1.10.0) |
+| **SSH tunnels / port forwarding (local `ssh -L` + WebSocket TCP tunnel)** | ✅ Phase 5 (1.21.0) |
+| **VNC remote desktop** | ✅ Phase 6 (1.18.0) |
+| RDP | ❌ Phase 6 |
 | Serial | ❌ Phase 7 |
+| Telnet | ❌ |
 | **Encrypted credential secrets at rest (AES-256-GCM)** | ✅ Phase 10 |
 | Vault unlock / KMS-backed master key | ❌ Phase 10.x |
 

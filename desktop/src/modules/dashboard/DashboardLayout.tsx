@@ -10,6 +10,7 @@ import {
   Terminal as TerminalIcon,
   FolderTree,
   Network,
+  Cable,
   Shield,
   Activity,
   Users,
@@ -42,6 +43,7 @@ const PRIMARY_NAV: NavItem[] = [
   { to: "/credentials", label: "Credentials", icon: <KeyRound className="size-4" />, available: true },
   { to: "/files", label: "Files", icon: <FolderTree className="size-4" />, available: true },
   { to: "/network", label: "Network", icon: <Network className="size-4" />, available: true },
+  { to: "/tunnels", label: "Tunnels", icon: <Cable className="size-4" />, available: true },
   { to: "/folders", label: "Folders", icon: <Folder className="size-4" />, available: true },
   { to: "/tags", label: "Tags", icon: <Tag className="size-4" />, available: true },
 ];

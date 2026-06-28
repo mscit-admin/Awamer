@@ -31,6 +31,7 @@ import type {
   CredentialRepository,
   ConnectionHistoryRepository,
 } from "../repos/sessionRepos.js";
+import { resolveSshConnection, SshResolveError, type SshAuth } from "./resolveAuth.js";
 
 export interface SshGatewayDeps {
   jwt: JwtService;
@@ -80,44 +81,20 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         return fail("invalid_token", "token is invalid or expired");
       }
 
-      // 2. Resolve host + auth material (user-scoped).
+      // 2. Resolve host + auth material (user-scoped) via the shared resolver.
       let host: Awaited<ReturnType<HostRepository["getById"]>>;
+      let username: string;
+      let auth: SshAuth;
       try {
-        host = await deps.hosts.getById(userId, hostId);
-      } catch {
-        return fail("host_not_found", "host not found");
-      }
-
-      let username = "root";
-      let auth: { password: string } | { privateKey: string; passphrase?: string } | null = null;
-
-      try {
-        if (password_override) {
-          if (host.credentialId) {
-            const c = await deps.credentials.getById(host.userId, host.credentialId);
-            username = c.username || "root";
-          }
-          auth = { password: password_override };
-        } else if (host.credentialId) {
-          const cred = await deps.credentials.getById(host.userId, host.credentialId);
-          username = cred.username || "root";
-          const secret = cred.secretData ?? {};
-          if (cred.credentialType === "password") {
-            const pw = secret["password"];
-            if (typeof pw !== "string") return fail("no_credential", "credential has no password");
-            auth = { password: pw };
-          } else if (cred.credentialType === "private_key") {
-            const pem = secret["private_key"];
-            if (typeof pem !== "string") return fail("no_credential", "credential has no private_key");
-            const pp = passphrase_override ?? (typeof secret["passphrase"] === "string" ? (secret["passphrase"] as string) : undefined);
-            auth = { privateKey: pem, ...(pp ? { passphrase: pp } : {}) };
-          } else {
-            return fail("unsupported_credential", `credential type ${cred.credentialType} is not supported for SSH`);
-          }
-        } else {
-          return fail("no_credential", "host has no credential and no password was provided");
-        }
+        const resolved = await resolveSshConnection(deps, userId, hostId, {
+          password: password_override,
+          passphrase: passphrase_override,
+        });
+        host = resolved.host;
+        username = resolved.username;
+        auth = resolved.auth;
       } catch (e) {
+        if (e instanceof SshResolveError) return fail(e.code, e.message);
         deps.log.warn({ err: e }, "ssh gateway: credential resolution failed");
         return fail("credential_error", "could not resolve credentials");
       }

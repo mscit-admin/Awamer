@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.21.0] — 2026-06-28 — SSH port forwarding (Phase 5)
+
+### Added
+- **SSH tunnels — server-managed local forwarding (`ssh -L`).** The backend
+  holds an SSH connection to a host and listens on a local TCP port; every
+  inbound connection is forwarded through the host to a destination reachable
+  from it (e.g. an internal database or web UI behind a bastion).
+  - `TunnelManager` (in-memory, one `ssh2` client + `net.Server` per tunnel)
+    with live stats (connections, active, bytes in/out) and graceful shutdown.
+  - `GET/POST/DELETE /api/v1/tunnels` — self-scoped to the caller, gated by
+    `sessions:connect`. Listener binds to **127.0.0.1 by default**; binding to
+    all interfaces (`0.0.0.0`) is **admin-only**. Port range 1024–65535;
+    per-user cap; duplicate-port and bind-error handling.
+  - frontend **Tunnels** page (sidebar): create form (via-host, listen port,
+    destination host/port, admin-only public toggle) + live table with
+    status/traffic and stop, polled every few seconds.
+  - verified end-to-end against a real in-process SSH server: forward
+    round-trip, byte accounting, per-user isolation, duplicate-port rejection,
+    and port release on stop.
+- **Per-user WebSocket TCP tunnel** (`/api/v1/tunnel/connect`) — a
+  JWT-authenticated browser-native relay of a raw TCP stream to a destination
+  through an SSH host (same mechanism as the SSH/VNC gateways), so no
+  unauthenticated listening port is ever exposed.
+
+### Changed
+- Extracted the host + credential resolution shared by the SSH gateway, tunnel
+  manager, and WS tunnel into `ssh/resolveAuth.ts` (`resolveSshConnection`);
+  the SSH gateway now uses it (behavior unchanged, all 23 tests pass).
+- Refreshed the README roadmap table to match what has actually shipped.
+
+---
+
 ## [1.20.1] — 2026-06-28 — Fix stale credential-storage warning
 
 ### Fixed

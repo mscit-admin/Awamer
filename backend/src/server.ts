@@ -39,6 +39,9 @@ import { CommandHistoryRepository } from "./repos/commandHistoryRepo.js";
 import { makeSshGateway } from "./ssh/gateway.js";
 import { makeSftpGateway } from "./ssh/sftpGateway.js";
 import { makeVncGateway } from "./vnc/gateway.js";
+import { TunnelManager } from "./ssh/tunnelManager.js";
+import { makeTunnelRoutes } from "./routes/tunnels.js";
+import { makeWsTunnelGateway } from "./ssh/wsTunnelGateway.js";
 
 async function main() {
   const cfg = loadConfig();
@@ -64,6 +67,8 @@ async function main() {
   const history = new ConnectionHistoryRepository(pool);
   const commands = new CommandHistoryRepository(pool);
   const appSettings = new AppSettingsRepository(pool);
+  // Phase 5 — server-managed SSH local tunnels (in-memory).
+  const tunnels = new TunnelManager({ hosts, credentials, log });
 
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
@@ -125,10 +130,15 @@ async function main() {
   await app.register(makeSftpGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/sftp" });
   // Phase 6 — browser VNC gateway (WebSocket byte relay).
   await app.register(makeVncGateway({ jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
+  // Phase 5 — SSH port forwarding: server-managed local tunnels (REST) and a
+  // per-user WebSocket TCP tunnel.
+  await app.register(makeTunnelRoutes({ tunnels, jwt }), { prefix: "/api/v1/tunnels" });
+  await app.register(makeWsTunnelGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/tunnel" });
 
   const closeOn = (sig: NodeJS.Signals) => async () => {
     log.info({ sig }, "shutdown signal received");
     try {
+      tunnels.stopAll();
       await app.close();
       await pool.end();
       log.info("clean shutdown complete");

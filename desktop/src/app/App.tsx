@@ -30,6 +30,7 @@ import { WebSftpPage } from "@/modules/sessions/components/WebSftpPage";
 import { VncPage } from "@/modules/sessions/components/VncPage";
 import { FilesPage } from "@/modules/sessions/components/FilesPage";
 import { NetworkPage } from "@/modules/sessions/components/NetworkPage";
+import { TunnelsPage } from "@/modules/sessions/components/TunnelsPage";
 import { isTauri } from "@/shared/lib/tauri";
 
 export default function App() {
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="/terminal" element={<TerminalWorkspace />} />
         <Route path="/files" element={<FilesPage />} />
         <Route path="/network" element={<NetworkPage />} />
+        <Route path="/tunnels" element={<TunnelsPage />} />
         <Route path="/credentials" element={<CredentialsPage />} />
         <Route path="/tags" element={<TagsPage />} />
         <Route path="/folders" element={<FoldersPage />} />
