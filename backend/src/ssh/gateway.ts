@@ -24,6 +24,7 @@
 import { Client } from "ssh2";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
+import { can } from "../domain/permissions.js";
 import type { Logger } from "../logger/index.js";
 import type {
   HostRepository,
@@ -67,11 +68,14 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         return fail("bad_request", "token and host_id are required");
       }
 
-      // 1. Authenticate.
+      // 1. Authenticate + authorize.
       let userId: string;
       try {
         const claims = await deps.jwt.verifyAccess(token);
         userId = claims.sub;
+        if (!can(claims.role, "sessions:connect")) {
+          return fail("forbidden", "your role cannot open sessions");
+        }
       } catch {
         return fail("invalid_token", "token is invalid or expired");
       }

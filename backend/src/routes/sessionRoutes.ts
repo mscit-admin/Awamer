@@ -10,7 +10,7 @@ import {
 } from "../domain/session.js";
 import { DomainError } from "../domain/index.js";
 import type { AuditRepository } from "../repos/otherRepos.js";
-import { makeAuthMiddleware } from "../middleware/auth.js";
+import { makeAuthMiddleware, requireWrite } from "../middleware/auth.js";
 import type { JwtService } from "../jwt/index.js";
 
 const protocolEnum = z.enum(HOST_PROTOCOLS as unknown as [string, ...string[]]);
@@ -49,6 +49,7 @@ interface HostDeps {
 export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", requireWrite());
 
     // --- List ----------------------------------------------------------
     const listQuery = z.object({

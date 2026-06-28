@@ -11,6 +11,7 @@ import {
   type Host, type CredentialPublic, type ConnectionHistoryEntry,
   type HostProtocol,
 } from "../api/sessionsApi";
+import { useCan } from "@/shared/lib/permissions";
 
 const PROTOCOL_ICONS: Record<HostProtocol, string> = {
   ssh: "🔒", sftp: "📁", rdp: "🖥️", vnc: "📺",
@@ -28,6 +29,9 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function HostDetailPage() {
   const navigate = useNavigate();
+  const canWrite = useCan("resources:write");
+  const canConnect = useCan("sessions:connect");
+  const canReveal = useCan("credentials:reveal");
   const params = useParams<{ id: string }>();
   const [host, setHost] = useState<Host | null>(null);
   const [credential, setCredential] = useState<CredentialPublic | null>(null);
@@ -146,6 +150,7 @@ export function HostDetailPage() {
             <div className="text-sm text-fg-muted mt-1">{host.description}</div>
           )}
         </div>
+        {canWrite && (
         <div className="flex gap-2">
           <button onClick={toggleFavorite} className="btn-ghost" title="Toggle favorite">
             <Star className={"size-4 " + (host.is_favorite ? "text-yellow-400 fill-yellow-400" : "")} />
@@ -157,9 +162,11 @@ export function HostDetailPage() {
             <Trash2 className="size-4" /> Delete
           </button>
         </div>
+        )}
       </div>
 
       {/* Connect / SFTP buttons — Phase 3 + 4 */}
+      {canConnect && (
       <div className="card p-4 mb-6 flex items-center gap-3">
         <div className="size-9 rounded bg-accent/10 grid place-items-center">
           <Play className="size-4 text-accent" />
@@ -195,6 +202,7 @@ export function HostDetailPage() {
           Connect
         </button>
       </div>
+      )}
 
       {/* Metadata grid */}
       <div className="grid grid-cols-2 gap-3 mb-6">
@@ -237,7 +245,7 @@ export function HostDetailPage() {
                 {credential.username && <> · user <span className="font-mono">{credential.username}</span></>}
               </div>
             </div>
-            {!revealed && credential.hasSecret && (
+            {!revealed && credential.hasSecret && canReveal && (
               <button onClick={revealSecret} className="btn-ghost text-xs">Reveal secret</button>
             )}
           </div>

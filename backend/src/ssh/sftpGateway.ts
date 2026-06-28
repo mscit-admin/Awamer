@@ -26,6 +26,7 @@ import { Client, type SFTPWrapper, type FileEntry } from "ssh2";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
 import { makeAuthMiddleware } from "../middleware/auth.js";
+import { can } from "../domain/permissions.js";
 import type { JwtService } from "../jwt/index.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
@@ -126,6 +127,9 @@ export function makeSftpGateway(deps: SftpGatewayDeps) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       }
       const userId = req.auth!.sub;
+      if (!can(req.auth!.role, "sessions:connect")) {
+        return reply.code(403).send({ error: { code: "forbidden", message: "your role cannot open sessions" } });
+      }
       const { host_id, password, passphrase } = parsed.data;
 
       let host;

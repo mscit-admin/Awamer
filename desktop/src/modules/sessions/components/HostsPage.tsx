@@ -8,6 +8,7 @@ import {
   hostsApi, foldersApi, tagsApi,
   type Host, type FolderTreeNode, type Tag, type HostProtocol,
 } from "../api/sessionsApi";
+import { useCan } from "@/shared/lib/permissions";
 
 const PROTOCOL_ICONS: Record<HostProtocol, string> = {
   ssh: "🔒", sftp: "📁", rdp: "🖥️", vnc: "📺",
@@ -15,6 +16,7 @@ const PROTOCOL_ICONS: Record<HostProtocol, string> = {
 };
 
 export function HostsPage() {
+  const canWrite = useCan("resources:write");
   const [hosts, setHosts] = useState<Host[]>([]);
   const [folders, setFolders] = useState<FolderTreeNode[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -167,12 +169,14 @@ export function HostsPage() {
               <option key={p} value={p}>{p.toUpperCase()}</option>
             ))}
           </select>
-          <Link
-            to="/hosts/new"
-            className="btn-primary flex items-center gap-1"
-          >
-            <Plus className="size-4" /> New host
-          </Link>
+          {canWrite && (
+            <Link
+              to="/hosts/new"
+              className="btn-primary flex items-center gap-1"
+            >
+              <Plus className="size-4" /> New host
+            </Link>
+          )}
         </header>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -267,6 +271,7 @@ function HostCard({
   onDelete: () => void;
 }) {
   const navigate = useNavigate();
+  const canWrite = useCan("resources:write");
   return (
     <div
       className="card p-4 hover:border-accent/50 transition-colors cursor-pointer group"
@@ -297,6 +302,7 @@ function HostCard({
             </div>
           )}
         </div>
+        {canWrite && (
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
           <button
             className="btn-icon"
@@ -320,6 +326,7 @@ function HostCard({
             <Trash2 className="size-3.5" />
           </button>
         </div>
+        )}
       </div>
     </div>
   );

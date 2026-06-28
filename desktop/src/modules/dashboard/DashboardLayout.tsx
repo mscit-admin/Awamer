@@ -49,6 +49,7 @@ const SECONDARY_NAV: NavItem[] = [
 // Shown only to admin / super_admin.
 const ADMIN_NAV: NavItem[] = [
   { to: "/users", label: "Users", icon: <Users className="size-4" />, available: true },
+  { to: "/roles", label: "Roles & Permissions", icon: <Shield className="size-4" />, available: true },
 ];
 
 export function DashboardLayout() {

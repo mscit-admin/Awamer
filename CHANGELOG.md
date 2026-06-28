@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.13.0] — 2026-06-27 — Roles & Permissions (RBAC)
+
+### Added
+- **Role-based access control, enforced server-side.** A capability
+  matrix maps each role to permissions; the baseline for every
+  authenticated user is *view-only*, with extra capabilities granted per
+  role:
+  - `super_admin` / `admin`: everything (incl. user management)
+  - `user`: create/edit/delete own resources, open SSH/SFTP, reveal secrets
+  - `readonly`: browse only — no writes, no sessions, no secret reveal
+  - `auditor`: read-only + audit logs
+  - `backend/src/domain/permissions.ts` (+ tests) and middleware
+    `requirePermission` / `requireWrite`.
+  - Enforced on hosts/credentials/folders/tags mutations (`resources:write`),
+    SSH & SFTP gateways (`sessions:connect`), and credential reveal
+    (`credentials:reveal`). Verified end-to-end: a read-only user can list
+    hosts (200) but is blocked from create/connect (403); a normal user can.
+- **Roles & Permissions page** (`/roles`, admin-only) showing the full
+  matrix and the current user's effective permissions.
+- **UI gating** via a mirrored `shared/lib/permissions.ts` + `useCan`
+  hook: New/Edit/Delete, Connect/SFTP, Favorite, and Reveal-secret
+  affordances are hidden for roles that lack the permission (Hosts, Host
+  detail, Credentials, Folders, Tags). The server remains the source of
+  truth.
+
+---
+
 ## [1.12.0] — 2026-06-27 — User management UI (add non-admin users)
 
 ### Added

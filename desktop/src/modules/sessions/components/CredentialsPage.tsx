@@ -6,6 +6,7 @@ import {
   credentialsApi,
   type CredentialPublic, type CredentialType,
 } from "../api/sessionsApi";
+import { useCan } from "@/shared/lib/permissions";
 
 const CREDENTIAL_TYPES: { value: CredentialType; label: string; description: string }[] = [
   { value: "password",    label: "Password",    description: "Username + password (SSH, RDP)" },
@@ -17,6 +18,7 @@ const CREDENTIAL_TYPES: { value: CredentialType; label: string; description: str
 ];
 
 export function CredentialsPage() {
+  const canWrite = useCan("resources:write");
   const [credentials, setCredentials] = useState<CredentialPublic[]>([]);
   const [editing, setEditing] = useState<CredentialPublic | "new" | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,9 +52,9 @@ export function CredentialsPage() {
     <div className="max-w-4xl mx-auto py-8 px-6 animate-fade-in">
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-xl font-semibold tracking-tight">Credentials</h1>
-        <button onClick={() => setEditing("new")} className="btn-primary">
+        {canWrite && <button onClick={() => setEditing("new")} className="btn-primary">
           <Plus className="size-4" /> New credential
-        </button>
+        </button>}
       </div>
       <p className="text-sm text-fg-muted mb-4">
         Authentication material for hosts. One credential can be reused across many hosts.
@@ -78,9 +80,9 @@ export function CredentialsPage() {
           <KeyRound className="size-8 mx-auto text-fg-muted mb-2" />
           <div className="font-medium text-sm mb-1">No credentials yet</div>
           <p className="text-xs text-fg-muted mb-4">Add a credential, then attach it to one or more hosts.</p>
-          <button onClick={() => setEditing("new")} className="btn-primary inline-flex">
+          {canWrite && <button onClick={() => setEditing("new")} className="btn-primary inline-flex">
             <Plus className="size-4" /> New credential
-          </button>
+          </button>}
         </div>
       ) : (
         <div className="card divide-y divide-border">
@@ -97,10 +99,10 @@ export function CredentialsPage() {
                   {!c.hasSecret && <span className="text-amber-400 ml-2">no secret set</span>}
                 </div>
               </div>
-              <button onClick={() => setEditing(c)} className="btn-icon"><Edit3 className="size-4" /></button>
-              <button onClick={() => handleDelete(c)} className="btn-icon hover:text-red-500">
+              {canWrite && <button onClick={() => setEditing(c)} className="btn-icon"><Edit3 className="size-4" /></button>}
+              {canWrite && <button onClick={() => handleDelete(c)} className="btn-icon hover:text-red-500">
                 <Trash2 className="size-4" />
-              </button>
+              </button>}
             </div>
           ))}
         </div>

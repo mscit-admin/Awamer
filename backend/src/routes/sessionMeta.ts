@@ -8,7 +8,8 @@ import {
 import { CREDENTIAL_TYPES, type Folder, toCredentialPublic } from "../domain/session.js";
 import { DomainError } from "../domain/index.js";
 import type { AuditRepository } from "../repos/otherRepos.js";
-import { makeAuthMiddleware } from "../middleware/auth.js";
+import { makeAuthMiddleware, requireWrite } from "../middleware/auth.js";
+import { can } from "../domain/permissions.js";
 import type { JwtService } from "../jwt/index.js";
 
 // =====================================================================
@@ -37,6 +38,7 @@ function serializeFolder(f: Folder) {
 export function makeFolderRoutes(deps: FolderDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", requireWrite());
 
     app.get("/", async (req, reply) => {
       const folders = await deps.folders.listForUser(req.auth!.sub);
@@ -148,6 +150,7 @@ interface TagDeps {
 export function makeTagRoutes(deps: TagDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", requireWrite());
 
     app.get("/", async (req, reply) => {
       const tags = await deps.tags.listForUser(req.auth!.sub);
@@ -229,6 +232,7 @@ const credentialTypeEnum = z.enum(CREDENTIAL_TYPES as unknown as [string, ...str
 export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", requireWrite());
 
     app.get("/", async (req, reply) => {
       const list = await deps.credentials.listForUser(req.auth!.sub);
@@ -239,6 +243,9 @@ export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
     app.get("/:id", async (req, reply) => {
       const { id } = req.params as { id: string };
       const reveal = (req.query as { reveal?: string }).reveal === "true";
+      if (reveal && !can(req.auth!.role, "credentials:reveal")) {
+        return reply.code(403).send({ error: { code: "forbidden", message: "your role cannot reveal secrets" } });
+      }
       try {
         const c = await deps.credentials.getById(req.auth!.sub, id);
         if (reveal) {

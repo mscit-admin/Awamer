@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { Tag as TagIconCmp, Plus, Trash2, Edit3, X, Check } from "lucide-react";
 import { tagsApi, type Tag } from "../api/sessionsApi";
+import { useCan } from "@/shared/lib/permissions";
 
 const TAG_COLORS = [
   "#ef4444", "#f97316", "#eab308", "#22c55e",
@@ -8,6 +9,7 @@ const TAG_COLORS = [
 ];
 
 export function TagsPage() {
+  const canWrite = useCan("resources:write");
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,9 +44,9 @@ export function TagsPage() {
     <div className="max-w-3xl mx-auto py-8 px-6 animate-fade-in">
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-xl font-semibold tracking-tight">Tags</h1>
-        <button onClick={() => setCreating(true)} className="btn-primary">
+        {canWrite && <button onClick={() => setCreating(true)} className="btn-primary">
           <Plus className="size-4" /> New tag
-        </button>
+        </button>}
       </div>
       <p className="text-sm text-fg-muted mb-6">
         Cross-cutting labels for hosts (independent of folders).
@@ -67,9 +69,9 @@ export function TagsPage() {
         <div className="card p-8 text-center">
           <TagIconCmp className="size-8 mx-auto text-fg-muted mb-2" />
           <div className="font-medium text-sm mb-1">No tags yet</div>
-          <button onClick={() => setCreating(true)} className="btn-primary inline-flex mt-3">
+          {canWrite && <button onClick={() => setCreating(true)} className="btn-primary inline-flex mt-3">
             <Plus className="size-4" /> New tag
-          </button>
+          </button>}
         </div>
       ) : (
         <div className="card divide-y divide-border">
@@ -85,10 +87,10 @@ export function TagsPage() {
               <div key={t.id} className="px-4 py-2.5 flex items-center gap-3">
                 <span className="inline-block size-3 rounded-full" style={{ background: t.color ?? "#888" }} />
                 <div className="flex-1 text-sm font-medium">{t.name}</div>
-                <button onClick={() => setEditingId(t.id)} className="btn-icon"><Edit3 className="size-3.5" /></button>
-                <button onClick={() => handleDelete(t)} className="btn-icon hover:text-red-500">
+                {canWrite && <button onClick={() => setEditingId(t.id)} className="btn-icon"><Edit3 className="size-3.5" /></button>}
+                {canWrite && <button onClick={() => handleDelete(t)} className="btn-icon hover:text-red-500">
                   <Trash2 className="size-3.5" />
-                </button>
+                </button>}
               </div>
             )
           ))}
