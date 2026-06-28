@@ -13,6 +13,7 @@ import { SettingsPage } from "@/modules/settings/SettingsPage";
 import { UsersPage } from "@/modules/users/UsersPage";
 import { RolesPage } from "@/modules/users/RolesPage";
 import { AuditPage } from "@/modules/users/AuditPage";
+import { BrandingPage } from "@/modules/users/BrandingPage";
 
 // Phase 2 — Session Management
 import { HostsPage } from "@/modules/sessions/components/HostsPage";
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="/users" element={<UsersPage />} />
         <Route path="/roles" element={<RolesPage />} />
         <Route path="/audit" element={<AuditPage />} />
+        <Route path="/branding" element={<BrandingPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/security/password" element={<ChangePasswordPage />} />
         <Route path="/settings/security/mfa" element={<MFASetupPage />} />

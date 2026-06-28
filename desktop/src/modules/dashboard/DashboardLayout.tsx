@@ -17,9 +17,10 @@ import {
   X,
   Sun,
   Moon,
+  Palette,
 } from "lucide-react";
 import { useState } from "react";
-import { Logo, APP_NAME } from "@/shared/branding";
+import { Logo, useAppName } from "@/shared/branding";
 import { currentTheme, setTheme, type Theme } from "@/shared/lib/theme";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
@@ -54,6 +55,7 @@ const SECONDARY_NAV: NavItem[] = [
 const ADMIN_NAV: NavItem[] = [
   { to: "/users", label: "Users", icon: <Users className="size-4" />, available: true },
   { to: "/roles", label: "Roles & Permissions", icon: <Shield className="size-4" />, available: true },
+  { to: "/branding", label: "Branding", icon: <Palette className="size-4" />, available: true },
 ];
 
 export function DashboardLayout() {
@@ -62,6 +64,7 @@ export function DashboardLayout() {
   const logout = useAuthStore((s) => s.logout);
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const canAudit = roleCan(user?.role, "audit:read");
+  const appName = useAppName();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setThemeState] = useState<Theme>(() => currentTheme());
   const toggleTheme = () => {
@@ -95,7 +98,7 @@ export function DashboardLayout() {
             <div className="size-7 rounded bg-bg-elevated border border-border-strong grid place-items-center shrink-0">
               <Logo className="size-4" />
             </div>
-            <div className="font-display font-semibold text-sm truncate">{APP_NAME}</div>
+            <div className="font-display font-semibold text-sm truncate">{appName}</div>
           </Link>
           <button onClick={() => setSidebarOpen(false)} className="btn-ghost md:hidden -mr-2" aria-label="Close menu">
             <X className="size-4" />
@@ -170,7 +173,7 @@ export function DashboardLayout() {
             <Menu className="size-5" />
           </button>
           <Logo className="size-5" />
-          <span className="font-display font-semibold text-sm truncate">{APP_NAME}</span>
+          <span className="font-display font-semibold text-sm truncate">{appName}</span>
         </div>
         <main className="flex-1 min-h-0 overflow-y-auto">
           <Outlet />

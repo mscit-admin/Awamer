@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.19.0] — 2026-06-28 — Theming, responsive UI & in-app branding
+
+### Added
+- **Light / dark mode.** Semantic colors are now CSS variables with dark
+  (default) + light palettes; toggle (sun/moon) in the sidebar, persisted
+  and defaulting to the OS preference.
+- **Responsive layout** for phones/tablets: the sidebar becomes a
+  hamburger drawer; two-column pages (Assets, Files) adapt; dense toolbars
+  wrap.
+- **In-app Branding screen** (admin): set the app **name** and **logo**
+  from the UI — persisted server-side and shown to everyone (login
+  included).
+  - migration `005_app_settings` (key/value) + `AppSettingsRepository`
+  - `GET /api/v1/branding` (public) / `PUT /api/v1/branding` (admin;
+    validates logo is a data:image URI or http(s) URL, size-capped)
+  - frontend branding store loads at startup with env-var fallbacks
+    (`VITE_APP_NAME`, `VITE_APP_LOGO_URL`); Branding page under
+    Administration with logo upload + preview.
+  - verified end-to-end: set/read name+logo, anon PUT 401, bad logo 400.
+
+---
+
 ## [1.18.0] — 2026-06-28 — VNC remote desktop (Phase 6)
 
 ### Added

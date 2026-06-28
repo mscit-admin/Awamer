@@ -32,6 +32,8 @@ import { makeFolderRoutes, makeTagRoutes, makeCredentialRoutes } from "./routes/
 import { makeHostRoutes, makeHistoryRoutes } from "./routes/sessionRoutes.js";
 import { makeAuditRoutes } from "./routes/audit.js";
 import { makeNetworkRoutes } from "./routes/network.js";
+import { makeBrandingRoutes } from "./routes/branding.js";
+import { AppSettingsRepository } from "./repos/appSettings.js";
 import { makeSshGateway } from "./ssh/gateway.js";
 import { makeSftpGateway } from "./ssh/sftpGateway.js";
 import { makeVncGateway } from "./vnc/gateway.js";
@@ -58,6 +60,7 @@ async function main() {
   const credentials = new CredentialRepository(pool, secretBox);
   const hosts = new HostRepository(pool);
   const history = new ConnectionHistoryRepository(pool);
+  const appSettings = new AppSettingsRepository(pool);
 
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
@@ -110,6 +113,7 @@ async function main() {
   await app.register(makeHistoryRoutes({ history, hosts, audit, jwt }), { prefix: "/api/v1/history" });
   await app.register(makeAuditRoutes({ audit, jwt }), { prefix: "/api/v1/audit" });
   await app.register(makeNetworkRoutes({ jwt }), { prefix: "/api/v1/network" });
+  await app.register(makeBrandingRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/branding" });
 
   // Phase 5 — browser SSH gateway (WebSocket).
   await app.register(makeSshGateway({ jwt, hosts, credentials, history, log }), { prefix: "/api/v1/ssh" });

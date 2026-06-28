@@ -3,10 +3,11 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Loader2, Lock, User as UserIcon, AlertCircle } from "lucide-react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
-import { Logo, APP_NAME } from "@/shared/branding";
+import { Logo, useAppName } from "@/shared/branding";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const appName = useAppName();
   const location = useLocation();
   const status = useAuthStore((s) => s.status);
   const error = useAuthStore((s) => s.error);
@@ -43,7 +44,7 @@ export function LoginPage() {
         <div className="flex items-center gap-3 mb-10">
           <BrandMark />
           <div>
-            <div className="font-display font-semibold tracking-tight text-lg leading-none">{APP_NAME}</div>
+            <div className="font-display font-semibold tracking-tight text-lg leading-none">{appName}</div>
             <div className="text-2xs text-fg-subtle font-mono uppercase tracking-widest mt-1">terminal</div>
           </div>
         </div>
