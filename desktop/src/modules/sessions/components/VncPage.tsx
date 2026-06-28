@@ -39,11 +39,13 @@ export function VncPage() {
   const [hostName, setHostName] = useState("");
   const [phase, setPhase] = useState<"connecting" | "connected" | "error" | "need_password">("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [attempt, setAttempt] = useState(0);
 
-  // Load host name + (optionally) the stored VNC password before connecting.
+  // Load host name + (optionally) the stored VNC username/password.
   const prefillRef = useRef<string | undefined>(undefined);
+  const prefillUserRef = useRef<string | undefined>(undefined);
   const [ready, setReady] = useState(false);
   useEffect(() => {
     void (async () => {
@@ -54,6 +56,7 @@ export function VncPage() {
         if (h.credential_id) {
           try {
             const c = await credentialsApi.get(h.credential_id, true);
+            if (c.username) prefillUserRef.current = c.username;
             const pw = (c.secret_data as Record<string, unknown> | undefined)?.["password"];
             if (typeof pw === "string") prefillRef.current = pw;
           } catch { /* no reveal permission — will prompt */ }
@@ -72,7 +75,10 @@ export function VncPage() {
     let rfb: RFB;
     try {
       rfb = new RFB(screenRef.current, gatewayUrl(accessToken, hostId), {
-        credentials: { password: password || prefillRef.current || "" },
+        credentials: {
+          username: username || prefillUserRef.current || undefined,
+          password: password || prefillRef.current || "",
+        },
       });
     } catch (e) {
       setPhase("error");
@@ -93,7 +99,11 @@ export function VncPage() {
         setError(e?.detail?.clean === false ? "Could not connect — check the host, port, and that VNC is reachable." : "Disconnected");
       }
     };
-    const onCredentials = () => { setPhase("need_password"); };
+    const onCredentials = () => {
+      // Pre-fill from the stored credential if we have it.
+      if (prefillUserRef.current && !username) setUsername(prefillUserRef.current);
+      setPhase("need_password");
+    };
     const onSecurityFailure = (e: any) => { setPhase("error"); setError(e?.detail?.reason || "VNC authentication failed"); };
 
     rfb.addEventListener("connect", onConnect);
@@ -112,12 +122,13 @@ export function VncPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, accessToken, hostId, attempt]);
 
-  function submitPassword(e: FormEvent) {
+  function submitCredentials(e: FormEvent) {
     e.preventDefault();
     if (!password) return;
+    const creds = { username: username || undefined, password };
     // Send the entered credentials to the in-progress RFB session.
     if (rfbRef.current) {
-      rfbRef.current.sendCredentials({ password });
+      rfbRef.current.sendCredentials(creds);
       setPhase("connecting");
     } else {
       setAttempt((n) => n + 1);
@@ -150,10 +161,31 @@ export function VncPage() {
 
         {phase === "need_password" && (
           <div className="absolute inset-0 grid place-items-center bg-bg/80">
-            <form onSubmit={submitPassword} className="card p-6 w-full max-w-sm">
-              <div className="flex items-center gap-2 mb-4"><Lock className="size-4 text-accent" /><h2 className="text-base font-semibold">VNC password</h2></div>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoFocus className="input w-full" />
-              <button type="submit" disabled={!password} className="btn-primary w-full mt-3">Connect</button>
+            <form onSubmit={submitCredentials} className="card p-6 w-full max-w-sm space-y-3">
+              <div className="flex items-center gap-2"><Lock className="size-4 text-accent" /><h2 className="text-base font-semibold">VNC sign-in</h2></div>
+              <div>
+                <label className="block text-xs text-fg-muted mb-1">Username <span className="text-fg-subtle">(optional)</span></label>
+                <input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Leave blank if not required"
+                  autoComplete="username"
+                  className="input w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-fg-muted mb-1">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  autoFocus
+                  autoComplete="current-password"
+                  className="input w-full"
+                />
+              </div>
+              <button type="submit" disabled={!password} className="btn-primary w-full">Connect</button>
             </form>
           </div>
         )}
