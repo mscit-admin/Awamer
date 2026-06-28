@@ -12,26 +12,41 @@ import { request } from "@/shared/lib/api";
 const ENV_NAME = (import.meta.env.VITE_APP_NAME as string | undefined)?.trim() || "NetSphere";
 const ENV_LOGO = (import.meta.env.VITE_APP_LOGO_URL as string | undefined)?.trim() || "";
 
+function applyFavicon(href: string): void {
+  if (!href || typeof document === "undefined") return;
+  let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "icon";
+    document.head.appendChild(link);
+  }
+  link.href = href;
+}
+
 interface BrandingState {
   appName: string;
   logoUrl: string;
+  favicon: string;
   loaded: boolean;
   load: () => Promise<void>;
-  apply: (b: { app_name?: string | null; logo?: string | null }) => void;
+  apply: (b: { app_name?: string | null; logo?: string | null; favicon?: string | null }) => void;
 }
 
 export const useBranding = create<BrandingState>((set) => ({
   appName: ENV_NAME,
   logoUrl: ENV_LOGO,
+  favicon: "",
   loaded: false,
   async load() {
     try {
-      const b = await request<{ app_name: string | null; logo: string | null }>("/api/v1/branding", {
-        unauthenticated: true,
-      });
+      const b = await request<{ app_name: string | null; logo: string | null; favicon: string | null }>(
+        "/api/v1/branding",
+        { unauthenticated: true },
+      );
       const name = b.app_name?.trim() || ENV_NAME;
-      set({ appName: name, logoUrl: b.logo || ENV_LOGO, loaded: true });
+      set({ appName: name, logoUrl: b.logo || ENV_LOGO, favicon: b.favicon || "", loaded: true });
       document.title = name;
+      if (b.favicon) applyFavicon(b.favicon);
     } catch {
       set({ loaded: true });
     }
@@ -40,7 +55,12 @@ export const useBranding = create<BrandingState>((set) => ({
     set((s) => {
       const name = (b.app_name ?? undefined)?.trim() || s.appName;
       document.title = name;
-      return { appName: name, logoUrl: b.logo !== undefined ? (b.logo || "") : s.logoUrl };
+      if (b.favicon) applyFavicon(b.favicon);
+      return {
+        appName: name,
+        logoUrl: b.logo !== undefined ? (b.logo || "") : s.logoUrl,
+        favicon: b.favicon !== undefined ? (b.favicon || "") : s.favicon,
+      };
     });
   },
 }));

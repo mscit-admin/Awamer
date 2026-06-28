@@ -14,28 +14,40 @@ export function BrandingPage() {
   const apply = useBranding((s) => s.apply);
   const [name, setName] = useState("");
   const [logo, setLogo] = useState<string | null>(null);
+  const [favicon, setFavicon] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const faviconRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     brandingApi.get()
-      .then((b) => { setName(b.app_name ?? ""); setLogo(b.logo ?? null); })
+      .then((b) => { setName(b.app_name ?? ""); setLogo(b.logo ?? null); setFavicon(b.favicon ?? null); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
+  function readImage(file: File | undefined, set: (v: string) => void) {
     if (!file) return;
     if (!file.type.startsWith("image/")) { setError("Please choose an image file."); return; }
     if (file.size > MAX_BYTES) { setError(`Image too large (max ${Math.round(MAX_BYTES / 1024)} KB).`); return; }
     const reader = new FileReader();
-    reader.onload = () => { setLogo(reader.result as string); setError(null); };
+    reader.onload = () => { set(reader.result as string); setError(null); };
     reader.readAsDataURL(file);
+  }
+
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    readImage(file, setLogo);
+  }
+
+  function onPickFavicon(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    readImage(file, setFavicon);
   }
 
   async function save(e: FormEvent) {
@@ -44,8 +56,8 @@ export function BrandingPage() {
     setError(null);
     setSaved(false);
     try {
-      const b = await brandingApi.update({ app_name: name.trim() || null, logo });
-      apply({ app_name: b.app_name, logo: b.logo });
+      const b = await brandingApi.update({ app_name: name.trim() || null, logo, favicon });
+      apply({ app_name: b.app_name, logo: b.logo, favicon: b.favicon });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -97,6 +109,27 @@ export function BrandingPage() {
               <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickFile} />
             </div>
             <p className="text-2xs text-fg-muted mt-2">PNG/SVG/JPG, up to {Math.round(MAX_BYTES / 1024)} KB. Square images look best.</p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-fg-muted mb-2">Favicon (browser tab icon)</label>
+            <div className="flex items-center gap-4">
+              <div className="size-10 rounded bg-bg-elevated border border-border grid place-items-center overflow-hidden">
+                {favicon ? <img src={favicon} alt="favicon preview" className="size-full object-contain" /> : <Palette className="size-4 text-fg-subtle" />}
+              </div>
+              <div className="flex flex-col gap-2">
+                <button type="button" onClick={() => faviconRef.current?.click()} className="btn-ghost text-xs">
+                  <Upload className="size-3.5" /> Upload favicon
+                </button>
+                {favicon && (
+                  <button type="button" onClick={() => setFavicon(null)} className="btn-ghost text-xs text-red-400">
+                    <Trash2 className="size-3.5" /> Remove
+                  </button>
+                )}
+              </div>
+              <input ref={faviconRef} type="file" accept="image/*,.ico" hidden onChange={onPickFavicon} />
+            </div>
+            <p className="text-2xs text-fg-muted mt-2">Small square icon (PNG/SVG/ICO). Leave empty to use the default.</p>
           </div>
 
           {error && (
