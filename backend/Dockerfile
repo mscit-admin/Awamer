@@ -21,7 +21,8 @@ RUN npm prune --omit=dev
 # =====================================================
 FROM node:20-alpine
 
-RUN apk add --no-cache wget tini
+# wget+tini for runtime; iputils/traceroute power the Network diagnostics tools.
+RUN apk add --no-cache wget tini iputils traceroute
 
 WORKDIR /app
 

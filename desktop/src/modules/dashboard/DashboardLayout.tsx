@@ -32,13 +32,10 @@ const PRIMARY_NAV: NavItem[] = [
   { to: "/hosts", label: "Assets", icon: <Server className="size-4" />, available: true },
   { to: "/terminal", label: "Terminal", icon: <TerminalIcon className="size-4" />, available: true },
   { to: "/credentials", label: "Credentials", icon: <KeyRound className="size-4" />, available: true },
+  { to: "/files", label: "Files", icon: <FolderTree className="size-4" />, available: true },
+  { to: "/network", label: "Network", icon: <Network className="size-4" />, available: true },
   { to: "/folders", label: "Folders", icon: <Folder className="size-4" />, available: true },
   { to: "/tags", label: "Tags", icon: <Tag className="size-4" />, available: true },
-];
-
-const COMING_NAV: NavItem[] = [
-  { to: "/files", label: "Files", icon: <FolderTree className="size-4" /> },
-  { to: "/network", label: "Network", icon: <Network className="size-4" /> },
 ];
 
 const SECONDARY_NAV: NavItem[] = [
@@ -90,13 +87,6 @@ export function DashboardLayout() {
             Workspace
           </div>
           {PRIMARY_NAV.map((item) => (
-            <NavItemLink key={item.to} item={item} />
-          ))}
-
-          <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 mt-4 font-mono">
-            Coming soon
-          </div>
-          {COMING_NAV.map((item) => (
             <NavItemLink key={item.to} item={item} />
           ))}
 

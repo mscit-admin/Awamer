@@ -30,8 +30,9 @@ function parentOf(path: string): string {
   return idx <= 0 ? "/" : trimmed.slice(0, idx);
 }
 
-export function WebSftpPage() {
-  const { id: hostId } = useParams<{ id: string }>();
+export function WebSftpPage({ hostId: hostIdProp }: { hostId?: string } = {}) {
+  const params = useParams<{ id: string }>();
+  const hostId = hostIdProp ?? params.id;
   const navigate = useNavigate();
   const accessToken = useAuthStore((s) => s.accessToken);
 

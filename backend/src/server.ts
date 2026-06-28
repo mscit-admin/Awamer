@@ -31,6 +31,7 @@ import { makeAdminRoutes } from "./routes/admin.js";
 import { makeFolderRoutes, makeTagRoutes, makeCredentialRoutes } from "./routes/sessionMeta.js";
 import { makeHostRoutes, makeHistoryRoutes } from "./routes/sessionRoutes.js";
 import { makeAuditRoutes } from "./routes/audit.js";
+import { makeNetworkRoutes } from "./routes/network.js";
 import { makeSshGateway } from "./ssh/gateway.js";
 import { makeSftpGateway } from "./ssh/sftpGateway.js";
 
@@ -107,6 +108,7 @@ async function main() {
   await app.register(makeHostRoutes({ hosts, audit, jwt }), { prefix: "/api/v1/hosts" });
   await app.register(makeHistoryRoutes({ history, hosts, audit, jwt }), { prefix: "/api/v1/history" });
   await app.register(makeAuditRoutes({ audit, jwt }), { prefix: "/api/v1/audit" });
+  await app.register(makeNetworkRoutes({ jwt }), { prefix: "/api/v1/network" });
 
   // Phase 5 — browser SSH gateway (WebSocket).
   await app.register(makeSshGateway({ jwt, hosts, credentials, history, log }), { prefix: "/api/v1/ssh" });

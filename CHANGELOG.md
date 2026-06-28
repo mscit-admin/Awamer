@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.17.0] — 2026-06-28 — Files manager + Network tools
+
+### Added
+- **Files** (`/files`) — a unified file manager across all assets: pick an
+  SSH/SFTP asset from a searchable list and browse/edit/upload/download its
+  files inline (web build embeds the SFTP browser; desktop routes to the
+  native one). `WebSftpPage` now accepts an optional `hostId` prop.
+- **Network** (`/network`) — server-side diagnostics: **ping**,
+  **traceroute**, **DNS lookup**, and **TCP port check**, gated by the
+  `sessions:connect` permission.
+  - `backend/src/routes/network.ts` runs external tools via `spawn` with an
+    argument array (no shell) and validates the target to a hostname/IP
+    charset — command injection is not possible (verified: `a;rm -rf /`
+    → 400). Time- and output-bounded.
+  - DNS falls back to the system resolver so `/etc/hosts` names resolve.
+  - Dockerfile installs `iputils` + `traceroute` so ping/traceroute work
+    in the container.
+- Both move out of the sidebar's "Coming soon" into the active Workspace
+  section (which is now empty and removed).
+
+---
+
 ## [1.16.0] — 2026-06-28 — Audit log viewer
 
 ### Added
