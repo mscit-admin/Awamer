@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.20.0] — 2026-06-28 — Opt-in command history & branding favicon
+
+### Added
+- **Command history (opt-in, per user).** Browser SSH sessions can now record
+  the commands you type, on a strictly **off-by-default** toggle in the
+  terminal toolbar (commands may contain typed secrets, so recording is a
+  deliberate choice).
+  - migration `006_command_history` (per-user, append-only; rows survive host
+    deletion via a `host_label` snapshot) + `CommandHistoryRepository`.
+  - `GET/POST/DELETE /api/v1/command-history` — always self-scoped to the
+    authenticated user (no cross-user reads/clears), gated by
+    `sessions:connect`. List supports search + per-host filtering.
+  - frontend: terminal toolbar toggle (persisted per browser, default off);
+    keystrokes are folded into command lines client-side and POSTed on Enter
+    when enabled. A slide-over **History panel** lists, searches, copies,
+    re-inserts, and clears past commands, with a privacy warning.
+  - verified end-to-end against PostgreSQL 16: migration up/down, schema
+    (FKs, indexes), insert/list/clear.
+- **Branding favicon.** The Branding admin screen can now set the browser-tab
+  favicon alongside the app name and logo (stored server-side, applied at
+  startup; `GET/PUT /api/v1/branding` carry `favicon`).
+
+---
+
 ## [1.19.0] — 2026-06-28 — Theming, responsive UI & in-app branding
 
 ### Added

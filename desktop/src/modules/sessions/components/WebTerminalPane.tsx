@@ -11,7 +11,7 @@
  *   recv: binary = output, text JSON = {type:"status"|"error",...}
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, Loader2, Lock, Power } from "lucide-react";
+import { AlertCircle, Loader2, Lock, Power, History, Check } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -19,6 +19,9 @@ import "@xterm/xterm/css/xterm.css";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { useTerminalTabs, type TerminalTab } from "../store/terminalTabsStore";
+import { useCommandHistoryPref } from "../store/commandHistoryPref";
+import { commandHistoryApi } from "../api/commandHistoryApi";
+import { CommandHistoryPanel } from "./CommandHistoryPanel";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
@@ -37,14 +40,58 @@ function gatewayUrl(token: string, hostId: string, cols: number, rows: number, p
   return u.toString();
 }
 
+/**
+ * Fold a chunk of user keystrokes into a running line buffer, emitting any
+ * completed command lines (on Enter). Best-effort reconstruction: handles
+ * printable text, backspace, and Ctrl-C/Ctrl-U cancel; skips escape sequences
+ * (arrow keys, etc.) so they don't corrupt the captured text.
+ */
+function foldKeystrokes(buf: string, chunk: string): { buf: string; commands: string[] } {
+  const commands: string[] = [];
+  for (let i = 0; i < chunk.length; i++) {
+    const ch = chunk[i]!;
+    const code = ch.charCodeAt(0);
+    if (ch === "\r" || ch === "\n") {
+      const cmd = buf.trim();
+      if (cmd) commands.push(cmd);
+      buf = "";
+    } else if (ch === "\x7f" || ch === "\b") {
+      buf = buf.slice(0, -1);
+    } else if (ch === "\x03" || ch === "\x15") {
+      // Ctrl-C / Ctrl-U → abandon the current line.
+      buf = "";
+    } else if (ch === "\x1b") {
+      // Escape sequence (e.g. arrow key) — skip to the end of this chunk's seq.
+      // Most fit in this chunk; drop the rest of the chunk's control bytes.
+      while (i + 1 < chunk.length && chunk.charCodeAt(i + 1) < 0x40) i++;
+      if (i + 1 < chunk.length) i++; // final byte of the sequence
+    } else if (code >= 0x20) {
+      buf += ch;
+    }
+  }
+  return { buf, commands };
+}
+
 export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const updateTab = useTerminalTabs((s) => s.updateTab);
+  const saveHistory = useCommandHistoryPref((s) => s.saveHistory);
+  const setSaveHistory = useCommandHistoryPref((s) => s.setSaveHistory);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Command-history capture. We reconstruct each typed line from the user's
+  // keystrokes (xterm.onData) and POST it on Enter — but only when the user
+  // has opted in. Read the flag through a ref so the keystroke handler always
+  // sees the latest value without re-subscribing the WebSocket.
+  const lineBufRef = useRef("");
+  const saveHistoryRef = useRef(saveHistory);
+  useEffect(() => { saveHistoryRef.current = saveHistory; }, [saveHistory]);
+
+  const [showHistory, setShowHistory] = useState(false);
 
   const [phase, setPhase] = useState<"connecting" | "connected" | "error" | "need_password">("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +153,18 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
 
     const dataDisp = term.onData((d) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));
+      // Capture typed commands when the user has opted in.
+      if (saveHistoryRef.current) {
+        const { buf, commands } = foldKeystrokes(lineBufRef.current, d);
+        lineBufRef.current = buf;
+        for (const command of commands) {
+          commandHistoryApi
+            .add({ command, hostId: tab.hostId, hostLabel: tab.label })
+            .catch(() => { /* best-effort; never disrupt the session */ });
+        }
+      } else {
+        lineBufRef.current = "";
+      }
     });
 
     ws.onmessage = (ev) => {
@@ -158,9 +217,52 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
     setAttempt((n) => n + 1);
   }
 
+  function insertCommand(command: string) {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(new TextEncoder().encode(command));
+      lineBufRef.current = saveHistoryRef.current ? command : "";
+    }
+    termRef.current?.focus();
+  }
+
   return (
     <div className="relative h-full w-full bg-[#0b0e14]">
       <div ref={containerRef} className="absolute inset-0 p-2" />
+
+      {(phase === "connected" || phase === "error") && (
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
+          <button
+            onClick={() => setSaveHistory(!saveHistory)}
+            title={saveHistory ? "Saving command history — click to stop" : "Save command history (off)"}
+            className={
+              "flex items-center gap-1.5 px-2 py-1 rounded text-2xs border backdrop-blur-sm transition-colors " +
+              (saveHistory
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                : "bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated")
+            }
+          >
+            {saveHistory ? <Check className="size-3.5" /> : <History className="size-3.5" />}
+            {saveHistory ? "Saving history" : "Save history"}
+          </button>
+          <button
+            onClick={() => setShowHistory(true)}
+            title="View command history"
+            className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
+          >
+            <History className="size-3.5" /> History
+          </button>
+        </div>
+      )}
+
+      {showHistory && (
+        <CommandHistoryPanel
+          hostId={tab.hostId}
+          hostLabel={tab.label}
+          onClose={() => setShowHistory(false)}
+          onPick={(cmd) => { insertCommand(cmd); setShowHistory(false); }}
+        />
+      )}
 
       {phase === "connecting" && (
         <div className="absolute inset-0 grid place-items-center bg-bg/60 backdrop-blur-sm">
