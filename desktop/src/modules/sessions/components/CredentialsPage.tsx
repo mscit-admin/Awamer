@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
 import {
-  KeyRound, Plus, Trash2, Edit3, Eye, EyeOff, AlertTriangle, X,
+  KeyRound, Plus, Trash2, Edit3, Eye, EyeOff, ShieldCheck, X,
 } from "lucide-react";
 import {
   credentialsApi,
@@ -60,12 +60,14 @@ export function CredentialsPage() {
         Authentication material for hosts. One credential can be reused across many hosts.
       </p>
 
-      <div className="text-2xs bg-amber-500/10 border border-amber-500/30 text-amber-200 px-3 py-2 rounded mb-6 flex items-start gap-2">
-        <AlertTriangle className="size-3.5 mt-px shrink-0" />
+      <div className="text-2xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 px-3 py-2 rounded mb-6 flex items-start gap-2">
+        <ShieldCheck className="size-3.5 mt-px shrink-0" />
         <div>
-          <span className="font-semibold">Phase 2 storage:</span> secrets are stored as plaintext JSONB
-          in PostgreSQL. Phase 10 will move them to envelope-encrypted blobs with KMS-managed keys.
-          Don't store production secrets yet.
+          <span className="font-semibold">Encrypted at rest:</span> secret material is sealed with
+          AES-256-GCM authenticated encryption before it reaches PostgreSQL — only the envelope
+          (IV, tag, ciphertext) is stored. The data key is held by the server
+          (<span className="font-mono">CREDENTIAL_ENCRYPTION_KEY</span>); a dedicated KMS-backed
+          master key and vault unlock are planned next.
         </div>
       </div>
 

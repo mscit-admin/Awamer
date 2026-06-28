@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.20.1] — 2026-06-28 — Fix stale credential-storage warning
+
+### Fixed
+- **Credentials page banner** still claimed secrets were stored as *plaintext
+  JSONB* and warned "don't store production secrets yet" — left over from
+  before Phase 10. Secret material has in fact been **AES-256-GCM encrypted at
+  rest** since 1.8.0 (`CredentialRepository` seals on write / opens on read;
+  `CREDENTIAL_ENCRYPTION_KEY` is mandatory in production). Replaced the amber
+  warning with an accurate "encrypted at rest" note, keeping the honest caveat
+  that the data key is server-held and a KMS-backed master key / vault unlock
+  is still planned.
+
+---
+
 ## [1.20.0] — 2026-06-28 — Opt-in command history & branding favicon
 
 ### Added
