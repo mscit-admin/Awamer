@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, AlertCircle, Lock, Power, Maximize2 } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, Lock, Power, Maximize2, Keyboard } from "lucide-react";
 import RFB from "@novnc/novnc";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
@@ -42,6 +42,11 @@ export function VncPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [attempt, setAttempt] = useState(0);
+
+  // Guest-login auto-type panel.
+  const [showInject, setShowInject] = useState(false);
+  const [osUser, setOsUser] = useState("");
+  const [osPass, setOsPass] = useState("");
 
   // Load host name + (optionally) the stored VNC username/password.
   const prefillRef = useRef<string | undefined>(undefined);
@@ -122,6 +127,29 @@ export function VncPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, accessToken, hostId, attempt]);
 
+  // ---- Auto-type OS credentials into the remote desktop --------------
+  // Sends the username/password as keystrokes to the *guest* login screen,
+  // so they're never typed by hand on the remote screen.
+  const XK_TAB = 0xff09;
+  const XK_RETURN = 0xff0d;
+
+  function sendString(s: string) {
+    const rfb = rfbRef.current;
+    if (!rfb) return;
+    for (const ch of s) {
+      const cp = ch.codePointAt(0)!;
+      const keysym = cp < 0x100 ? cp : 0x01000000 + cp;
+      rfb.sendKey(keysym, "Unidentified", true);
+      rfb.sendKey(keysym, "Unidentified", false);
+    }
+  }
+  function sendKeysym(keysym: number) {
+    const rfb = rfbRef.current;
+    if (!rfb) return;
+    rfb.sendKey(keysym, "Unidentified", true);
+    rfb.sendKey(keysym, "Unidentified", false);
+  }
+
   function submitCredentials(e: FormEvent) {
     e.preventDefault();
     if (!password) return;
@@ -136,12 +164,23 @@ export function VncPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#0b0e14]">
+    <div className="relative flex flex-col h-full bg-[#0b0e14]">
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-elevated/40">
         <button onClick={() => navigate(-1)} className="btn-ghost text-xs"><ArrowLeft className="size-3.5" /></button>
         <span className="text-sm font-medium">{hostName || "VNC"}</span>
         <span className="text-xs text-fg-muted">remote desktop</span>
         <div className="flex-1" />
+        <button
+          onClick={() => {
+            if (!showInject) { setOsUser(prefillUserRef.current ?? ""); setOsPass(prefillRef.current ?? ""); }
+            setShowInject((v) => !v);
+          }}
+          disabled={phase !== "connected"}
+          className="btn-ghost text-xs disabled:opacity-40"
+          title="Type login credentials into the remote screen"
+        >
+          <Keyboard className="size-3.5" /> Send login
+        </button>
         <button onClick={() => rfbRef.current?.sendCtrlAltDel()} disabled={phase !== "connected"} className="btn-ghost text-xs disabled:opacity-40">
           Ctrl+Alt+Del
         </button>
@@ -149,6 +188,41 @@ export function VncPage() {
           <Maximize2 className="size-3.5" /> Fullscreen
         </button>
       </div>
+
+      {/* Auto-type panel: inject the guest OS login without typing on screen */}
+      {showInject && phase === "connected" && (
+        <div className="absolute right-4 top-12 z-20 card p-4 w-72 space-y-3 shadow-xl">
+          <div className="flex items-center gap-2">
+            <Keyboard className="size-4 text-accent" />
+            <span className="text-sm font-medium">Type login into desktop</span>
+          </div>
+          <p className="text-2xs text-fg-muted leading-relaxed">
+            Click the username field on the remote screen first, then use the
+            buttons below. Keystrokes are sent to the desktop — nothing is typed
+            here on the host terminal.
+          </p>
+          <div>
+            <label className="block text-xs text-fg-muted mb-1">Username</label>
+            <input value={osUser} onChange={(e) => setOsUser(e.target.value)} className="input w-full text-sm" autoComplete="off" />
+          </div>
+          <div>
+            <label className="block text-xs text-fg-muted mb-1">Password</label>
+            <input type="password" value={osPass} onChange={(e) => setOsPass(e.target.value)} className="input w-full text-sm" autoComplete="off" />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button onClick={() => sendString(osUser)} disabled={!osUser} className="btn-ghost text-xs disabled:opacity-40">Type username</button>
+            <button onClick={() => sendString(osPass)} disabled={!osPass} className="btn-ghost text-xs disabled:opacity-40">Type password</button>
+            <button
+              onClick={() => { sendString(osUser); sendKeysym(XK_TAB); sendString(osPass); sendKeysym(XK_RETURN); }}
+              disabled={!osPass}
+              className="btn-primary text-xs"
+            >
+              Username ⇥ Password ⏎
+            </button>
+            <button onClick={() => sendKeysym(XK_RETURN)} className="btn-ghost text-xs">Enter</button>
+          </div>
+        </div>
+      )}
 
       <div className="relative flex-1 min-h-0">
         <div ref={screenRef} className="absolute inset-0" />
