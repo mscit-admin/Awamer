@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.21.1] — 2026-06-28 — Terminal username watermark
+
+### Added
+- **Username watermark** behind the browser SSH terminal — the logged-in
+  user's name (and the host label) render as a faint, non-interactive
+  watermark so it's obvious whose session a terminal belongs to. The xterm
+  canvas is now transparent so the watermark shows through without obscuring
+  output.
+
+---
+
 ## [1.21.0] — 2026-06-28 — SSH port forwarding (Phase 5)
 
 ### Added

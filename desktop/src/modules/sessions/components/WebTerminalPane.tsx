@@ -74,6 +74,7 @@ function foldKeystrokes(buf: string, chunk: string): { buf: string; commands: st
 
 export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const accessToken = useAuthStore((s) => s.accessToken);
+  const username = useAuthStore((s) => s.user?.username ?? null);
   const updateTab = useTerminalTabs((s) => s.updateTab);
   const saveHistory = useCommandHistoryPref((s) => s.saveHistory);
   const setSaveHistory = useCommandHistoryPref((s) => s.setSaveHistory);
@@ -105,7 +106,9 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       fontSize: 13,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       cursorBlink: true,
-      theme: { background: "#0b0e14" },
+      // Transparent so the username watermark behind the canvas shows through.
+      allowTransparency: true,
+      theme: { background: "rgba(0,0,0,0)" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -228,7 +231,18 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
 
   return (
     <div className="relative h-full w-full bg-[#0b0e14]">
-      <div ref={containerRef} className="absolute inset-0 p-2" />
+      {/* Faint username watermark behind the terminal so you can tell whose session this is. */}
+      {username && (
+        <div className="absolute inset-0 z-0 grid place-items-center pointer-events-none select-none overflow-hidden">
+          <div className="text-center -rotate-12">
+            <div className="font-mono font-bold uppercase tracking-widest text-white/[0.05] leading-none whitespace-nowrap text-[12vw]">
+              {username}
+            </div>
+            <div className="font-mono text-white/[0.06] mt-2 text-[2.2vw]">{tab.label}</div>
+          </div>
+        </div>
+      )}
+      <div ref={containerRef} className="absolute inset-0 z-10 p-2" />
 
       {(phase === "connected" || phase === "error") && (
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
