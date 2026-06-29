@@ -38,6 +38,9 @@ import { makeBackupRoutes } from "./routes/backup.js";
 import { AppSettingsRepository } from "./repos/appSettings.js";
 import { CommandHistoryRepository } from "./repos/commandHistoryRepo.js";
 import { BackupRepository } from "./repos/backupRepo.js";
+import { RoleRepository } from "./repos/roleRepo.js";
+import { RoleService } from "./domain/roleService.js";
+import { makeRoleRoutes } from "./routes/roles.js";
 import { makeSshGateway } from "./ssh/gateway.js";
 import { makeSftpGateway } from "./ssh/sftpGateway.js";
 import { makeVncGateway } from "./vnc/gateway.js";
@@ -73,6 +76,10 @@ async function main() {
   const tunnels = new TunnelManager({ hosts, credentials, log });
   // Backup / restore of a user's own session data.
   const backup = new BackupRepository(pool, secretBox);
+  // Custom roles — load the DB-backed RBAC resolver before serving traffic.
+  const roles = new RoleRepository(pool);
+  const roleService = new RoleService(roles);
+  await roleService.reload();
 
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
@@ -115,7 +122,8 @@ async function main() {
   }), { prefix: "/api/v1/auth" });
 
   await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
-  await app.register(makeAdminRoutes({ users, register: registerUC, jwt }), { prefix: "/api/v1/admin" });
+  await app.register(makeAdminRoutes({ users, register: registerUC, roleService, jwt }), { prefix: "/api/v1/admin" });
+  await app.register(makeRoleRoutes({ roles, roleService, audit, jwt }), { prefix: "/api/v1/roles" });
 
   // Phase 2 — Session Management routes
   await app.register(makeFolderRoutes({ folders, audit, jwt }), { prefix: "/api/v1/folders" });

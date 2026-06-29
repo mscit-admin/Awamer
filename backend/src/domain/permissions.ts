@@ -1,13 +1,17 @@
 /**
  * Role-based access control (RBAC).
  *
- * Every authenticated user can *view* their own inventory (hosts, folders,
- * tags, credential metadata, history). The capabilities below are the extra
- * powers granted on top of that baseline, mapped per role. The same matrix is
- * mirrored in the desktop/web client (shared/lib/permissions.ts) for UI
- * gating, but the server is the source of truth and enforces it.
+ * PERMISSIONS is the fixed, code-defined catalog of capabilities the server
+ * actually enforces — new permissions are added here when a feature needs one
+ * (see CLAUDE.md). ROLES, by contrast, are dynamic: they live in the `roles`
+ * table and an admin can create roles granting any subset of this catalog.
+ *
+ * `can()` / `permissionsFor()` resolve a role's permissions through a swappable
+ * resolver. At startup the server installs a DB-backed resolver
+ * (setPermissionResolver); until then (and in unit tests) a static fallback
+ * built from the seeded built-in roles is used.
  */
-import type { Role } from "./index.js";
+import { BUILTIN_ROLE_KEYS } from "./index.js";
 
 export const PERMISSIONS = [
   "resources:write",    // create / edit / delete hosts, credentials, folders, tags
@@ -21,23 +25,51 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-const ALL: Permission[] = [...PERMISSIONS];
-
-export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  super_admin: ALL,
-  admin: ALL,
-  // Full self-service over own resources, but no user administration.
-  user: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage"],
-  // Browse-only: can view the inventory, cannot modify, connect, or reveal secrets.
-  readonly: [],
-  // Like read-only, plus access to audit logs.
-  auditor: ["audit:read"],
+/** Human-readable catalog, served to the UI so it can render the role editor. */
+export const PERMISSION_META: Record<Permission, { label: string; description: string }> = {
+  "resources:write":    { label: "Manage resources", description: "Create, edit and delete hosts, credentials, folders and tags" },
+  "sessions:connect":   { label: "Open sessions", description: "Open SSH / SFTP / VNC sessions" },
+  "credentials:reveal": { label: "Reveal secrets", description: "View a credential's decrypted secret" },
+  "tunnels:manage":     { label: "Manage tunnels", description: "Create and use SSH port-forwarding tunnels" },
+  "backup:manage":      { label: "Backup & restore", description: "Export and restore backups of own data" },
+  "users:manage":       { label: "Manage users", description: "Create, edit and delete user accounts and roles" },
+  "audit:read":         { label: "View audit log", description: "Read the audit log" },
 };
 
-export function permissionsFor(role: string): Permission[] {
-  return ROLE_PERMISSIONS[role as Role] ?? [];
+const ALL: Permission[] = [...PERMISSIONS];
+
+/** Seed definitions for the built-in roles (also the static fallback matrix). */
+export const BUILTIN_ROLES: { key: string; name: string; description: string; permissions: Permission[] }[] = [
+  { key: "super_admin", name: "Super admin", description: "Full access to everything.", permissions: ALL },
+  { key: "admin",       name: "Admin",       description: "Full access to everything.", permissions: ALL },
+  { key: "user",        name: "User",        description: "Self-service over own resources; no user administration.",
+    permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage"] },
+  { key: "readonly",    name: "Read-only",   description: "Browse the inventory; cannot modify, connect, or reveal secrets.", permissions: [] },
+  { key: "auditor",     name: "Auditor",     description: "Read-only plus access to audit logs.", permissions: ["audit:read"] },
+];
+
+export function isPermission(s: string): s is Permission {
+  return (PERMISSIONS as readonly string[]).includes(s);
+}
+
+// --- Swappable resolver -----------------------------------------------------
+
+const staticMatrix: Record<string, Permission[]> = Object.fromEntries(
+  BUILTIN_ROLES.map((r) => [r.key, r.permissions]),
+);
+void BUILTIN_ROLE_KEYS; // (kept for documentation/parity with domain)
+
+let resolver: (roleKey: string) => readonly string[] = (key) => staticMatrix[key] ?? [];
+
+/** Install a resolver (e.g. DB-backed). Pass null to revert to the static one. */
+export function setPermissionResolver(fn: ((roleKey: string) => readonly string[]) | null): void {
+  resolver = fn ?? ((key) => staticMatrix[key] ?? []);
+}
+
+export function permissionsFor(role: string): readonly string[] {
+  return resolver(role);
 }
 
 export function can(role: string, perm: Permission): boolean {
-  return permissionsFor(role).includes(perm);
+  return resolver(role).includes(perm);
 }

@@ -8,27 +8,24 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { UserPlus, Loader2, AlertCircle, Trash2, ShieldCheck, X, Download } from "lucide-react";
 
-import { usersAdminApi, ROLES, type AdminUser, type Role } from "./usersAdminApi";
+import { usersAdminApi, type AdminUser } from "./usersAdminApi";
+import { rolesApi } from "./rolesApi";
 import { exportUsersCsv, exportUsersJson } from "./exportUsers";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { ApiError } from "@/shared/lib/api";
 
-const ROLE_LABEL: Record<Role, string> = {
-  super_admin: "Super admin",
-  admin: "Admin",
-  user: "User",
-  readonly: "Read-only",
-  auditor: "Auditor",
-};
+export interface RoleOption { key: string; name: string }
 
 export function UsersPage() {
   const me = useAuthStore((s) => s.user);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [roleOpts, setRoleOpts] = useState<RoleOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
   const msg = (e: unknown) => (e instanceof ApiError ? humanize(e.message) : e instanceof Error ? e.message : "error");
+  const roleLabel = (key: string) => roleOpts.find((o) => o.key === key)?.name ?? key;
 
   async function load() {
     setLoading(true);
@@ -43,9 +40,12 @@ export function UsersPage() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    rolesApi.list().then((r) => setRoleOpts(r.data.map((x) => ({ key: x.key, name: x.name })))).catch(() => {});
+  }, []);
 
-  async function changeRole(u: AdminUser, role: Role) {
+  async function changeRole(u: AdminUser, role: string) {
     try { await usersAdminApi.update(u.id, { role }); await load(); }
     catch (e) { setError(msg(e)); }
   }
@@ -133,11 +133,12 @@ export function UsersPage() {
                       <select
                         value={u.role}
                         disabled={isSelf}
-                        onChange={(e) => changeRole(u, e.target.value as Role)}
+                        onChange={(e) => changeRole(u, e.target.value)}
                         className="input text-xs py-1"
                         title={isSelf ? "You can't change your own role" : ""}
                       >
-                        {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                        {roleOpts.length === 0 && <option value={u.role}>{roleLabel(u.role)}</option>}
+                        {roleOpts.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
                       </select>
                     </td>
                     <td className="px-4 py-2">
@@ -171,6 +172,7 @@ export function UsersPage() {
 
       {showCreate && (
         <CreateUserModal
+          roleOpts={roleOpts}
           onClose={() => setShowCreate(false)}
           onCreated={() => { setShowCreate(false); void load(); }}
           onError={setError}
@@ -180,7 +182,8 @@ export function UsersPage() {
   );
 }
 
-function CreateUserModal({ onClose, onCreated, onError }: {
+function CreateUserModal({ roleOpts, onClose, onCreated, onError }: {
+  roleOpts: RoleOption[];
   onClose: () => void;
   onCreated: () => void;
   onError: (m: string) => void;
@@ -189,7 +192,7 @@ function CreateUserModal({ onClose, onCreated, onError }: {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("user");
+  const [role, setRole] = useState<string>("user");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -236,8 +239,8 @@ function CreateUserModal({ onClose, onCreated, onError }: {
         </div>
         <div>
           <label className="block text-xs text-fg-muted mb-1">Role</label>
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="input w-full">
-            {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+          <select value={role} onChange={(e) => setRole(e.target.value)} className="input w-full">
+            {(roleOpts.length ? roleOpts : [{ key: "user", name: "User" }]).map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
           </select>
         </div>
 

@@ -30,8 +30,18 @@ When adding such a feature:
 
 Current permissions: `resources:write`, `sessions:connect`,
 `credentials:reveal`, `tunnels:manage`, `backup:manage`, `users:manage`,
-`audit:read`. Roles are the 5 built-ins (super_admin, admin, user, readonly,
-auditor) with a fixed matrix — there are no DB-stored custom roles yet.
+`audit:read` — defined in code; add new ones here when a feature needs them.
+
+**Roles are dynamic** (DB table `roles`, migration `007`). The 5 built-ins
+(super_admin, admin, user, readonly, auditor) are seeded and **locked**; admins
+create custom roles from the permission catalog via the Roles page. `can()` /
+`permissionsFor()` resolve through `RoleService` (DB-backed resolver installed at
+startup + reloaded on role changes). `users.role` is an FK to `roles.key`. The
+server sends each user's **effective permissions** in the user payload; the
+client gates UI off `user.permissions` (`useCan` / `hasPerm`), not a static
+matrix. When adding a permission, update its grants in the built-in role
+definitions in `permissions.ts` AND the seed in a new migration if you want
+existing built-in roles to include it.
 
 ## General conventions
 

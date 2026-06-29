@@ -26,7 +26,7 @@ import { Logo, useAppName } from "@/shared/branding";
 import { currentTheme, setTheme, type Theme } from "@/shared/lib/theme";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
-import { roleCan, type Permission } from "@/shared/lib/permissions";
+import { hasPerm, type Permission } from "@/shared/lib/permissions";
 import { cn } from "@/shared/lib/cn";
 
 interface NavItem {
@@ -59,8 +59,11 @@ const SECONDARY_NAV: NavItem[] = [
 
 // Shown only to admin / super_admin.
 const ADMIN_NAV: NavItem[] = [
-  { to: "/users", label: "Users", icon: <Users className="size-4" />, available: true },
-  { to: "/roles", label: "Roles & Permissions", icon: <Shield className="size-4" />, available: true },
+  { to: "/users", label: "Users", icon: <Users className="size-4" />, available: true, perm: "users:manage" },
+  { to: "/roles", label: "Roles & Permissions", icon: <Shield className="size-4" />, available: true, perm: "users:manage" },
+];
+// Branding is gated by the admin role (server enforces requireRole), not a permission.
+const ADMIN_ROLE_NAV: NavItem[] = [
   { to: "/branding", label: "Branding", icon: <Palette className="size-4" />, available: true },
 ];
 
@@ -69,7 +72,8 @@ export function DashboardLayout() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
-  const canAudit = roleCan(user?.role, "audit:read");
+  const canManageUsers = hasPerm(user?.permissions, "users:manage");
+  const canAudit = hasPerm(user?.permissions, "audit:read");
   const appName = useAppName();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setThemeState] = useState<Theme>(() => currentTheme());
@@ -115,16 +119,19 @@ export function DashboardLayout() {
           <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 font-mono">
             Workspace
           </div>
-          {PRIMARY_NAV.filter((i) => !i.perm || roleCan(user?.role, i.perm)).map((item) => (
+          {PRIMARY_NAV.filter((i) => !i.perm || hasPerm(user?.permissions, i.perm)).map((item) => (
             <NavItemLink key={item.to} item={item} />
           ))}
 
-          {(isAdmin || canAudit) && (
+          {(isAdmin || canManageUsers || canAudit) && (
             <>
               <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 mt-4 font-mono">
                 Administration
               </div>
-              {isAdmin && ADMIN_NAV.map((item) => (
+              {ADMIN_NAV.filter((i) => !i.perm || hasPerm(user?.permissions, i.perm)).map((item) => (
+                <NavItemLink key={item.to} item={item} />
+              ))}
+              {isAdmin && ADMIN_ROLE_NAV.map((item) => (
                 <NavItemLink key={item.to} item={item} />
               ))}
               {canAudit && (
@@ -136,7 +143,7 @@ export function DashboardLayout() {
           <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 mt-4 font-mono">
             Account
           </div>
-          {SECONDARY_NAV.filter((i) => !i.perm || roleCan(user?.role, i.perm)).map((item) => (
+          {SECONDARY_NAV.filter((i) => !i.perm || hasPerm(user?.permissions, i.perm)).map((item) => (
             <NavItemLink key={item.to} item={item} />
           ))}
         </nav>

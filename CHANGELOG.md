@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.24.0] — 2026-06-28 — Custom roles (admin-managed RBAC)
+
+### Added
+- **Create & manage custom roles.** Roles are no longer a fixed enum — admins
+  can create roles and grant them any subset of the permission catalog from the
+  **Roles & Permissions** page (built-in roles are locked).
+  - migration `007_custom_roles`: `roles` table seeded with the 5 built-ins;
+    `users.role` becomes an FK to `roles.key` (the old CHECK is dropped).
+  - `RoleRepository` + `RoleService` install a **DB-backed permission resolver**
+    at startup and reload it on any role change, so `can()`/`permissionsFor()`
+    reflect live role definitions without re-login.
+  - `GET /api/v1/roles` (roles + permission catalog, any auth user);
+    `POST/PATCH/DELETE /api/v1/roles/:id` (require `users:manage`). Built-in
+    roles can't be edited/deleted; a role in use can't be deleted; assigned
+    permissions are validated against the catalog.
+  - admin user create/update now validate the role against existing roles
+    (DB FK is the backstop).
+  - the user payload now includes the user's **effective permissions**; the
+    client gates UI off that list (`useCan`/`hasPerm`) instead of a hardcoded
+    matrix. Roles page is now an editor; the Users role dropdown is dynamic.
+  - verified end-to-end against PostgreSQL 16: seeding, DB-backed resolver,
+    custom-role CRUD, FK accept/reject, in-use delete guard, and down migration.
+
+### Changed
+- `Role` is now an open string (a role key) rather than a fixed union.
+
+---
+
 ## [1.23.0] — 2026-06-28 — RBAC: dedicated permissions for tunnels & backup
 
 ### Added
