@@ -72,8 +72,12 @@ export function DashboardLayout() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
-  const canManageUsers = hasPerm(user?.permissions, "users:manage");
-  const canAudit = hasPerm(user?.permissions, "audit:read");
+  // Admins always pass; if the server hasn't sent a permissions list (older
+  // session / backend), don't hide anything — fall back to showing it.
+  const can = (perm: Permission) =>
+    isAdmin || !Array.isArray(user?.permissions) || hasPerm(user?.permissions, perm);
+  const canManageUsers = can("users:manage");
+  const canAudit = can("audit:read");
   const appName = useAppName();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [theme, setThemeState] = useState<Theme>(() => currentTheme());
@@ -119,7 +123,7 @@ export function DashboardLayout() {
           <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 font-mono">
             Workspace
           </div>
-          {PRIMARY_NAV.filter((i) => !i.perm || hasPerm(user?.permissions, i.perm)).map((item) => (
+          {PRIMARY_NAV.filter((i) => !i.perm || can(i.perm)).map((item) => (
             <NavItemLink key={item.to} item={item} />
           ))}
 
@@ -128,7 +132,7 @@ export function DashboardLayout() {
               <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 mt-4 font-mono">
                 Administration
               </div>
-              {ADMIN_NAV.filter((i) => !i.perm || hasPerm(user?.permissions, i.perm)).map((item) => (
+              {ADMIN_NAV.filter((i) => !i.perm || can(i.perm)).map((item) => (
                 <NavItemLink key={item.to} item={item} />
               ))}
               {isAdmin && ADMIN_ROLE_NAV.map((item) => (
@@ -143,7 +147,7 @@ export function DashboardLayout() {
           <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 mt-4 font-mono">
             Account
           </div>
-          {SECONDARY_NAV.filter((i) => !i.perm || hasPerm(user?.permissions, i.perm)).map((item) => (
+          {SECONDARY_NAV.filter((i) => !i.perm || can(i.perm)).map((item) => (
             <NavItemLink key={item.to} item={item} />
           ))}
         </nav>

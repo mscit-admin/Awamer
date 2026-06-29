@@ -21,10 +21,13 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-/** Does the current user hold a permission? */
+/** Does the current user hold a permission?
+ *  If the server hasn't sent an effective-permissions list (older session or
+ *  backend), we don't gate the UI — the server still enforces every action. */
 export function useCan(perm: Permission): boolean {
   const perms = useAuthStore((s) => s.user?.permissions);
-  return Array.isArray(perms) && perms.includes(perm);
+  if (!Array.isArray(perms)) return true;
+  return perms.includes(perm);
 }
 
 /** Non-hook check against an explicit permission list (e.g. the current user's). */
