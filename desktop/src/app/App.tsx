@@ -37,6 +37,7 @@ import { FilesPage } from "@/modules/sessions/components/FilesPage";
 import { NetworkPage } from "@/modules/sessions/components/NetworkPage";
 import { TunnelsPage } from "@/modules/sessions/components/TunnelsPage";
 import { BackupPage } from "@/modules/sessions/components/BackupPage";
+import { NotesPage } from "@/modules/notes/NotesPage";
 import { isTauri } from "@/shared/lib/tauri";
 
 export default function App() {
@@ -92,6 +93,7 @@ export default function App() {
         <Route path="/credentials" element={<CredentialsPage />} />
         <Route path="/credentials/import/keepass" element={<KeepassImportPage />} />
         <Route path="/tags" element={<TagsPage />} />
+        <Route path="/notes" element={<NotesPage />} />
         <Route path="/folders" element={<FoldersPage />} />
 
         <Route path="/users" element={<UsersPage />} />

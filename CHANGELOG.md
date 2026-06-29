@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.31.0] — 2026-06-29 — Notes
+
+### Added
+- **Notes** — a personal, per-user notes screen (sidebar → Notes): create, edit,
+  pin, search and delete notes. Each note can have a title + body.
+  - migration `009_notes` (per-user; optional `host_id` with a `host_label`
+    snapshot) + `NotesRepository`; `GET/POST/PATCH/DELETE /api/v1/notes`
+    (self-scoped, any signed-in user).
+  - **Quick notes from the terminal**: a **Notes** button in the web terminal
+    toolbar opens a slide-over scoped to the current host — notes you take there
+    are tagged with that host and show up on the Notes page with a host badge.
+  - verified end-to-end against PostgreSQL 16 (CRUD, host filter, search, pin
+    ordering, per-user isolation).
+
+---
+
 ## [1.30.1] — 2026-06-29 — Drag assets into folders
 
 ### Added

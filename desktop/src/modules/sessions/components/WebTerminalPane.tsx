@@ -11,7 +11,7 @@
  *   recv: binary = output, text JSON = {type:"status"|"error",...}
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, Loader2, Lock, Power, History, Check } from "lucide-react";
+import { AlertCircle, Loader2, Lock, Power, History, Check, StickyNote } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -22,6 +22,7 @@ import { useTerminalTabs, type TerminalTab } from "../store/terminalTabsStore";
 import { useCommandHistoryPref } from "../store/commandHistoryPref";
 import { commandHistoryApi } from "../api/commandHistoryApi";
 import { CommandHistoryPanel } from "./CommandHistoryPanel";
+import { NotesPanel } from "@/modules/notes/NotesPanel";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
@@ -93,6 +94,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   useEffect(() => { saveHistoryRef.current = saveHistory; }, [saveHistory]);
 
   const [showHistory, setShowHistory] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
 
   const [phase, setPhase] = useState<"connecting" | "connected" | "error" | "need_password">("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -266,6 +268,13 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
           >
             <History className="size-3.5" /> History
           </button>
+          <button
+            onClick={() => setShowNotes(true)}
+            title="Notes for this host"
+            className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
+          >
+            <StickyNote className="size-3.5" /> Notes
+          </button>
         </div>
       )}
 
@@ -276,6 +285,10 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
           onClose={() => setShowHistory(false)}
           onPick={(cmd) => { insertCommand(cmd); setShowHistory(false); }}
         />
+      )}
+
+      {showNotes && (
+        <NotesPanel hostId={tab.hostId} hostLabel={tab.label} onClose={() => setShowNotes(false)} />
       )}
 
       {phase === "connecting" && (

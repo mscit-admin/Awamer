@@ -13,6 +13,7 @@ import {
   Cable,
   DatabaseBackup,
   Mail,
+  StickyNote,
   Shield,
   Activity,
   Users,
@@ -50,6 +51,7 @@ const PRIMARY_NAV: NavItem[] = [
   { to: "/tunnels", label: "Tunnels", icon: <Cable className="size-4" />, available: true, perm: "tunnels:manage" },
   { to: "/folders", label: "Folders", icon: <Folder className="size-4" />, available: true },
   { to: "/tags", label: "Tags", icon: <Tag className="size-4" />, available: true },
+  { to: "/notes", label: "Notes", icon: <StickyNote className="size-4" />, available: true },
 ];
 
 const SECONDARY_NAV: NavItem[] = [

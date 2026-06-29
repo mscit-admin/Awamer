@@ -42,6 +42,8 @@ import { makeCommandHistoryRoutes } from "./routes/commandHistory.js";
 import { makeBackupRoutes } from "./routes/backup.js";
 import { AppSettingsRepository } from "./repos/appSettings.js";
 import { CommandHistoryRepository } from "./repos/commandHistoryRepo.js";
+import { NotesRepository } from "./repos/notesRepo.js";
+import { makeNotesRoutes } from "./routes/notes.js";
 import { BackupRepository } from "./repos/backupRepo.js";
 import { RoleRepository } from "./repos/roleRepo.js";
 import { RoleService } from "./domain/roleService.js";
@@ -77,6 +79,7 @@ async function main() {
   const hosts = new HostRepository(pool);
   const history = new ConnectionHistoryRepository(pool);
   const commands = new CommandHistoryRepository(pool);
+  const notes = new NotesRepository(pool);
   const appSettings = new AppSettingsRepository(pool);
   // Phase 5 — server-managed SSH local tunnels (in-memory).
   const tunnels = new TunnelManager({ hosts, credentials, log });
@@ -148,6 +151,7 @@ async function main() {
   await app.register(makeNetworkRoutes({ jwt }), { prefix: "/api/v1/network" });
   await app.register(makeBrandingRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/branding" });
   await app.register(makeCommandHistoryRoutes({ commands, jwt }), { prefix: "/api/v1/command-history" });
+  await app.register(makeNotesRoutes({ notes, jwt }), { prefix: "/api/v1/notes" });
   await app.register(makeBackupRoutes({ backup, jwt }), { prefix: "/api/v1/backup" });
 
   // Phase 5 — browser SSH gateway (WebSocket).
