@@ -187,9 +187,13 @@ export function HostDetailPage() {
           <div className="text-xs text-fg-muted">
             {host.protocol === "ssh"
               ? "Open an interactive SSH terminal, or browse files over SFTP."
-              : host.protocol === "vnc"
-                ? "Open the remote desktop over VNC."
-                : `${host.protocol.toUpperCase()} support arrives in a later phase.`}
+              : host.protocol === "sftp"
+                ? "Browse, upload and download files over SFTP."
+                : host.protocol === "vnc"
+                  ? "Open the remote desktop over VNC."
+                  : (host.protocol === "http" || host.protocol === "https")
+                    ? "Open the web service in a new tab."
+                    : `${host.protocol.toUpperCase()} is not supported yet.`}
           </div>
         </div>
         {host.protocol === "ssh" && (
@@ -202,13 +206,27 @@ export function HostDetailPage() {
             </button>
           </>
         )}
+        {host.protocol === "sftp" && (
+          <button onClick={() => navigate(`/hosts/${host.id}/sftp`)} className="btn-primary" title="Browse files via SFTP">
+            <HardDriveIcon className="size-3.5" /> Browse files
+          </button>
+        )}
         {host.protocol === "vnc" && (
           <button onClick={() => navigate(`/hosts/${host.id}/vnc`)} className="btn-primary" title="Open remote desktop">
             Open desktop
           </button>
         )}
-        {host.protocol !== "ssh" && host.protocol !== "vnc" && (
-          <span className="text-xs text-fg-muted">Not yet supported</span>
+        {(host.protocol === "http" || host.protocol === "https") && (
+          <a
+            href={`${host.protocol}://${host.hostname}:${host.port}`}
+            target="_blank" rel="noreferrer noopener"
+            className="btn-primary" title="Open in browser"
+          >
+            Open
+          </a>
+        )}
+        {!["ssh", "sftp", "vnc", "http", "https"].includes(host.protocol) && (
+          <span className="text-xs text-fg-muted">Not supported yet</span>
         )}
       </div>
       )}

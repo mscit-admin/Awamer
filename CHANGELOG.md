@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.26.1] — 2026-06-28 — Connect action for SFTP/HTTP assets
+
+### Fixed
+- The host detail **Connect to host** card showed "Not yet supported" for
+  `sftp` assets even though the browser SFTP browser exists. It now offers
+  **Browse files** for `sftp` hosts, **Open** (new tab) for `http`/`https`
+  hosts, alongside the existing SSH (terminal + SFTP) and VNC actions. Only
+  genuinely unimplemented protocols (rdp, telnet, serial, custom) still show
+  "Not supported yet".
+
+---
+
 ## [1.26.0] — 2026-06-28 — Asset logos
 
 ### Added
