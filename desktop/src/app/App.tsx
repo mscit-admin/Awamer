@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
@@ -41,11 +41,21 @@ import { isTauri } from "@/shared/lib/tauri";
 
 export default function App() {
   const restore = useAuthStore((s) => s.restore);
+  const navigate = useNavigate();
 
   // Restore session from secure keyring on first mount.
   useEffect(() => {
     void restore();
   }, [restore]);
+
+  // Password-reset links land on the root with ?reset_token=… (so they work
+  // even without server-side SPA deep-link fallback). Forward to the reset
+  // screen client-side and strip the param.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const token = sp.get("reset_token");
+    if (token) navigate(`/reset-password?token=${encodeURIComponent(token)}`, { replace: true });
+  }, [navigate]);
 
   return (
     <Routes>

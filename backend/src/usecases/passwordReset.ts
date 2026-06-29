@@ -47,7 +47,10 @@ export class PasswordResetUseCase {
     await this.resets.create(user.id, hashToken(raw), new Date(Date.now() + TOKEN_TTL_MS));
 
     const base = (await this.mailer.baseUrl()) || fallbackBaseUrl;
-    const link = `${base.replace(/\/+$/, "")}/reset-password?token=${raw}`;
+    // Point at the app root with the token as a query param: the root always
+    // serves the SPA, so the link works even without server-side deep-link
+    // (history) fallback. The app forwards it to the reset screen on load.
+    const link = `${base.replace(/\/+$/, "")}/?reset_token=${raw}`;
 
     if (await this.mailer.isConfigured()) {
       try {
