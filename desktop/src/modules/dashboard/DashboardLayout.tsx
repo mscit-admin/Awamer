@@ -93,7 +93,7 @@ export function DashboardLayout() {
   }
 
   return (
-    <div className="h-full flex md:grid md:grid-cols-[220px_1fr] bg-bg">
+    <div className="h-full flex md:grid md:grid-cols-[220px_1fr] md:grid-rows-1 md:overflow-hidden bg-bg">
       {/* Backdrop (mobile only, when drawer is open) */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />
@@ -183,7 +183,7 @@ export function DashboardLayout() {
       </aside>
 
       {/* Main column */}
-      <div className="flex-1 min-w-0 flex flex-col h-full">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col h-full">
         {/* Mobile top bar with hamburger */}
         <div className="md:hidden flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-surface">
           <button onClick={() => setSidebarOpen(true)} className="btn-ghost" aria-label="Open menu">
