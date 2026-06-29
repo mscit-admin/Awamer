@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.27.0] — 2026-06-28 — Telnet (browser terminal)
+
+### Added
+- **Browser Telnet.** Connect to a Telnet host from the asset's **Connect**
+  button — an interactive xterm.js terminal over a backend WebSocket↔TCP relay
+  (`/api/v1/telnet/connect`), gated by `sessions:connect`. Telnet option
+  negotiation (IAC) is handled server-side (accepts ECHO/SGA, refuses the rest,
+  strips subnegotiation) so the terminal only sees clean output; the login
+  happens in-stream. Connection history is recorded like SSH/VNC.
+  - verified: IAC negotiation unit tests (ECHO/SGA accept, others refused,
+    escaped 0xFF, subnegotiation stripping, sequences split across chunks).
+
+### Notes
+- **RDP** and **Serial** remain unsupported: RDP needs a Guacamole-style
+  gateway (a separate `guacd` service), and Serial requires host-attached
+  hardware (or the browser Web Serial API) — both are larger, separate efforts.
+
+---
+
 ## [1.26.1] — 2026-06-28 — Connect action for SFTP/HTTP assets
 
 ### Fixed

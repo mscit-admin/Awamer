@@ -29,6 +29,7 @@ import { TerminalWorkspace } from "@/modules/sessions/components/TerminalWorkspa
 import { SftpPage } from "@/modules/sessions/components/SftpPage";
 import { WebSftpPage } from "@/modules/sessions/components/WebSftpPage";
 import { VncPage } from "@/modules/sessions/components/VncPage";
+import { TelnetPage } from "@/modules/sessions/components/TelnetPage";
 import { FilesPage } from "@/modules/sessions/components/FilesPage";
 import { NetworkPage } from "@/modules/sessions/components/NetworkPage";
 import { TunnelsPage } from "@/modules/sessions/components/TunnelsPage";
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="/hosts/:id/terminal" element={<TerminalWorkspace />} />
         <Route path="/hosts/:id/sftp" element={isTauri ? <SftpPage /> : <WebSftpPage />} />
         <Route path="/hosts/:id/vnc" element={<VncPage />} />
+        <Route path="/hosts/:id/telnet" element={<TelnetPage />} />
         <Route path="/terminal" element={<TerminalWorkspace />} />
         <Route path="/files" element={<FilesPage />} />
         <Route path="/network" element={<NetworkPage />} />

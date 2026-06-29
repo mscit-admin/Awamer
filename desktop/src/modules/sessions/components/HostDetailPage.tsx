@@ -191,9 +191,11 @@ export function HostDetailPage() {
                 ? "Browse, upload and download files over SFTP."
                 : host.protocol === "vnc"
                   ? "Open the remote desktop over VNC."
-                  : (host.protocol === "http" || host.protocol === "https")
-                    ? "Open the web service in a new tab."
-                    : `${host.protocol.toUpperCase()} is not supported yet.`}
+                  : host.protocol === "telnet"
+                    ? "Open an interactive Telnet terminal."
+                    : (host.protocol === "http" || host.protocol === "https")
+                      ? "Open the web service in a new tab."
+                      : `${host.protocol.toUpperCase()} is not supported yet.`}
           </div>
         </div>
         {host.protocol === "ssh" && (
@@ -216,6 +218,11 @@ export function HostDetailPage() {
             Open desktop
           </button>
         )}
+        {host.protocol === "telnet" && (
+          <button onClick={() => navigate(`/hosts/${host.id}/telnet`)} className="btn-primary" title="Open Telnet terminal">
+            Connect
+          </button>
+        )}
         {(host.protocol === "http" || host.protocol === "https") && (
           <a
             href={`${host.protocol}://${host.hostname}:${host.port}`}
@@ -225,7 +232,7 @@ export function HostDetailPage() {
             Open
           </a>
         )}
-        {!["ssh", "sftp", "vnc", "http", "https"].includes(host.protocol) && (
+        {!["ssh", "sftp", "vnc", "telnet", "http", "https"].includes(host.protocol) && (
           <span className="text-xs text-fg-muted">Not supported yet</span>
         )}
       </div>
