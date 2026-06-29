@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.29.1] — 2026-06-29 — Readable API errors + SMTP TLS option
+
+### Fixed
+- **API error messages showed "[object Object]".** The client stringified the
+  whole `{ code, message }` error object instead of its `message`. Now it reads
+  `error.message` (falling back to `code` / Fastify's `message`), so real error
+  text shows everywhere — including the SMTP **Send test** result.
+
+### Added
+- **SMTP "Allow self-signed / invalid TLS certificate"** option, for
+  self-hosted mail servers whose certificate doesn't validate
+  (`tls.rejectUnauthorized=false` when enabled).
+
+---
+
 ## [1.29.0] — 2026-06-28 — Password reset by email + SMTP config
 
 ### Added

@@ -34,6 +34,7 @@ export function makeSmtpRoutes(deps: Deps): FastifyPluginAsync {
       password: z.string().max(512).nullable().optional(),
       from: z.string().max(320).nullable().optional(),
       base_url: z.string().max(512).nullable().optional(),
+      allow_invalid_certs: z.boolean().nullable().optional(),
     });
 
     app.put("/", async (req, reply) => {

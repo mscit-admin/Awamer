@@ -16,6 +16,7 @@ export function SmtpPage() {
   const [password, setPassword] = useState("");
   const [from, setFrom] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [allowInvalid, setAllowInvalid] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -29,7 +30,7 @@ export function SmtpPage() {
   function fill(c: SmtpConfig) {
     setCfg(c);
     setHost(c.host); setPort(c.port || 587); setSecure(c.secure);
-    setUser(c.user); setFrom(c.from); setBaseUrl(c.base_url);
+    setUser(c.user); setFrom(c.from); setBaseUrl(c.base_url); setAllowInvalid(c.allow_invalid_certs);
   }
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export function SmtpPage() {
         user: user.trim() || null,
         from: from.trim() || null,
         base_url: baseUrl.trim() || null,
+        allow_invalid_certs: allowInvalid,
         // Only send the password when changed; blank keeps the stored one.
         ...(password ? { password } : {}),
       });
@@ -103,6 +105,12 @@ export function SmtpPage() {
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={secure} onChange={(e) => setSecure(e.target.checked)} className="accent-accent" />
               Use TLS on connect (port 465). Leave off for STARTTLS (587).
+            </label>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={allowInvalid} onChange={(e) => setAllowInvalid(e.target.checked)} className="accent-accent" />
+              Allow self-signed / invalid TLS certificate
+              <span className="text-2xs text-amber-300/80">(only for trusted self-hosted servers)</span>
             </label>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

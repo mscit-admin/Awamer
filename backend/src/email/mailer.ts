@@ -13,6 +13,7 @@ import type { Logger } from "../logger/index.js";
 const K = {
   host: "smtp_host", port: "smtp_port", secure: "smtp_secure",
   user: "smtp_user", pass: "smtp_pass", from: "smtp_from", baseUrl: "app_base_url",
+  allowInvalid: "smtp_allow_invalid_certs",
 } as const;
 const KEYS = Object.values(K);
 
@@ -20,12 +21,14 @@ const KEYS = Object.values(K);
 export interface SmtpPublicConfig {
   host: string; port: number; secure: boolean;
   user: string; from: string; base_url: string;
+  allow_invalid_certs: boolean;
   has_password: boolean; configured: boolean;
 }
 
 export interface SmtpUpdate {
   host?: string | null; port?: number | null; secure?: boolean | null;
   user?: string | null; password?: string | null; from?: string | null; base_url?: string | null;
+  allow_invalid_certs?: boolean | null;
 }
 
 export class MailService {
@@ -44,6 +47,7 @@ export class MailService {
       user: s[K.user] ?? "",
       from: s[K.from] ?? "",
       base_url: s[K.baseUrl] ?? "",
+      allow_invalid_certs: s[K.allowInvalid] === "true",
       has_password: !!s[K.pass],
       configured: !!(s[K.host] && s[K.from]),
     };
@@ -56,6 +60,7 @@ export class MailService {
     if (patch.user !== undefined) await this.settings.set(K.user, patch.user?.trim() || null);
     if (patch.from !== undefined) await this.settings.set(K.from, patch.from?.trim() || null);
     if (patch.base_url !== undefined) await this.settings.set(K.baseUrl, patch.base_url?.trim().replace(/\/+$/, "") || null);
+    if (patch.allow_invalid_certs !== undefined) await this.settings.set(K.allowInvalid, patch.allow_invalid_certs ? "true" : "false");
     // Password: only overwrite when a non-empty value is supplied; "" keeps existing.
     if (patch.password) {
       await this.settings.set(K.pass, JSON.stringify(this.box.seal({ pass: patch.password })));
@@ -82,6 +87,8 @@ export class MailService {
       port: s[K.port] ? Number(s[K.port]) : 587,
       secure: s[K.secure] === "true",
       auth: user ? { user, pass } : undefined,
+      // Self-hosted servers often present self-signed / mismatched certs.
+      ...(s[K.allowInvalid] === "true" ? { tls: { rejectUnauthorized: false } } : {}),
     });
     return { tx, from: s[K.from]! };
   }

@@ -8,6 +8,7 @@ export interface SmtpConfig {
   user: string;
   from: string;
   base_url: string;
+  allow_invalid_certs: boolean;
   has_password: boolean;
   configured: boolean;
 }
@@ -20,6 +21,7 @@ export interface SmtpUpdate {
   password?: string | null;
   from?: string | null;
   base_url?: string | null;
+  allow_invalid_certs?: boolean | null;
 }
 
 export const smtpApi = {

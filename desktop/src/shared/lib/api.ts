@@ -86,8 +86,17 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
     let message = `HTTP ${response.status}`;
     try {
       payload = await response.json();
-      if (payload && typeof payload === "object" && "error" in payload) {
-        message = String((payload as { error: string }).error);
+      const p = payload as { error?: unknown; message?: unknown };
+      const err = p?.error;
+      if (err && typeof err === "object") {
+        // Our envelope: { error: { code, message } }
+        const eo = err as { message?: unknown; code?: unknown };
+        message = String(eo.message ?? eo.code ?? p?.message ?? message);
+      } else if (typeof err === "string") {
+        // Fastify default: { error: "Not Found", message: "..." }
+        message = String(p?.message ?? err);
+      } else if (typeof p?.message === "string") {
+        message = p.message;
       }
     } catch {
       // Non-JSON error body — keep generic message.
