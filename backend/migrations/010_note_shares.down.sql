@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS note_shares;
+ALTER TABLE notes DROP COLUMN IF EXISTS is_shared;

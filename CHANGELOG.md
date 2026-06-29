@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.32.0] — 2026-06-29 — Share notes with other users
+
+### Added
+- **Note sharing.** A note's owner can share it **with everyone** or with
+  **specific users**; recipients see it (read-only) on their Notes page with a
+  "shared by …" badge. Mirrors host sharing.
+  - migration `010_note_shares` (`notes.is_shared` + `note_shares` table).
+  - notes list visibility = own OR shared-with-everyone OR shared-with-you;
+    edit/delete/pin remain **owner-only** (recipients can't modify).
+  - `PATCH /api/v1/notes/:id` accepts `is_shared`; `GET/PUT
+    /api/v1/notes/:id/shares` manage the per-user list (owner only).
+  - frontend: a **Share** dialog on owned notes (everyone toggle + user
+    checklist); shared/owner badges in the list.
+  - verified end-to-end against PostgreSQL 16 (visibility for owner/specific/
+    everyone, recipient read-only, share-id management, unshare).
+
+---
+
 ## [1.31.1] — 2026-06-29 — Faster load (code-splitting)
 
 ### Changed

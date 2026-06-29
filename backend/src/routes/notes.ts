@@ -28,11 +28,17 @@ export function makeNotesRoutes(deps: Deps): FastifyPluginAsync {
       search: z.string().max(200).optional(),
     });
 
+    const view = (n: Awaited<ReturnType<NotesRepository["create"]>>) => ({
+      id: n.id, owner_id: n.ownerId, owner_username: n.ownerUsername, is_owner: n.isOwner,
+      is_shared: n.isShared, host_id: n.hostId, host_label: n.hostLabel,
+      title: n.title, body: n.body, pinned: n.pinned, created_at: n.createdAt, updated_at: n.updatedAt,
+    });
+
     app.get("/", async (req, reply) => {
       const parsed = listQuery.safeParse(req.query);
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       const notes = await deps.notes.list(req.auth!.sub, { hostId: parsed.data.host_id, search: parsed.data.search?.trim() || undefined });
-      return reply.send({ data: notes });
+      return reply.send({ data: notes.map(view) });
     });
 
     const createBody = z.object({
@@ -54,7 +60,7 @@ export function makeNotesRoutes(deps: Deps): FastifyPluginAsync {
         hostId: parsed.data.host_id ?? null,
         hostLabel: parsed.data.host_label ?? null,
       });
-      return reply.code(201).send(note);
+      return reply.code(201).send(view(note));
     });
 
     const idSchema = z.object({ id: z.string().regex(/^\d+$/) });
@@ -62,15 +68,18 @@ export function makeNotesRoutes(deps: Deps): FastifyPluginAsync {
       title: z.string().max(200).nullable().optional(),
       body: z.string().max(20000).optional(),
       pinned: z.boolean().optional(),
+      is_shared: z.boolean().optional(),
     });
 
     app.patch("/:id", async (req, reply) => {
       const idP = idSchema.safeParse(req.params);
       const bodyP = patchBody.safeParse(req.body);
       if (!idP.success || !bodyP.success) return reply.code(400).send({ error: { code: "validation_failed", message: "" } });
-      const note = await deps.notes.update(req.auth!.sub, idP.data.id, bodyP.data);
-      if (!note) return reply.code(404).send({ error: { code: "not_found", message: "note not found" } });
-      return reply.send(note);
+      const note = await deps.notes.update(req.auth!.sub, idP.data.id, {
+        title: bodyP.data.title, body: bodyP.data.body, pinned: bodyP.data.pinned, isShared: bodyP.data.is_shared,
+      });
+      if (!note) return reply.code(404).send({ error: { code: "not_found", message: "note not found, or you don't own it" } });
+      return reply.send(view(note));
     });
 
     app.delete("/:id", async (req, reply) => {
@@ -78,6 +87,25 @@ export function makeNotesRoutes(deps: Deps): FastifyPluginAsync {
       if (!idP.success) return reply.code(400).send({ error: { code: "validation_failed", message: "" } });
       const ok = await deps.notes.delete(req.auth!.sub, idP.data.id);
       if (!ok) return reply.code(404).send({ error: { code: "not_found", message: "note not found" } });
+      return reply.send({ ok: true });
+    });
+
+    // ---- per-user sharing (owner only) ----
+    app.get("/:id/shares", async (req, reply) => {
+      const idP = idSchema.safeParse(req.params);
+      if (!idP.success) return reply.code(400).send({ error: { code: "validation_failed", message: "" } });
+      const ids = await deps.notes.getShareUserIds(req.auth!.sub, idP.data.id);
+      if (ids === null) return reply.code(404).send({ error: { code: "not_found", message: "note not found, or you don't own it" } });
+      return reply.send({ user_ids: ids });
+    });
+
+    const sharesBody = z.object({ user_ids: z.array(z.string().uuid()).max(500) });
+    app.put("/:id/shares", async (req, reply) => {
+      const idP = idSchema.safeParse(req.params);
+      const bodyP = sharesBody.safeParse(req.body);
+      if (!idP.success || !bodyP.success) return reply.code(400).send({ error: { code: "validation_failed", message: "" } });
+      const ok = await deps.notes.setShares(req.auth!.sub, idP.data.id, bodyP.data.user_ids);
+      if (!ok) return reply.code(404).send({ error: { code: "not_found", message: "note not found, or you don't own it" } });
       return reply.send({ ok: true });
     });
   };
