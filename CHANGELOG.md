@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.24.1] — 2026-06-28 — Drag-and-drop SFTP upload
+
+### Added
+- **Drag-and-drop upload** in the browser SFTP file browser (used by the
+  **Files** page and each asset's SFTP view): drop one or more files onto the
+  window to upload them into the current remote directory, with a drop-zone
+  overlay and per-file progress. The Upload button now also accepts multiple
+  files. Folders are skipped with a notice (the browser File API can't read
+  directory contents).
+
+---
+
 ## [1.24.0] — 2026-06-28 — Custom roles (admin-managed RBAC)
 
 ### Added

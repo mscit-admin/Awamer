@@ -47,6 +47,7 @@ export function WebSftpPage({ hostId: hostIdProp }: { hostId?: string } = {}) {
   const [listing, setListing] = useState(false);
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
 
   // Inline text editor.
   const [editor, setEditor] = useState<{ path: string; text: string; saving: boolean; error: string | null } | null>(null);
@@ -165,19 +166,62 @@ export function WebSftpPage({ hostId: hostIdProp }: { hostId?: string } = {}) {
     });
   }
 
-  async function onUpload(ev: React.ChangeEvent<HTMLInputElement>) {
-    const file = ev.target.files?.[0];
-    ev.target.value = "";
-    if (!file || !sessionId) return;
+  async function uploadFiles(files: File[]) {
+    if (!sessionId || files.length === 0) return;
     await withBusy("upload", async () => {
-      const buf = await file.arrayBuffer();
-      let bin = "";
-      const bytes = new Uint8Array(buf);
-      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
-      const b64 = btoa(bin);
-      await webSftpApi.upload(sessionId, cwd.replace(/\/$/, "") + "/" + file.name, b64);
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]!;
+        setBusy(`upload:${i + 1}/${files.length} ${file.name}`);
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        // Base64-encode in chunks to avoid blowing the call stack on big files.
+        let bin = "";
+        const CHUNK = 0x8000;
+        for (let j = 0; j < bytes.length; j += CHUNK) {
+          bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(j, j + CHUNK)));
+        }
+        const b64 = btoa(bin);
+        await webSftpApi.upload(sessionId, cwd.replace(/\/$/, "") + "/" + file.name, b64);
+      }
       refresh();
     });
+  }
+
+  function onUpload(ev: React.ChangeEvent<HTMLInputElement>) {
+    const files = ev.target.files ? Array.from(ev.target.files) : [];
+    ev.target.value = "";
+    void uploadFiles(files);
+  }
+
+  // ---- drag & drop upload to the current directory ----
+  function onDragOver(e: React.DragEvent) {
+    if (e.dataTransfer?.types?.includes("Files")) {
+      e.preventDefault();
+      if (!dragOver) setDragOver(true);
+    }
+  }
+  function onDragLeave(e: React.DragEvent) {
+    // Only clear when leaving the drop zone itself, not its children.
+    if (e.currentTarget === e.target) setDragOver(false);
+  }
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const items = e.dataTransfer?.items;
+    let files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+    // Skip directories (the browser can't read them via the basic File API).
+    if (items) {
+      const dirNames = new Set<string>();
+      for (const it of Array.from(items)) {
+        const entry = (it as DataTransferItem & { webkitGetAsEntry?: () => { isDirectory?: boolean; name?: string } | null }).webkitGetAsEntry?.();
+        if (entry?.isDirectory && entry.name) dirNames.add(entry.name);
+      }
+      if (dirNames.size) {
+        files = files.filter((f) => !dirNames.has(f.name));
+        setError("Folders can't be uploaded by drag-and-drop — drop individual files.");
+      }
+    }
+    if (files.length) void uploadFiles(files);
   }
 
   const visible = sortAndFilterEntries(entries, filter, { key: "name", dir: "asc" });
@@ -215,7 +259,15 @@ export function WebSftpPage({ hostId: hostIdProp }: { hostId?: string } = {}) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+      {dragOver && (
+        <div className="absolute inset-0 z-30 bg-accent/10 border-2 border-dashed border-accent rounded-lg grid place-items-center pointer-events-none">
+          <div className="flex flex-col items-center gap-2 text-accent">
+            <Upload className="size-8" />
+            <div className="text-sm font-medium">Drop files to upload to <span className="font-mono">{cwd}</span></div>
+          </div>
+        </div>
+      )}
       {/* Toolbar */}
       <div className="flex items-center gap-1.5 md:gap-2 px-2 md:px-4 py-2 border-b border-border bg-bg-elevated/40 flex-wrap">
         <button onClick={() => navigate(-1)} className="btn-ghost text-xs"><ArrowLeft className="size-3.5" /></button>
@@ -227,9 +279,15 @@ export function WebSftpPage({ hostId: hostIdProp }: { hostId?: string } = {}) {
         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter…" className="input text-xs py-1 w-32" />
         <button onClick={refresh} className="btn-ghost text-xs" title="Refresh"><RefreshCw className={"size-3.5 " + (listing ? "animate-spin" : "")} /></button>
         <button onClick={doMkdir} className="btn-ghost text-xs" title="New folder"><FolderPlus className="size-3.5" /></button>
-        <button onClick={() => fileInputRef.current?.click()} className="btn-ghost text-xs" title="Upload"><Upload className="size-3.5" /></button>
-        <input ref={fileInputRef} type="file" hidden onChange={onUpload} />
+        <button onClick={() => fileInputRef.current?.click()} className="btn-ghost text-xs" title="Upload files"><Upload className="size-3.5" /></button>
+        <input ref={fileInputRef} type="file" multiple hidden onChange={onUpload} />
       </div>
+
+      {busy?.startsWith("upload") && (
+        <div className="px-4 py-1.5 bg-accent/10 border-b border-accent/30 text-accent text-xs flex items-center gap-2">
+          <Loader2 className="size-3.5 animate-spin" /> Uploading {busy.startsWith("upload:") ? busy.slice("upload:".length) : "…"}
+        </div>
+      )}
 
       {error && (
         <div className="px-4 py-1.5 bg-red-500/10 border-b border-red-500/30 text-red-300 text-xs flex items-center gap-2">
