@@ -1,44 +1,58 @@
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
+import { Loader2 } from "lucide-react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
+// Auth shell stays eager so the login screen paints instantly.
 import { LoginPage } from "@/modules/auth/components/LoginPage";
 import { MFAChallengePage } from "@/modules/auth/components/MFAChallengePage";
 import { ForgotPasswordPage } from "@/modules/auth/components/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/modules/auth/components/ResetPasswordPage";
-import { ChangePasswordPage } from "@/modules/auth/components/ChangePasswordPage";
 import { MFASetupPage } from "@/modules/auth/components/MFASetupPage";
+import { ChangePasswordPage } from "@/modules/auth/components/ChangePasswordPage";
 import { ProtectedRoute } from "@/modules/auth/components/ProtectedRoute";
 import { DashboardLayout } from "@/modules/dashboard/DashboardLayout";
 import { DashboardHome } from "@/modules/dashboard/DashboardHome";
-import { SettingsPage } from "@/modules/settings/SettingsPage";
-import { UsersPage } from "@/modules/users/UsersPage";
-import { RolesPage } from "@/modules/users/RolesPage";
-import { AuditPage } from "@/modules/users/AuditPage";
-import { BrandingPage } from "@/modules/users/BrandingPage";
-import { SmtpPage } from "@/modules/users/SmtpPage";
-import { KeepassImportPage } from "@/modules/users/KeepassImportPage";
-
-// Phase 2 — Session Management
-import { HostsPage } from "@/modules/sessions/components/HostsPage";
-import { HostFormPage } from "@/modules/sessions/components/HostFormPage";
-import { HostDetailPage } from "@/modules/sessions/components/HostDetailPage";
-import { CredentialsPage } from "@/modules/sessions/components/CredentialsPage";
-import { TagsPage } from "@/modules/sessions/components/TagsPage";
-import { FoldersPage } from "@/modules/sessions/components/FoldersPage";
-// Phase 3 (1.3.0) — multi-tab SSH terminal
-import { TerminalWorkspace } from "@/modules/sessions/components/TerminalWorkspace";
-// Phase 4 (1.5.0) — SFTP file browser
-import { SftpPage } from "@/modules/sessions/components/SftpPage";
-import { WebSftpPage } from "@/modules/sessions/components/WebSftpPage";
-import { VncPage } from "@/modules/sessions/components/VncPage";
-import { TelnetPage } from "@/modules/sessions/components/TelnetPage";
-import { FilesPage } from "@/modules/sessions/components/FilesPage";
-import { NetworkPage } from "@/modules/sessions/components/NetworkPage";
-import { TunnelsPage } from "@/modules/sessions/components/TunnelsPage";
-import { BackupPage } from "@/modules/sessions/components/BackupPage";
-import { NotesPage } from "@/modules/notes/NotesPage";
 import { isTauri } from "@/shared/lib/tauri";
+
+// Everything below is code-split: heavy libraries (xterm, noVNC, Monaco,
+// kdbxweb, hash-wasm) only download when their page is actually opened.
+const lz = <T extends Record<string, unknown>, K extends keyof T>(
+  factory: () => Promise<T>, key: K,
+) => lazy(() => factory().then((m) => ({ default: m[key] as unknown as React.ComponentType })));
+
+const SettingsPage = lz(() => import("@/modules/settings/SettingsPage"), "SettingsPage");
+const UsersPage = lz(() => import("@/modules/users/UsersPage"), "UsersPage");
+const RolesPage = lz(() => import("@/modules/users/RolesPage"), "RolesPage");
+const AuditPage = lz(() => import("@/modules/users/AuditPage"), "AuditPage");
+const BrandingPage = lz(() => import("@/modules/users/BrandingPage"), "BrandingPage");
+const SmtpPage = lz(() => import("@/modules/users/SmtpPage"), "SmtpPage");
+const KeepassImportPage = lz(() => import("@/modules/users/KeepassImportPage"), "KeepassImportPage");
+
+const HostsPage = lz(() => import("@/modules/sessions/components/HostsPage"), "HostsPage");
+const HostFormPage = lazy(() => import("@/modules/sessions/components/HostFormPage").then((m) => ({ default: m.HostFormPage })));
+const HostDetailPage = lz(() => import("@/modules/sessions/components/HostDetailPage"), "HostDetailPage");
+const CredentialsPage = lz(() => import("@/modules/sessions/components/CredentialsPage"), "CredentialsPage");
+const TagsPage = lz(() => import("@/modules/sessions/components/TagsPage"), "TagsPage");
+const FoldersPage = lz(() => import("@/modules/sessions/components/FoldersPage"), "FoldersPage");
+const TerminalWorkspace = lz(() => import("@/modules/sessions/components/TerminalWorkspace"), "TerminalWorkspace");
+const SftpPage = lz(() => import("@/modules/sessions/components/SftpPage"), "SftpPage");
+const WebSftpPage = lz(() => import("@/modules/sessions/components/WebSftpPage"), "WebSftpPage");
+const VncPage = lz(() => import("@/modules/sessions/components/VncPage"), "VncPage");
+const TelnetPage = lz(() => import("@/modules/sessions/components/TelnetPage"), "TelnetPage");
+const FilesPage = lz(() => import("@/modules/sessions/components/FilesPage"), "FilesPage");
+const NetworkPage = lz(() => import("@/modules/sessions/components/NetworkPage"), "NetworkPage");
+const TunnelsPage = lz(() => import("@/modules/sessions/components/TunnelsPage"), "TunnelsPage");
+const BackupPage = lz(() => import("@/modules/sessions/components/BackupPage"), "BackupPage");
+const NotesPage = lz(() => import("@/modules/notes/NotesPage"), "NotesPage");
+
+function RouteFallback() {
+  return (
+    <div className="h-full grid place-items-center text-fg-muted">
+      <Loader2 className="size-5 animate-spin" />
+    </div>
+  );
+}
 
 export default function App() {
   const restore = useAuthStore((s) => s.restore);
@@ -59,55 +73,57 @@ export default function App() {
   }, [navigate]);
 
   return (
-    <Routes>
-      {/* Public auth routes */}
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/login/mfa" element={<MFAChallengePage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
+        {/* Public auth routes */}
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login/mfa" element={<MFAChallengePage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
-      {/* Protected app shell */}
-      <Route
-        element={
-          <ProtectedRoute>
-            <DashboardLayout />
-          </ProtectedRoute>
-        }
-      >
-        <Route path="/" element={<DashboardHome />} />
+        {/* Protected app shell */}
+        <Route
+          element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route path="/" element={<DashboardHome />} />
 
-        {/* Phase 2 — Session Management */}
-        <Route path="/hosts" element={<HostsPage />} />
-        <Route path="/hosts/new" element={<HostFormPage mode="create" />} />
-        <Route path="/hosts/:id" element={<HostDetailPage />} />
-        <Route path="/hosts/:id/edit" element={<HostFormPage mode="edit" />} />
-        <Route path="/hosts/:id/terminal" element={<TerminalWorkspace />} />
-        <Route path="/hosts/:id/sftp" element={isTauri ? <SftpPage /> : <WebSftpPage />} />
-        <Route path="/hosts/:id/vnc" element={<VncPage />} />
-        <Route path="/hosts/:id/telnet" element={<TelnetPage />} />
-        <Route path="/terminal" element={<TerminalWorkspace />} />
-        <Route path="/files" element={<FilesPage />} />
-        <Route path="/network" element={<NetworkPage />} />
-        <Route path="/tunnels" element={<TunnelsPage />} />
-        <Route path="/backup" element={<BackupPage />} />
-        <Route path="/credentials" element={<CredentialsPage />} />
-        <Route path="/credentials/import/keepass" element={<KeepassImportPage />} />
-        <Route path="/tags" element={<TagsPage />} />
-        <Route path="/notes" element={<NotesPage />} />
-        <Route path="/folders" element={<FoldersPage />} />
+          {/* Phase 2 — Session Management */}
+          <Route path="/hosts" element={<HostsPage />} />
+          <Route path="/hosts/new" element={<HostFormPage mode="create" />} />
+          <Route path="/hosts/:id" element={<HostDetailPage />} />
+          <Route path="/hosts/:id/edit" element={<HostFormPage mode="edit" />} />
+          <Route path="/hosts/:id/terminal" element={<TerminalWorkspace />} />
+          <Route path="/hosts/:id/sftp" element={isTauri ? <SftpPage /> : <WebSftpPage />} />
+          <Route path="/hosts/:id/vnc" element={<VncPage />} />
+          <Route path="/hosts/:id/telnet" element={<TelnetPage />} />
+          <Route path="/terminal" element={<TerminalWorkspace />} />
+          <Route path="/files" element={<FilesPage />} />
+          <Route path="/network" element={<NetworkPage />} />
+          <Route path="/tunnels" element={<TunnelsPage />} />
+          <Route path="/backup" element={<BackupPage />} />
+          <Route path="/credentials" element={<CredentialsPage />} />
+          <Route path="/credentials/import/keepass" element={<KeepassImportPage />} />
+          <Route path="/tags" element={<TagsPage />} />
+          <Route path="/notes" element={<NotesPage />} />
+          <Route path="/folders" element={<FoldersPage />} />
 
-        <Route path="/users" element={<UsersPage />} />
-        <Route path="/roles" element={<RolesPage />} />
-        <Route path="/audit" element={<AuditPage />} />
-        <Route path="/branding" element={<BrandingPage />} />
-        <Route path="/smtp" element={<SmtpPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/settings/security/password" element={<ChangePasswordPage />} />
-        <Route path="/settings/security/mfa" element={<MFASetupPage />} />
-      </Route>
+          <Route path="/users" element={<UsersPage />} />
+          <Route path="/roles" element={<RolesPage />} />
+          <Route path="/audit" element={<AuditPage />} />
+          <Route path="/branding" element={<BrandingPage />} />
+          <Route path="/smtp" element={<SmtpPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings/security/password" element={<ChangePasswordPage />} />
+          <Route path="/settings/security/mfa" element={<MFASetupPage />} />
+        </Route>
 
-      {/* Fallback */}
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

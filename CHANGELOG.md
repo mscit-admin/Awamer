@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.31.1] — 2026-06-29 — Faster load (code-splitting)
+
+### Changed
+- **Code-split the frontend.** Routes now lazy-load, so heavy libraries
+  (xterm, noVNC, Monaco editor, kdbxweb + hash-wasm) download only when their
+  page is opened instead of all upfront. Initial JS dropped from one ~1.2 MB
+  bundle to ~0.28 MB + small per-route chunks — much faster first load and
+  navigation. The login/dashboard shell stays eager so sign-in is instant.
+
+---
+
 ## [1.31.0] — 2026-06-29 — Notes
 
 ### Added
