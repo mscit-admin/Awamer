@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.28.0] — 2026-06-28 — Login background image & draggable sign-in card
+
+### Added
+- **Login background image**, configurable from the **Branding** screen
+  (alongside name/logo/favicon). Stored server-side (`app_login_image`,
+  data URI or URL, up to ~3 MB) and shown behind the sign-in card with a
+  subtle blur/overlay for legibility.
+- **Draggable sign-in card.** The login panel is now a floating card you can
+  reposition by dragging its header (pointer-capture drag; the form fields stay
+  fully usable).
+- `GET/PUT /api/v1/branding` now carry `login_image` (PUT body limit raised to
+  4 MB for the larger image).
+
+---
+
 ## [1.27.0] — 2026-06-28 — Telnet (browser terminal)
 
 ### Added

@@ -27,24 +27,26 @@ interface BrandingState {
   appName: string;
   logoUrl: string;
   favicon: string;
+  loginImage: string;
   loaded: boolean;
   load: () => Promise<void>;
-  apply: (b: { app_name?: string | null; logo?: string | null; favicon?: string | null }) => void;
+  apply: (b: { app_name?: string | null; logo?: string | null; favicon?: string | null; login_image?: string | null }) => void;
 }
 
 export const useBranding = create<BrandingState>((set) => ({
   appName: ENV_NAME,
   logoUrl: ENV_LOGO,
   favicon: "",
+  loginImage: "",
   loaded: false,
   async load() {
     try {
-      const b = await request<{ app_name: string | null; logo: string | null; favicon: string | null }>(
+      const b = await request<{ app_name: string | null; logo: string | null; favicon: string | null; login_image: string | null }>(
         "/api/v1/branding",
         { unauthenticated: true },
       );
       const name = b.app_name?.trim() || ENV_NAME;
-      set({ appName: name, logoUrl: b.logo || ENV_LOGO, favicon: b.favicon || "", loaded: true });
+      set({ appName: name, logoUrl: b.logo || ENV_LOGO, favicon: b.favicon || "", loginImage: b.login_image || "", loaded: true });
       document.title = name;
       if (b.favicon) applyFavicon(b.favicon);
     } catch {
@@ -60,10 +62,16 @@ export const useBranding = create<BrandingState>((set) => ({
         appName: name,
         logoUrl: b.logo !== undefined ? (b.logo || "") : s.logoUrl,
         favicon: b.favicon !== undefined ? (b.favicon || "") : s.favicon,
+        loginImage: b.login_image !== undefined ? (b.login_image || "") : s.loginImage,
       };
     });
   },
 }));
+
+/** Reactive login background image (data URI / URL), empty if unset. */
+export function useLoginImage(): string {
+  return useBranding((s) => s.loginImage);
+}
 
 /** Reactive app name for components. */
 export function useAppName(): string {

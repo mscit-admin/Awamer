@@ -8,31 +8,34 @@ import { brandingApi } from "./brandingApi";
 import { useBranding } from "@/shared/branding";
 import { ApiError } from "@/shared/lib/api";
 
-const MAX_BYTES = 500 * 1024; // ~500 KB image
+const MAX_BYTES = 500 * 1024; // ~500 KB for logo/favicon
+const MAX_LOGIN_BYTES = 2.5 * 1024 * 1024; // larger budget for the login background
 
 export function BrandingPage() {
   const apply = useBranding((s) => s.apply);
   const [name, setName] = useState("");
   const [logo, setLogo] = useState<string | null>(null);
   const [favicon, setFavicon] = useState<string | null>(null);
+  const [loginImage, setLoginImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const faviconRef = useRef<HTMLInputElement | null>(null);
+  const loginRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     brandingApi.get()
-      .then((b) => { setName(b.app_name ?? ""); setLogo(b.logo ?? null); setFavicon(b.favicon ?? null); })
+      .then((b) => { setName(b.app_name ?? ""); setLogo(b.logo ?? null); setFavicon(b.favicon ?? null); setLoginImage(b.login_image ?? null); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  function readImage(file: File | undefined, set: (v: string) => void) {
+  function readImage(file: File | undefined, set: (v: string) => void, max = MAX_BYTES) {
     if (!file) return;
     if (!file.type.startsWith("image/")) { setError("Please choose an image file."); return; }
-    if (file.size > MAX_BYTES) { setError(`Image too large (max ${Math.round(MAX_BYTES / 1024)} KB).`); return; }
+    if (file.size > max) { setError(`Image too large (max ${Math.round(max / 1024)} KB).`); return; }
     const reader = new FileReader();
     reader.onload = () => { set(reader.result as string); setError(null); };
     reader.readAsDataURL(file);
@@ -50,14 +53,20 @@ export function BrandingPage() {
     readImage(file, setFavicon);
   }
 
+  function onPickLogin(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    readImage(file, setLoginImage, MAX_LOGIN_BYTES);
+  }
+
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     setSaved(false);
     try {
-      const b = await brandingApi.update({ app_name: name.trim() || null, logo, favicon });
-      apply({ app_name: b.app_name, logo: b.logo, favicon: b.favicon });
+      const b = await brandingApi.update({ app_name: name.trim() || null, logo, favicon, login_image: loginImage });
+      apply({ app_name: b.app_name, logo: b.logo, favicon: b.favicon, login_image: b.login_image });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -130,6 +139,27 @@ export function BrandingPage() {
               <input ref={faviconRef} type="file" accept="image/*,.ico" hidden onChange={onPickFavicon} />
             </div>
             <p className="text-2xs text-fg-muted mt-2">Small square icon (PNG/SVG/ICO). Leave empty to use the default.</p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-fg-muted mb-2">Login background image</label>
+            <div className="rounded-md border border-border bg-bg-elevated overflow-hidden mb-2 aspect-[16/7] grid place-items-center">
+              {loginImage
+                ? <img src={loginImage} alt="login background preview" className="size-full object-cover" />
+                : <span className="text-2xs text-fg-subtle">No image — plain background</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => loginRef.current?.click()} className="btn-ghost text-xs">
+                <Upload className="size-3.5" /> Upload image
+              </button>
+              {loginImage && (
+                <button type="button" onClick={() => setLoginImage(null)} className="btn-ghost text-xs text-red-400">
+                  <Trash2 className="size-3.5" /> Remove
+                </button>
+              )}
+              <input ref={loginRef} type="file" accept="image/*" hidden onChange={onPickLogin} />
+            </div>
+            <p className="text-2xs text-fg-muted mt-2">Shown behind the sign-in card (landscape, up to {Math.round(MAX_LOGIN_BYTES / 1024 / 1024 * 10) / 10} MB).</p>
           </div>
 
           {error && (
