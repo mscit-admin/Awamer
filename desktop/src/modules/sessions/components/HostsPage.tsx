@@ -75,6 +75,20 @@ export function HostsPage() {
     } catch { /* ignore */ }
   }
 
+  async function moveHost(hostId: string, folderId: string | null) {
+    const current = hosts.find((x) => x.id === hostId);
+    if (current && (current.folder_id ?? null) === folderId) return; // no-op
+    // Optimistic: drop it from the current view if it no longer matches the filter.
+    setHosts((arr) => arr.map((x) => x.id === hostId ? { ...x, folder_id: folderId } : x));
+    try {
+      await hostsApi.update(hostId, { folder_id: folderId });
+      void load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Move failed");
+      void load();
+    }
+  }
+
   async function deleteHost(h: Host) {
     if (!confirm(`Delete "${h.name}"? This cannot be undone.`)) return;
     try {
@@ -110,6 +124,7 @@ export function HostsPage() {
         <FilterButton
           active={selectedFolder === "root"}
           onClick={() => setSelectedFolder("root")}
+          onDropHost={canWrite ? (id) => moveHost(id, null) : undefined}
         >
           <FolderIcon className="size-4" /> Unfiled
         </FilterButton>
@@ -119,6 +134,7 @@ export function HostsPage() {
           tree={folders}
           selectedId={typeof selectedFolder === "string" && selectedFolder !== "root" ? selectedFolder : null}
           onSelect={(id) => setSelectedFolder(id)}
+          onDropHost={canWrite ? (id, fid) => moveHost(id, fid) : undefined}
         />
 
         {tags.length > 0 && (
@@ -212,12 +228,20 @@ export function HostsPage() {
 // Subcomponents
 // =====================================================================
 
-function FilterButton({ children, active, onClick }: { children: React.ReactNode; active: boolean; onClick: () => void }) {
+function FilterButton({ children, active, onClick, onDropHost }: {
+  children: React.ReactNode; active: boolean; onClick: () => void;
+  onDropHost?: (hostId: string) => void;
+}) {
+  const [over, setOver] = useState(false);
   return (
     <button
       onClick={onClick}
+      onDragOver={onDropHost ? (e) => { e.preventDefault(); setOver(true); } : undefined}
+      onDragLeave={onDropHost ? () => setOver(false) : undefined}
+      onDrop={onDropHost ? (e) => { e.preventDefault(); setOver(false); const id = e.dataTransfer.getData("text/plain"); if (id) onDropHost(id); } : undefined}
       className={
         "w-full text-left text-sm px-2 py-1.5 rounded flex items-center gap-2 mb-0.5 " +
+        (over ? "ring-2 ring-accent bg-accent/10 " : "") +
         (active ? "bg-accent/10 text-accent" : "hover:bg-bg-elevated text-fg")
       }
     >
@@ -227,24 +251,31 @@ function FilterButton({ children, active, onClick }: { children: React.ReactNode
 }
 
 function FolderTree({
-  tree, selectedId, onSelect, depth = 0,
+  tree, selectedId, onSelect, onDropHost, depth = 0,
 }: {
   tree: FolderTreeNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onDropHost?: (hostId: string, folderId: string) => void;
   depth?: number;
 }) {
+  const [overId, setOverId] = useState<string | null>(null);
   return (
     <div>
       {tree.map((node) => (
         <div key={node.id}>
           <button
             onClick={() => onSelect(node.id)}
+            onDragOver={onDropHost ? (e) => { e.preventDefault(); setOverId(node.id); } : undefined}
+            onDragLeave={onDropHost ? () => setOverId((o) => (o === node.id ? null : o)) : undefined}
+            onDrop={onDropHost ? (e) => { e.preventDefault(); setOverId(null); const id = e.dataTransfer.getData("text/plain"); if (id) onDropHost(id, node.id); } : undefined}
             style={{ paddingLeft: 8 + depth * 12 }}
             className={
               "w-full text-left text-sm py-1 rounded flex items-center gap-1.5 " +
+              (overId === node.id ? "ring-2 ring-accent bg-accent/10 " : "") +
               (selectedId === node.id ? "bg-accent/10 text-accent" : "hover:bg-bg-elevated text-fg")
             }
+            title={onDropHost ? "Drop an asset here to move it into this folder" : undefined}
           >
             <ChevronRight className="size-3 text-fg-muted" />
             <FolderIcon className="size-3.5" style={node.color ? { color: node.color } : undefined} />
@@ -255,6 +286,7 @@ function FolderTree({
               tree={node.children}
               selectedId={selectedId}
               onSelect={onSelect}
+              onDropHost={onDropHost}
               depth={depth + 1}
             />
           )}
@@ -279,7 +311,9 @@ function HostCard({
   const canManage = canWrite && isOwner;
   return (
     <div
-      className="card p-4 hover:border-accent/50 transition-colors cursor-pointer group"
+      draggable={canManage}
+      onDragStart={canManage ? (e) => { e.dataTransfer.setData("text/plain", host.id); e.dataTransfer.effectAllowed = "move"; } : undefined}
+      className={"card p-4 hover:border-accent/50 transition-colors group " + (canManage ? "cursor-grab active:cursor-grabbing" : "cursor-pointer")}
       onClick={() => navigate(`/hosts/${host.id}`)}
     >
       <div className="flex items-start gap-3">

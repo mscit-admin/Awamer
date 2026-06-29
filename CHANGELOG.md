@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.30.1] — 2026-06-29 — Drag assets into folders
+
+### Added
+- **Drag-and-drop an asset onto a folder** (or "Unfiled") in the Assets sidebar
+  to move it — drop targets highlight while dragging. Persists via the host's
+  `folder_id`; only your own editable assets are draggable (needs
+  `resources:write`).
+
+---
+
 ## [1.30.0] — 2026-06-29 — Configurable reset-email content & expiry
 
 ### Added
