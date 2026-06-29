@@ -283,8 +283,10 @@ function HostCard({
       onClick={() => navigate(`/hosts/${host.id}`)}
     >
       <div className="flex items-start gap-3">
-        <div className="size-10 rounded grid place-items-center text-lg bg-bg-elevated">
-          {PROTOCOL_ICONS[host.protocol]}
+        <div className="size-10 rounded grid place-items-center text-lg bg-bg-elevated overflow-hidden shrink-0">
+          {typeof host.options?.logo === "string"
+            ? <img src={host.options.logo as string} alt="" className="size-full object-contain" />
+            : PROTOCOL_ICONS[host.protocol]}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">

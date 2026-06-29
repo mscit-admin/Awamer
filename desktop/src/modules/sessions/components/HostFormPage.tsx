@@ -1,6 +1,6 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { ArrowLeft, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Upload, Image as ImageIcon, Server } from "lucide-react";
 import {
   hostsApi, foldersApi, tagsApi, credentialsApi,
   type Folder, type Tag, type CredentialPublic,
@@ -34,6 +34,9 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
   const [shareUserIds, setShareUserIds] = useState<string[]>([]);
   const [directory, setDirectory] = useState<{ id: string; username: string; full_name: string | null }[]>([]);
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [logo, setLogo] = useState<string | null>(null);
+  const [optionsBase, setOptionsBase] = useState<Record<string, unknown>>({});
+  const logoRef = useRef<HTMLInputElement | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [credentials, setCredentials] = useState<CredentialPublic[]>([]);
@@ -64,6 +67,8 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
           setDescription(host.description ?? "");
           setIsShared(host.is_shared);
           setTagIds(host.tags.map((tg) => tg.id));
+          setOptionsBase(host.options ?? {});
+          setLogo(typeof host.options?.logo === "string" ? (host.options.logo as string) : null);
           try {
             const sh = await hostsApi.getShares(params.id);
             setShareUserIds(sh.user_ids);
@@ -80,11 +85,26 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
     if (port === "" || !port) setPort(DEFAULT_PORTS[p] || "");
   }
 
+  const MAX_LOGO_BYTES = 256 * 1024;
+  function onPickLogo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setError("Please choose an image file."); return; }
+    if (file.size > MAX_LOGO_BYTES) { setError(`Logo too large (max ${Math.round(MAX_LOGO_BYTES / 1024)} KB).`); return; }
+    const reader = new FileReader();
+    reader.onload = () => { setLogo(reader.result as string); setError(null); };
+    reader.readAsDataURL(file);
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
+      // Merge the logo into the host's options without clobbering other keys.
+      const options: Record<string, unknown> = { ...optionsBase };
+      if (logo) options.logo = logo; else delete options.logo;
       const payload = {
         name: name.trim(),
         hostname: hostname.trim(),
@@ -95,6 +115,7 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
         description: description.trim() || null,
         is_shared: isShared,
         tag_ids: tagIds,
+        options,
       };
       let hostId = params.id;
       if (isEdit && params.id) {
@@ -152,6 +173,24 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
             required maxLength={100}
             className="input"
           />
+        </Field>
+
+        <Field label="Logo">
+          <div className="flex items-center gap-3">
+            <div className="size-12 rounded-md bg-bg-elevated border border-border grid place-items-center overflow-hidden shrink-0">
+              {logo ? <img src={logo} alt="" className="size-full object-contain" /> : <Server className="size-5 text-fg-subtle" />}
+            </div>
+            <button type="button" onClick={() => logoRef.current?.click()} className="btn-ghost text-xs">
+              <Upload className="size-3.5" /> {logo ? "Change" : "Upload logo"}
+            </button>
+            {logo && (
+              <button type="button" onClick={() => setLogo(null)} className="btn-ghost text-xs text-red-400">
+                <Trash2 className="size-3.5" /> Remove
+              </button>
+            )}
+            <input ref={logoRef} type="file" accept="image/*" hidden onChange={onPickLogo} />
+          </div>
+          <p className="text-2xs text-fg-muted mt-1 flex items-center gap-1"><ImageIcon className="size-3" /> PNG/SVG/JPG up to 256 KB. Shown on the asset card.</p>
         </Field>
 
         <div className="grid grid-cols-12 gap-3">

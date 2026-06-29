@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.26.0] — 2026-06-28 — Asset logos
+
+### Added
+- **Per-asset logo.** Upload a custom logo/icon for a host on the asset form
+  (PNG/SVG/JPG up to 256 KB). It's shown on the Assets list cards and the host
+  detail header, falling back to the protocol icon when none is set. Stored in
+  the host's `options` (data URI) — no migration or new permission (gated by the
+  existing `resources:write` for editing hosts).
+
+---
+
 ## [1.25.0] — 2026-06-28 — Import from KeePass (.kdbx)
 
 ### Added
