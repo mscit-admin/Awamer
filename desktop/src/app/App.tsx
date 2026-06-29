@@ -14,6 +14,7 @@ import { UsersPage } from "@/modules/users/UsersPage";
 import { RolesPage } from "@/modules/users/RolesPage";
 import { AuditPage } from "@/modules/users/AuditPage";
 import { BrandingPage } from "@/modules/users/BrandingPage";
+import { KeepassImportPage } from "@/modules/users/KeepassImportPage";
 
 // Phase 2 — Session Management
 import { HostsPage } from "@/modules/sessions/components/HostsPage";
@@ -72,6 +73,7 @@ export default function App() {
         <Route path="/tunnels" element={<TunnelsPage />} />
         <Route path="/backup" element={<BackupPage />} />
         <Route path="/credentials" element={<CredentialsPage />} />
+        <Route path="/credentials/import/keepass" element={<KeepassImportPage />} />
         <Route path="/tags" element={<TagsPage />} />
         <Route path="/folders" element={<FoldersPage />} />
 

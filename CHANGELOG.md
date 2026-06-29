@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.25.0] — 2026-06-28 — Import from KeePass (.kdbx)
+
+### Added
+- **KeePass import.** Import an existing `.kdbx` database into the app from the
+  **Credentials → Import from KeePass** screen.
+  - The file is **decrypted entirely in the browser** (`kdbxweb` + `hash-wasm`
+    Argon2, supporting KDBX 3.x and KDBX4) — the master password and secrets
+    never leave the device; only the resulting credentials are sent to the API
+    (over HTTPS, then encrypted at rest). Supports an optional key file.
+  - Preview & select entries before importing; each becomes a **credential**
+    (password type), and optionally an **asset (host)** for entries whose URL
+    parses to a host (scheme → protocol/port: ssh/sftp/rdp/vnc/telnet/http(s)).
+    Name clashes are auto-suffixed; the recycle bin is skipped.
+  - verified: KDBX4 + Argon2d round-trip (build → decrypt → field extraction),
+    wrong-password rejection.
+- New frontend dependencies: `kdbxweb`, `hash-wasm`.
+
+---
+
 ## [1.24.1] — 2026-06-28 — Drag-and-drop SFTP upload
 
 ### Added

@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
-  KeyRound, Plus, Trash2, Edit3, Eye, EyeOff, ShieldCheck, X,
+  KeyRound, Plus, Trash2, Edit3, Eye, EyeOff, ShieldCheck, X, Import,
 } from "lucide-react";
 import {
   credentialsApi,
@@ -52,9 +53,14 @@ export function CredentialsPage() {
     <div className="max-w-4xl mx-auto py-8 px-6 animate-fade-in">
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-xl font-semibold tracking-tight">Credentials</h1>
-        {canWrite && <button onClick={() => setEditing("new")} className="btn-primary">
-          <Plus className="size-4" /> New credential
-        </button>}
+        {canWrite && (
+          <div className="flex items-center gap-2">
+            <Link to="/credentials/import/keepass" className="btn-ghost text-xs"><Import className="size-3.5" /> Import from KeePass</Link>
+            <button onClick={() => setEditing("new")} className="btn-primary">
+              <Plus className="size-4" /> New credential
+            </button>
+          </div>
+        )}
       </div>
       <p className="text-sm text-fg-muted mb-4">
         Authentication material for hosts. One credential can be reused across many hosts.
