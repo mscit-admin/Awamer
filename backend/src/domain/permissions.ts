@@ -13,6 +13,8 @@ export const PERMISSIONS = [
   "resources:write",    // create / edit / delete hosts, credentials, folders, tags
   "sessions:connect",   // open SSH / SFTP sessions
   "credentials:reveal", // read a credential's decrypted secret
+  "tunnels:manage",     // create / use SSH port-forwarding tunnels
+  "backup:manage",      // export / restore backups of own data
   "users:manage",       // admin user management
   "audit:read",         // view audit logs
 ] as const;
@@ -25,7 +27,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   super_admin: ALL,
   admin: ALL,
   // Full self-service over own resources, but no user administration.
-  user: ["resources:write", "sessions:connect", "credentials:reveal"],
+  user: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage"],
   // Browse-only: can view the inventory, cannot modify, connect, or reveal secrets.
   readonly: [],
   // Like read-only, plus access to audit logs.

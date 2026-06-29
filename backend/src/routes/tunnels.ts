@@ -26,7 +26,7 @@ const DST_HOST_RE = /^[a-zA-Z0-9._-]+$/;
 export function makeTunnelRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
-    app.addHook("preHandler", requirePermission("sessions:connect"));
+    app.addHook("preHandler", requirePermission("tunnels:manage"));
 
     app.get("/", async (req, reply) => {
       return reply.send({ data: deps.tunnels.list(req.auth!.sub) });

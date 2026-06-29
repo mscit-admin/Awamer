@@ -26,7 +26,7 @@ import { Logo, useAppName } from "@/shared/branding";
 import { currentTheme, setTheme, type Theme } from "@/shared/lib/theme";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
-import { roleCan } from "@/shared/lib/permissions";
+import { roleCan, type Permission } from "@/shared/lib/permissions";
 import { cn } from "@/shared/lib/cn";
 
 interface NavItem {
@@ -35,6 +35,8 @@ interface NavItem {
   icon: React.ReactNode;
   /** Phase 1+ availability — disabled items show as "soon". */
   available?: boolean;
+  /** If set, the item is only shown to roles holding this permission. */
+  perm?: Permission;
 }
 
 const PRIMARY_NAV: NavItem[] = [
@@ -44,13 +46,13 @@ const PRIMARY_NAV: NavItem[] = [
   { to: "/credentials", label: "Credentials", icon: <KeyRound className="size-4" />, available: true },
   { to: "/files", label: "Files", icon: <FolderTree className="size-4" />, available: true },
   { to: "/network", label: "Network", icon: <Network className="size-4" />, available: true },
-  { to: "/tunnels", label: "Tunnels", icon: <Cable className="size-4" />, available: true },
+  { to: "/tunnels", label: "Tunnels", icon: <Cable className="size-4" />, available: true, perm: "tunnels:manage" },
   { to: "/folders", label: "Folders", icon: <Folder className="size-4" />, available: true },
   { to: "/tags", label: "Tags", icon: <Tag className="size-4" />, available: true },
 ];
 
 const SECONDARY_NAV: NavItem[] = [
-  { to: "/backup", label: "Backup & Restore", icon: <DatabaseBackup className="size-4" />, available: true },
+  { to: "/backup", label: "Backup & Restore", icon: <DatabaseBackup className="size-4" />, available: true, perm: "backup:manage" },
   { to: "/settings", label: "Settings", icon: <Settings className="size-4" />, available: true },
   { to: "/settings/security/mfa", label: "Security", icon: <Shield className="size-4" />, available: true },
 ];
@@ -113,7 +115,7 @@ export function DashboardLayout() {
           <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 font-mono">
             Workspace
           </div>
-          {PRIMARY_NAV.map((item) => (
+          {PRIMARY_NAV.filter((i) => !i.perm || roleCan(user?.role, i.perm)).map((item) => (
             <NavItemLink key={item.to} item={item} />
           ))}
 
@@ -134,7 +136,7 @@ export function DashboardLayout() {
           <div className="text-2xs uppercase tracking-widest text-fg-subtle px-2 py-1.5 mt-4 font-mono">
             Account
           </div>
-          {SECONDARY_NAV.map((item) => (
+          {SECONDARY_NAV.filter((i) => !i.perm || roleCan(user?.role, i.perm)).map((item) => (
             <NavItemLink key={item.to} item={item} />
           ))}
         </nav>

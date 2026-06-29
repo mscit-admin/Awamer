@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.23.0] — 2026-06-28 — RBAC: dedicated permissions for tunnels & backup
+
+### Added
+- **Two new RBAC permissions**, so the recently-added features are
+  individually grantable per role and appear in **Roles & Permissions**:
+  - `tunnels:manage` — create & use SSH port-forwarding tunnels.
+  - `backup:manage` — export & restore backups.
+- Default grants: super-admin & admin get both; **user** gets both (parity
+  with its existing session/resource access); read-only & auditor get neither.
+
+### Changed
+- Tunnels (REST + WebSocket) now require `tunnels:manage` instead of
+  `sessions:connect`. Backup export/import now require `backup:manage`
+  (export-with-secrets still also requires `credentials:reveal`; import no
+  longer needs `resources:write`).
+- The Tunnels and Backup sidebar items are hidden from roles lacking the new
+  permissions (server still enforces). The Roles & Permissions matrix renders
+  the two new capability rows automatically.
+
+---
+
 ## [1.22.0] — 2026-06-28 — Backup & Restore
 
 ### Added

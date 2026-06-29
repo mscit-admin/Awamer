@@ -10,6 +10,8 @@ export const PERMISSIONS = [
   "resources:write",
   "sessions:connect",
   "credentials:reveal",
+  "tunnels:manage",
+  "backup:manage",
   "users:manage",
   "audit:read",
 ] as const;
@@ -24,7 +26,7 @@ const ALL: Permission[] = [...PERMISSIONS];
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   super_admin: ALL,
   admin: ALL,
-  user: ["resources:write", "sessions:connect", "credentials:reveal"],
+  user: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage"],
   readonly: [],
   auditor: ["audit:read"],
 };
@@ -41,6 +43,8 @@ export const PERMISSION_LABEL: Record<Permission, string> = {
   "resources:write": "Create / edit / delete hosts, credentials, folders, tags",
   "sessions:connect": "Open SSH / SFTP sessions",
   "credentials:reveal": "Reveal credential secrets",
+  "tunnels:manage": "Create & use SSH port-forwarding tunnels",
+  "backup:manage": "Export & restore backups",
   "users:manage": "Manage users",
   "audit:read": "View audit logs",
 };

@@ -28,6 +28,7 @@ const BACKUP_VERSION = 1;
 export function makeBackupRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", requirePermission("backup:manage"));
 
     const exportBody = z.object({
       include_secrets: z.boolean().optional().default(false),
@@ -75,7 +76,7 @@ export function makeBackupRoutes(deps: Deps): FastifyPluginAsync {
       mode: z.enum(["merge", "skip"]).optional().default("merge"),
     });
 
-    app.post("/import", { bodyLimit: 16 * 1024 * 1024, preHandler: [requirePermission("resources:write")] }, async (req, reply) => {
+    app.post("/import", { bodyLimit: 16 * 1024 * 1024 }, async (req, reply) => {
       const parsed = importBody.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });

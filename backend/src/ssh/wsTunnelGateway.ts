@@ -59,8 +59,8 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
       try {
         const claims = await deps.jwt.verifyAccess(token);
         userId = claims.sub;
-        if (!can(claims.role, "sessions:connect")) {
-          return fail("forbidden", "your role cannot open sessions");
+        if (!can(claims.role, "tunnels:manage")) {
+          return fail("forbidden", "your role cannot open tunnels");
         }
       } catch {
         return fail("invalid_token", "token is invalid or expired");
