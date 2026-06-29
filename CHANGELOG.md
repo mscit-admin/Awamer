@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.29.0] — 2026-06-28 — Password reset by email + SMTP config
+
+### Added
+- **SMTP configuration** under Administration (admin / super_admin). Set host,
+  port, TLS, username, password, From address and the app base URL; send a
+  **test email**. Stored in `app_settings`; the SMTP password is **encrypted at
+  rest** (SecretBox) and never returned to the client.
+  - `GET/PUT /api/v1/admin/smtp`, `POST /api/v1/admin/smtp/test`.
+- **Forgot / reset password by email.**
+  - migration `008_password_resets` — one-time, 1-hour, single-use tokens
+    (only the SHA-256 hash is stored).
+  - `POST /api/v1/auth/forgot-password` (always 200 — never reveals whether an
+    email exists) emails a reset link; `POST /api/v1/auth/reset-password`
+    validates the token, sets the new password (policy-checked), consumes the
+    token and revokes all refresh sessions.
+  - frontend: **Forgot password?** link on the sign-in screen →
+    `/forgot-password`; `/reset-password?token=…` page to choose a new password.
+  - verified end-to-end against PostgreSQL 16: token issue/consume, single-use,
+    weak-password & invalid-token rejection, unknown-email silence, session
+    revocation.
+- New backend dependency: `nodemailer`.
+
+### Notes
+- SMTP is gated by the **admin role** (consistent with Branding — instance
+  infrastructure), not a per-user permission.
+
+---
+
 ## [1.28.0] — 2026-06-28 — Login background image & draggable sign-in card
 
 ### Added

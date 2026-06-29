@@ -12,6 +12,7 @@ import {
   Network,
   Cable,
   DatabaseBackup,
+  Mail,
   Shield,
   Activity,
   Users,
@@ -62,9 +63,10 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/users", label: "Users", icon: <Users className="size-4" />, available: true, perm: "users:manage" },
   { to: "/roles", label: "Roles & Permissions", icon: <Shield className="size-4" />, available: true, perm: "users:manage" },
 ];
-// Branding is gated by the admin role (server enforces requireRole), not a permission.
+// Branding & SMTP are gated by the admin role (server enforces requireRole), not a permission.
 const ADMIN_ROLE_NAV: NavItem[] = [
   { to: "/branding", label: "Branding", icon: <Palette className="size-4" />, available: true },
+  { to: "/smtp", label: "Email (SMTP)", icon: <Mail className="size-4" />, available: true },
 ];
 
 export function DashboardLayout() {

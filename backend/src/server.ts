@@ -24,6 +24,11 @@ import { RefreshUseCase } from "./usecases/refresh.js";
 import { MFAUseCase } from "./usecases/mfa.js";
 import { RegisterUseCase } from "./usecases/register.js";
 import { ChangePasswordUseCase } from "./usecases/changePassword.js";
+import { PasswordResetUseCase } from "./usecases/passwordReset.js";
+import { PasswordResetRepository } from "./repos/passwordResetRepo.js";
+import { MailService } from "./email/mailer.js";
+import { makePasswordResetRoutes } from "./routes/passwordReset.js";
+import { makeSmtpRoutes } from "./routes/smtp.js";
 
 import { makeAuthRoutes } from "./routes/auth.js";
 import { makeAuthedRoutes } from "./routes/users.js";
@@ -88,6 +93,10 @@ async function main() {
   const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2);
   const registerUC = new RegisterUseCase(users, audit, argon2);
   const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2);
+  // Email + forgot/reset password.
+  const passwordResets = new PasswordResetRepository(pool);
+  const mailer = new MailService(appSettings, secretBox, log);
+  const passwordResetUC = new PasswordResetUseCase(users, passwordResets, refresh, mailer, argon2, audit, log);
 
   // Bootstrap admin (only if there are no users)
   await bootstrapAdmin(users, argon2, cfg, log);
@@ -121,9 +130,12 @@ async function main() {
   await app.register(makeAuthRoutes({
     login: loginUC, refresh: refreshUC, mfa: mfaUC, users, jwt,
   }), { prefix: "/api/v1/auth" });
+  // Public forgot/reset password (same prefix as auth).
+  await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });
 
   await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
   await app.register(makeAdminRoutes({ users, register: registerUC, roleService, jwt }), { prefix: "/api/v1/admin" });
+  await app.register(makeSmtpRoutes({ mailer, jwt }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt }), { prefix: "/api/v1/roles" });
 
   // Phase 2 — Session Management routes

@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { LoginPage } from "@/modules/auth/components/LoginPage";
 import { MFAChallengePage } from "@/modules/auth/components/MFAChallengePage";
+import { ForgotPasswordPage } from "@/modules/auth/components/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/modules/auth/components/ResetPasswordPage";
 import { ChangePasswordPage } from "@/modules/auth/components/ChangePasswordPage";
 import { MFASetupPage } from "@/modules/auth/components/MFASetupPage";
 import { ProtectedRoute } from "@/modules/auth/components/ProtectedRoute";
@@ -14,6 +16,7 @@ import { UsersPage } from "@/modules/users/UsersPage";
 import { RolesPage } from "@/modules/users/RolesPage";
 import { AuditPage } from "@/modules/users/AuditPage";
 import { BrandingPage } from "@/modules/users/BrandingPage";
+import { SmtpPage } from "@/modules/users/SmtpPage";
 import { KeepassImportPage } from "@/modules/users/KeepassImportPage";
 
 // Phase 2 — Session Management
@@ -49,6 +52,8 @@ export default function App() {
       {/* Public auth routes */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/login/mfa" element={<MFAChallengePage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
       {/* Protected app shell */}
       <Route
@@ -83,6 +88,7 @@ export default function App() {
         <Route path="/roles" element={<RolesPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/branding" element={<BrandingPage />} />
+        <Route path="/smtp" element={<SmtpPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/security/password" element={<ChangePasswordPage />} />
         <Route path="/settings/security/mfa" element={<MFASetupPage />} />

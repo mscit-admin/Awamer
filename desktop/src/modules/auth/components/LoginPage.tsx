@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, Link } from "react-router-dom";
 import { Loader2, Lock, User as UserIcon, AlertCircle, GripVertical } from "lucide-react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
@@ -133,6 +133,10 @@ export function LoginPage() {
               "Sign in"
             )}
           </button>
+
+          <div className="text-center">
+            <Link to="/forgot-password" className="text-xs text-fg-muted hover:text-accent">Forgot password?</Link>
+          </div>
         </form>
 
         <div className="mt-10 pt-6 border-t border-border">
