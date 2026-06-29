@@ -32,7 +32,12 @@ export function RolesPage() {
       setCatalog(r.catalog);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load");
+      const status = e instanceof ApiError ? e.status : 0;
+      if (status === 404) {
+        setError("Roles service not found — the server needs updating. Deploy the latest backend (it adds /api/v1/roles and runs migration 007).");
+      } else {
+        setError(e instanceof Error ? e.message : "failed to load");
+      }
     } finally {
       setLoading(false);
     }
