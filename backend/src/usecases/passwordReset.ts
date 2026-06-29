@@ -18,8 +18,6 @@ import type { Logger } from "../logger/index.js";
 import { Errors, DomainError } from "../domain/index.js";
 import { validatePassword } from "./register.js";
 
-const TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
-
 function hashToken(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
 }
@@ -42,9 +40,10 @@ export class PasswordResetUseCase {
       this.log.info({ email }, "password reset requested for unknown/inactive account (ignored)");
       return;
     }
+    const ttlMinutes = await this.mailer.resetTtlMinutes();
     const raw = randomBytes(32).toString("base64url");
     await this.resets.invalidateForUser(user.id);
-    await this.resets.create(user.id, hashToken(raw), new Date(Date.now() + TOKEN_TTL_MS));
+    await this.resets.create(user.id, hashToken(raw), new Date(Date.now() + ttlMinutes * 60 * 1000));
 
     const base = (await this.mailer.baseUrl()) || fallbackBaseUrl;
     // Point at the app root with the token as a query param: the root always
@@ -54,7 +53,7 @@ export class PasswordResetUseCase {
 
     if (await this.mailer.isConfigured()) {
       try {
-        await this.mailer.sendPasswordReset(user.email, link);
+        await this.mailer.sendPasswordReset(user.email, link, ttlMinutes);
       } catch (e) {
         this.log.error({ err: e instanceof Error ? e.message : e }, "failed to send password reset email");
       }

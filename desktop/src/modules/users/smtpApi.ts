@@ -9,6 +9,9 @@ export interface SmtpConfig {
   from: string;
   base_url: string;
   allow_invalid_certs: boolean;
+  reset_ttl_minutes: number;
+  reset_subject: string;
+  reset_body: string;
   has_password: boolean;
   configured: boolean;
 }
@@ -22,6 +25,9 @@ export interface SmtpUpdate {
   from?: string | null;
   base_url?: string | null;
   allow_invalid_certs?: boolean | null;
+  reset_ttl_minutes?: number | null;
+  reset_subject?: string | null;
+  reset_body?: string | null;
 }
 
 export const smtpApi = {

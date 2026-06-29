@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.30.0] — 2026-06-29 — Configurable reset-email content & expiry
+
+### Added
+- **Password-reset email is now configurable** from SMTP settings:
+  - **Link validity (minutes)** — replaces the hardcoded 1 hour (5–1440).
+  - **Subject** and **Message body** with placeholders
+    <span>`{{link}}`</span> (the reset URL) and <span>`{{minutes}}`</span>
+    (validity). The body is sent as plain text and an HTML version (the link
+    becomes a clickable, HTML-escaped anchor). Blank fields fall back to
+    sensible defaults.
+
+---
+
 ## [1.29.1] — 2026-06-29 — Readable API errors + SMTP TLS option
 
 ### Fixed

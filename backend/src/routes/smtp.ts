@@ -35,6 +35,9 @@ export function makeSmtpRoutes(deps: Deps): FastifyPluginAsync {
       from: z.string().max(320).nullable().optional(),
       base_url: z.string().max(512).nullable().optional(),
       allow_invalid_certs: z.boolean().nullable().optional(),
+      reset_ttl_minutes: z.coerce.number().int().min(5).max(1440).nullable().optional(),
+      reset_subject: z.string().max(200).nullable().optional(),
+      reset_body: z.string().max(5000).nullable().optional(),
     });
 
     app.put("/", async (req, reply) => {

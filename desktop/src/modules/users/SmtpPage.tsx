@@ -17,6 +17,9 @@ export function SmtpPage() {
   const [from, setFrom] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [allowInvalid, setAllowInvalid] = useState(false);
+  const [resetTtl, setResetTtl] = useState<number | "">(60);
+  const [resetSubject, setResetSubject] = useState("");
+  const [resetBody, setResetBody] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -31,6 +34,7 @@ export function SmtpPage() {
     setCfg(c);
     setHost(c.host); setPort(c.port || 587); setSecure(c.secure);
     setUser(c.user); setFrom(c.from); setBaseUrl(c.base_url); setAllowInvalid(c.allow_invalid_certs);
+    setResetTtl(c.reset_ttl_minutes || 60); setResetSubject(c.reset_subject); setResetBody(c.reset_body);
   }
 
   useEffect(() => {
@@ -49,6 +53,9 @@ export function SmtpPage() {
         from: from.trim() || null,
         base_url: baseUrl.trim() || null,
         allow_invalid_certs: allowInvalid,
+        reset_ttl_minutes: resetTtl === "" ? 60 : Number(resetTtl),
+        reset_subject: resetSubject.trim() || null,
+        reset_body: resetBody.trim() || null,
         // Only send the password when changed; blank keeps the stored one.
         ...(password ? { password } : {}),
       });
@@ -133,6 +140,31 @@ export function SmtpPage() {
               <label className="block text-xs text-fg-muted mb-1">App base URL (for reset links)</label>
               <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://161.97.78.116.nip.io:6655" className="input w-full" />
               <p className="text-2xs text-fg-muted mt-1">Reset links are built from this. If empty, the request's origin is used.</p>
+            </div>
+
+            <div className="border-t border-border pt-4 space-y-3">
+              <div className="text-xs font-semibold text-fg-muted uppercase tracking-wide">Password-reset email</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-fg-muted mb-1">Link valid for (minutes)</label>
+                  <input type="number" min={5} max={1440} value={resetTtl}
+                    onChange={(e) => setResetTtl(e.target.value === "" ? "" : Number(e.target.value))} className="input w-full" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-fg-muted mb-1">Subject</label>
+                  <input value={resetSubject} onChange={(e) => setResetSubject(e.target.value)} placeholder="Reset your password" maxLength={200} className="input w-full" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-fg-muted mb-1">Message body</label>
+                <textarea value={resetBody} onChange={(e) => setResetBody(e.target.value)} rows={6} maxLength={5000}
+                  placeholder={"A password reset was requested for your account.\n\nReset link (valid for {{minutes}} minutes):\n{{link}}\n\nIf you didn't request this, you can ignore this email."}
+                  className="input w-full font-mono text-xs" />
+                <p className="text-2xs text-fg-muted mt-1">
+                  Placeholders: <span className="font-mono">{"{{link}}"}</span> (the reset URL, required) and{" "}
+                  <span className="font-mono">{"{{minutes}}"}</span> (validity). Leave blank for the default message.
+                </p>
+              </div>
             </div>
 
             {error && <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded flex items-center gap-2"><AlertCircle className="size-3.5" /> {error}</div>}
