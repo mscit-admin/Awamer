@@ -14,6 +14,14 @@ interface Deps {
 }
 
 function originOf(req: FastifyRequest): string {
+  // The Origin header (sent on this POST) carries the full scheme+host+port the
+  // user actually loaded — the most reliable source behind a proxy on a
+  // non-default port. Referer is the next best. Forwarded host (often portless)
+  // is the last resort.
+  const origin = req.headers.origin;
+  if (origin && /^https?:\/\//.test(origin)) return origin;
+  const ref = req.headers.referer;
+  if (ref) { try { return new URL(ref).origin; } catch { /* ignore */ } }
   const proto = (req.headers["x-forwarded-proto"] as string)?.split(",")[0] || req.protocol || "https";
   const host = (req.headers["x-forwarded-host"] as string) || req.headers.host || "";
   return host ? `${proto}://${host}` : "";
