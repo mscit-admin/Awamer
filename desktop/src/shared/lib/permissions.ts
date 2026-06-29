@@ -15,6 +15,7 @@ export const PERMISSIONS = [
   "credentials:reveal",
   "tunnels:manage",
   "backup:manage",
+  "command_history:read",
   "users:manage",
   "audit:read",
 ] as const;

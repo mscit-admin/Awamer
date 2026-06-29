@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.33.0] — 2026-06-29 — Command-history permission
+
+### Added
+- **`command_history:read` permission** — controls who can save & view their own
+  terminal command history (previously gated by `sessions:connect`). It appears
+  in **Roles & Permissions** and can be granted per role.
+  - migration `011_command_history_perm` grants it to the built-in
+    super_admin / admin / user roles (parity with prior behavior); read-only and
+    auditor don't get it.
+  - server: command-history routes now require `command_history:read`.
+  - UI: the terminal's **Save history / History** controls only show for users
+    with the permission (and nothing is captured without it).
+
+---
+
 ## [1.32.0] — 2026-06-29 — Share notes with other users
 
 ### Added

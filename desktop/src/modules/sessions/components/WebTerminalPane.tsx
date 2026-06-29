@@ -23,6 +23,7 @@ import { useCommandHistoryPref } from "../store/commandHistoryPref";
 import { commandHistoryApi } from "../api/commandHistoryApi";
 import { CommandHistoryPanel } from "./CommandHistoryPanel";
 import { NotesPanel } from "@/modules/notes/NotesPanel";
+import { useCan } from "@/shared/lib/permissions";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
@@ -79,6 +80,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const updateTab = useTerminalTabs((s) => s.updateTab);
   const saveHistory = useCommandHistoryPref((s) => s.saveHistory);
   const setSaveHistory = useCommandHistoryPref((s) => s.setSaveHistory);
+  const canHistory = useCan("command_history:read");
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -90,8 +92,8 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   // has opted in. Read the flag through a ref so the keystroke handler always
   // sees the latest value without re-subscribing the WebSocket.
   const lineBufRef = useRef("");
-  const saveHistoryRef = useRef(saveHistory);
-  useEffect(() => { saveHistoryRef.current = saveHistory; }, [saveHistory]);
+  const saveHistoryRef = useRef(saveHistory && canHistory);
+  useEffect(() => { saveHistoryRef.current = saveHistory && canHistory; }, [saveHistory, canHistory]);
 
   const [showHistory, setShowHistory] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -248,26 +250,30 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
 
       {(phase === "connected" || phase === "error") && (
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
-          <button
-            onClick={() => setSaveHistory(!saveHistory)}
-            title={saveHistory ? "Saving command history — click to stop" : "Save command history (off)"}
-            className={
-              "flex items-center gap-1.5 px-2 py-1 rounded text-2xs border backdrop-blur-sm transition-colors " +
-              (saveHistory
-                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
-                : "bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated")
-            }
-          >
-            {saveHistory ? <Check className="size-3.5" /> : <History className="size-3.5" />}
-            {saveHistory ? "Saving history" : "Save history"}
-          </button>
-          <button
-            onClick={() => setShowHistory(true)}
-            title="View command history"
-            className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
-          >
-            <History className="size-3.5" /> History
-          </button>
+          {canHistory && (
+            <>
+              <button
+                onClick={() => setSaveHistory(!saveHistory)}
+                title={saveHistory ? "Saving command history — click to stop" : "Save command history (off)"}
+                className={
+                  "flex items-center gap-1.5 px-2 py-1 rounded text-2xs border backdrop-blur-sm transition-colors " +
+                  (saveHistory
+                    ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                    : "bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated")
+                }
+              >
+                {saveHistory ? <Check className="size-3.5" /> : <History className="size-3.5" />}
+                {saveHistory ? "Saving history" : "Save history"}
+              </button>
+              <button
+                onClick={() => setShowHistory(true)}
+                title="View command history"
+                className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
+              >
+                <History className="size-3.5" /> History
+              </button>
+            </>
+          )}
           <button
             onClick={() => setShowNotes(true)}
             title="Notes for this host"

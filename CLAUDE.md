@@ -29,8 +29,9 @@ When adding such a feature:
 5. Note the new permission and its default role grants in `CHANGELOG.md`.
 
 Current permissions: `resources:write`, `sessions:connect`,
-`credentials:reveal`, `tunnels:manage`, `backup:manage`, `users:manage`,
-`audit:read` — defined in code; add new ones here when a feature needs them.
+`credentials:reveal`, `tunnels:manage`, `backup:manage`,
+`command_history:read`, `users:manage`, `audit:read` — defined in code; add new
+ones here when a feature needs them.
 
 **Roles are dynamic** (DB table `roles`, migration `007`). The 5 built-ins
 (super_admin, admin, user, readonly, auditor) are seeded and **locked**; admins

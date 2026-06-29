@@ -26,7 +26,7 @@ interface Deps {
 export function makeCommandHistoryRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
-    app.addHook("preHandler", requirePermission("sessions:connect"));
+    app.addHook("preHandler", requirePermission("command_history:read"));
 
     const listQuery = z.object({
       limit: z.coerce.number().int().min(1).max(500).default(200),

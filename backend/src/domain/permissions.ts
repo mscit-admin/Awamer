@@ -19,6 +19,7 @@ export const PERMISSIONS = [
   "credentials:reveal", // read a credential's decrypted secret
   "tunnels:manage",     // create / use SSH port-forwarding tunnels
   "backup:manage",      // export / restore backups of own data
+  "command_history:read", // save & view own terminal command history
   "users:manage",       // admin user management
   "audit:read",         // view audit logs
 ] as const;
@@ -32,6 +33,7 @@ export const PERMISSION_META: Record<Permission, { label: string; description: s
   "credentials:reveal": { label: "Reveal secrets", description: "View a credential's decrypted secret" },
   "tunnels:manage":     { label: "Manage tunnels", description: "Create and use SSH port-forwarding tunnels" },
   "backup:manage":      { label: "Backup & restore", description: "Export and restore backups of own data" },
+  "command_history:read": { label: "Command history", description: "Save and view your own terminal command history" },
   "users:manage":       { label: "Manage users", description: "Create, edit and delete user accounts and roles" },
   "audit:read":         { label: "View audit log", description: "Read the audit log" },
 };
@@ -43,7 +45,7 @@ export const BUILTIN_ROLES: { key: string; name: string; description: string; pe
   { key: "super_admin", name: "Super admin", description: "Full access to everything.", permissions: ALL },
   { key: "admin",       name: "Admin",       description: "Full access to everything.", permissions: ALL },
   { key: "user",        name: "User",        description: "Self-service over own resources; no user administration.",
-    permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage"] },
+    permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage", "command_history:read"] },
   { key: "readonly",    name: "Read-only",   description: "Browse the inventory; cannot modify, connect, or reveal secrets.", permissions: [] },
   { key: "auditor",     name: "Auditor",     description: "Read-only plus access to audit logs.", permissions: ["audit:read"] },
 ];
