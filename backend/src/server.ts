@@ -94,7 +94,7 @@ async function main() {
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
   const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log);
-  const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2);
+  const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, appSettings);
   const registerUC = new RegisterUseCase(users, audit, argon2);
   const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2);
   // Email + forgot/reset password.

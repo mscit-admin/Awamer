@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.37.1] — 2026-06-30 — 2FA issuer name is the app name ("Awamer")
+
+### Changed
+- The **two-factor authentication** entry shown in authenticator apps (Google
+  Authenticator, etc.) now uses the **branding app name** as its issuer label
+  instead of the server host/IP — so it reads **"Awamer"** at the top by
+  default. It's configurable: change it under **Administration → Branding → App
+  name** (colons/control chars are stripped; empty falls back to "Awamer").
+  Affects **new** enrollments — existing users must re-enroll (disable then
+  re-enable 2FA) to refresh the label, since the issuer is baked into the QR at
+  setup time.
+
+---
+
 ## [1.37.0] — 2026-06-30 — Mouse paste + edit-before-paste for the web terminal
 
 ### Added

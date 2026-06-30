@@ -96,7 +96,12 @@ export function BrandingPage() {
         <form onSubmit={save} className="card p-5 space-y-5">
           <div>
             <label className="block text-xs text-fg-muted mb-1">App name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="NetSphere" className="input w-full" />
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Awamer" className="input w-full" />
+            <p className="text-2xs text-fg-muted mt-1">
+              Also shown as the issuer name at the top of the entry in authenticator apps (Google Authenticator,
+              etc.) when users set up two-factor authentication. Defaults to <span className="font-medium">Awamer</span>.
+              Changing it affects <span className="font-medium">new</span> 2FA enrollments only.
+            </p>
           </div>
 
           <div>
