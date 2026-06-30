@@ -26,6 +26,7 @@ import { commandHistoryApi } from "../api/commandHistoryApi";
 import { CommandHistoryPanel } from "./CommandHistoryPanel";
 import { NotesPanel } from "@/modules/notes/NotesPanel";
 import { useCan } from "@/shared/lib/permissions";
+import { useBranding } from "@/shared/branding";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
@@ -105,7 +106,7 @@ function barClass(pct?: number): string {
   return "text-emerald-300";
 }
 
-function TerminalStatusBar({ stats, connectedAt, fallbackName }: { stats: ServerStats | null; connectedAt: number | null; fallbackName: string }) {
+function TerminalStatusBar({ stats, connectedAt, fallbackName, username }: { stats: ServerStats | null; connectedAt: number | null; fallbackName: string; username?: string | null }) {
   const [, force] = useState(0);
   useEffect(() => { const id = setInterval(() => force((n) => n + 1), 1000); return () => clearInterval(id); }, []);
   const elapsed = connectedAt ? Math.max(0, Math.round((Date.now() - connectedAt) / 1000)) : 0;
@@ -129,6 +130,7 @@ function TerminalStatusBar({ stats, connectedAt, fallbackName }: { stats: Server
       {stats?.uptime_sec != null && <Metric label="UP" value={fmtDur(stats.uptime_sec)} cls="text-slate-300" />}
       <span className="ml-auto" />
       <Metric label="SESSION" value={fmtDur(elapsed)} cls="text-sky-300" />
+      {username && <Metric label="USER" value={username} cls="text-slate-100" />}
     </div>
   );
 }
@@ -144,6 +146,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const bottomGapPx = useTerminalUi((s) => s.bottomGapPx);
   const quickPasteButton = useTerminalPaste((s) => s.quickButton);
   const editPasteButton = useTerminalPaste((s) => s.editButton);
+  const logoUrl = useBranding((s) => s.logoUrl);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -402,15 +405,20 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
           bottom gap cushions the prompt from the status bar / OS taskbar; the
           status bar itself stays flush at the window bottom (no dead band). */}
       <div className="relative flex-1 min-h-0" style={{ paddingBottom: bottomGapPx }}>
-      {/* Faint username watermark behind the terminal so you can tell whose session this is. */}
-      {username && (
+      {/* Faint watermark behind the terminal: the branding logo if one is set,
+          otherwise the username (so you can still tell whose session this is). */}
+      {(logoUrl || username) && (
         <div className="absolute inset-0 z-0 grid place-items-center pointer-events-none select-none overflow-hidden">
-          <div className="text-center -rotate-12">
-            <div className="font-mono font-bold uppercase tracking-widest text-white/[0.05] leading-none whitespace-nowrap text-[12vw]">
-              {username}
+          {logoUrl ? (
+            <img src={logoUrl} alt="" className="max-w-[45%] max-h-[45%] object-contain opacity-[0.07]" />
+          ) : (
+            <div className="text-center -rotate-12">
+              <div className="font-mono font-bold uppercase tracking-widest text-white/[0.05] leading-none whitespace-nowrap text-[12vw]">
+                {username}
+              </div>
+              <div className="font-mono text-white/[0.06] mt-2 text-[2.2vw]">{tab.label}</div>
             </div>
-            <div className="font-mono text-white/[0.06] mt-2 text-[2.2vw]">{tab.label}</div>
-          </div>
+          )}
         </div>
       )}
       <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2 pb-2" />
@@ -560,7 +568,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       {/* Live server status bar below the terminal (CPU/RAM/disk/load/net/uptime
           + how long you've been connected). Only while a session is live. */}
       {phase === "connected" && (
-        <TerminalStatusBar stats={stats} connectedAt={connectedAt} fallbackName={tab.label} />
+        <TerminalStatusBar stats={stats} connectedAt={connectedAt} fallbackName={tab.label} username={username} />
       )}
     </div>
   );

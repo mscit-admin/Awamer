@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.38.0] — 2026-06-30 — Terminal watermark is the logo; username moved to the status bar
+
+### Changed
+- The faint **watermark** behind the terminal now shows the **branding logo**
+  (Administration → Branding → Logo) instead of the username text. If no logo is
+  set, it falls back to the username as before.
+- The connected **username** now appears in the **status bar at the bottom-right**
+  (a new `USER` field next to the session timer), so it's always visible without
+  the large centred overlay.
+
+---
+
 ## [1.37.1] — 2026-06-30 — 2FA issuer name is the app name ("Awamer")
 
 ### Changed
