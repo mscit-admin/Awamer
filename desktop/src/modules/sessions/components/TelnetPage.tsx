@@ -118,7 +118,7 @@ export function TelnetPage() {
             <div className="font-mono font-bold uppercase tracking-widest text-white/[0.05] text-[12vw] -rotate-12 whitespace-nowrap">{username}</div>
           </div>
         )}
-        <div ref={containerRef} className="absolute inset-0 z-10 p-2" />
+        <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2 pb-10" />
 
         {phase === "connecting" && (
           <div className="absolute inset-0 grid place-items-center bg-bg/60 backdrop-blur-sm z-20">

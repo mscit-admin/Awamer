@@ -269,7 +269,9 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
           </div>
         </div>
       )}
-      <div ref={containerRef} className="absolute inset-0 z-10 p-2" />
+      {/* Extra bottom padding keeps the prompt clear of the window edge / OS
+          taskbar; FitAddon accounts for it so no row is hidden. */}
+      <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2 pb-10" />
 
       {(phase === "connected" || phase === "error") && (
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
