@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.37.0] — 2026-06-30 — Mouse paste + edit-before-paste for the web terminal
+
+### Added
+- **Mouse paste.** Bind a mouse button to paste the clipboard into the terminal
+  (Settings → Terminal → Mouse paste). Two independent actions, each assignable
+  to **Middle-click**, **Right-click**, or **Off**:
+  - **Paste immediately** — sends the clipboard as-is (default: middle-click).
+  - **Paste with edit popup** — opens an editable box pre-filled with the
+    clipboard so you can review/fix the text before it's sent (default:
+    right-click; suppresses the browser context menu). A button can't be bound
+    to both actions at once.
+- **Paste edit dialog.** A popup with an editable textarea (char/line count,
+  Ctrl/Cmd+Enter to paste, Esc to cancel). Also reachable any time via a new
+  **Paste** button in the terminal toolbar. Multi-line pastes run line by line,
+  like a normal terminal paste. Left-click stays free for selecting text.
+
+---
+
 ## [1.36.2] — 2026-06-30 — No empty band below the terminal status bar
 
 ### Fixed

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { sessionSettingsApi } from "./sessionSettingsApi";
 import { useTerminalUi } from "@/modules/sessions/store/terminalUiStore";
+import { useTerminalPaste, type PasteButton } from "@/modules/sessions/store/terminalPastePref";
 import { useLockStore } from "@/modules/auth/store/lockStore";
 import { ApiError } from "@/shared/lib/api";
 
@@ -91,6 +92,10 @@ function AutoLockSettings() {
 function TerminalUiSettings() {
   const bottomGapPx = useTerminalUi((s) => s.bottomGapPx);
   const setBottomGapPx = useTerminalUi((s) => s.setBottomGapPx);
+  const quickButton = useTerminalPaste((s) => s.quickButton);
+  const editButton = useTerminalPaste((s) => s.editButton);
+  const setQuickButton = useTerminalPaste((s) => s.setQuickButton);
+  const setEditButton = useTerminalPaste((s) => s.setEditButton);
   return (
     <div className="px-4 py-4">
       <label className="block text-xs text-fg-muted mb-1">Bottom spacing (px)</label>
@@ -105,6 +110,41 @@ function TerminalUiSettings() {
         OS taskbar. The status bar stays flush at the bottom. <span className="font-medium">0 = none</span>.
         Applies live; saved in this browser.
       </p>
+
+      <div className="mt-5 pt-4 border-t border-border">
+        <label className="block text-xs text-fg-muted mb-2">Mouse paste</label>
+        <div className="grid grid-cols-2 gap-3 max-w-md">
+          <PasteButtonSelect
+            label="Paste immediately"
+            value={quickButton}
+            onChange={setQuickButton}
+          />
+          <PasteButtonSelect
+            label="Paste with edit popup"
+            value={editButton}
+            onChange={setEditButton}
+          />
+        </div>
+        <p className="text-2xs text-fg-muted mt-2">
+          Bind a mouse button to paste the clipboard into the terminal. <span className="font-medium">Immediately</span> pastes
+          the clipboard as-is; <span className="font-medium">edit popup</span> opens a box to review/edit the text first.
+          The two actions use different buttons. The toolbar <span className="font-medium">Paste</span> button always opens
+          the edit popup. Left-click stays for selecting text. Saved in this browser.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function PasteButtonSelect({ label, value, onChange }: { label: string; value: PasteButton; onChange: (b: PasteButton) => void }) {
+  return (
+    <div>
+      <span className="block text-2xs text-fg-muted mb-1">{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value as PasteButton)} className="input w-full text-sm">
+        <option value="none">Off</option>
+        <option value="middle">Middle-click</option>
+        <option value="right">Right-click</option>
+      </select>
     </div>
   );
 }
