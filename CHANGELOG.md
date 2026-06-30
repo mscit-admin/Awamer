@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.34.1] — 2026-06-30 — Terminal Retry actually reconnects
+
+### Fixed
+- The terminal **Retry** button now **refreshes the access token before
+  reconnecting**. The SSH WebSocket uses the token directly (it doesn't get the
+  auto-refresh that REST calls do), so on a long-running session the token could
+  expire and every retry reused the stale one — leaving "Connection failed".
+  Retry now obtains a fresh token first, so it reliably reconnects.
+
+---
+
 ## [1.34.0] — 2026-06-30 — Terminal sizing fix + SSH session timeout
 
 ### Fixed

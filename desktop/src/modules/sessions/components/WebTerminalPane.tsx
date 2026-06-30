@@ -76,6 +76,7 @@ function foldKeystrokes(buf: string, chunk: string): { buf: string; commands: st
 
 export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const accessToken = useAuthStore((s) => s.accessToken);
+  const refreshTokens = useAuthStore((s) => s.refreshTokens);
   const username = useAuthStore((s) => s.user?.username ?? null);
   const updateTab = useTerminalTabs((s) => s.updateTab);
   const saveHistory = useCommandHistoryPref((s) => s.saveHistory);
@@ -236,6 +237,16 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
     setAttempt((n) => n + 1);
   }
 
+  // Retry: refresh the access token first (the WS uses it directly and doesn't
+  // get the auto-refresh that REST calls do, so a long session's token may have
+  // expired), then force a fresh reconnect.
+  async function reconnect() {
+    setPhase("connecting");
+    setError(null);
+    try { await refreshTokens(); } catch { /* reconnect with the current token */ }
+    setAttempt((n) => n + 1);
+  }
+
   function insertCommand(command: string) {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -348,7 +359,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
             <AlertCircle className="size-6 text-red-400 mx-auto mb-2" />
             <div className="text-sm font-medium mb-1">Connection failed</div>
             <p className="text-xs text-fg-muted mb-4 break-words">{error}</p>
-            <button onClick={() => setAttempt((n) => n + 1)} className="btn-ghost text-xs inline-flex gap-1">
+            <button onClick={() => void reconnect()} className="btn-primary text-xs inline-flex gap-1">
               <Power className="size-3.5" /> Retry
             </button>
           </div>
