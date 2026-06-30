@@ -133,8 +133,20 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
     };
     window.addEventListener("resize", onResize);
 
+    // Refit whenever the container itself changes size — covers the persistent
+    // terminal being shown/hidden, sidebar toggles, and OS chrome differences
+    // (e.g. Windows) that a window 'resize' event alone misses.
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(onResize);
+    });
+    ro.observe(containerRef.current);
+
     return () => {
       window.removeEventListener("resize", onResize);
+      ro.disconnect();
+      cancelAnimationFrame(raf);
       term.dispose();
       termRef.current = null;
     };

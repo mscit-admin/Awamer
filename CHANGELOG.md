@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.34.0] — 2026-06-30 — Terminal sizing fix + SSH session timeout
+
+### Fixed
+- **Terminal cut off / "semi-hidden"** (notably on Windows): xterm now refits
+  via a `ResizeObserver` whenever its container changes size — including when
+  the persistent terminal is shown again — so the bottom rows are no longer
+  clipped.
+
+### Added
+- **Configurable SSH idle timeout.** Admins can set an idle timeout
+  (Settings → SSH sessions, minutes; 0 = never); a browser SSH terminal with no
+  activity for that long is auto-disconnected with a notice.
+  `GET/PUT /api/v1/admin/session-settings` (admin role).
+- **SSH keepalive** on the gateway so sessions don't drop on network/NAT idle.
+
+---
+
 ## [1.33.1] — 2026-06-29 — Terminal survives navigation
 
 ### Fixed

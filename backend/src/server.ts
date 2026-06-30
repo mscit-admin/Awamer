@@ -29,6 +29,7 @@ import { PasswordResetRepository } from "./repos/passwordResetRepo.js";
 import { MailService } from "./email/mailer.js";
 import { makePasswordResetRoutes } from "./routes/passwordReset.js";
 import { makeSmtpRoutes } from "./routes/smtp.js";
+import { makeSessionSettingsRoutes } from "./routes/sessionSettings.js";
 
 import { makeAuthRoutes } from "./routes/auth.js";
 import { makeAuthedRoutes } from "./routes/users.js";
@@ -139,6 +140,7 @@ async function main() {
   await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
   await app.register(makeAdminRoutes({ users, register: registerUC, roleService, jwt }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, jwt }), { prefix: "/api/v1/admin/smtp" });
+  await app.register(makeSessionSettingsRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/admin/session-settings" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt }), { prefix: "/api/v1/roles" });
 
   // Phase 2 — Session Management routes
@@ -155,7 +157,7 @@ async function main() {
   await app.register(makeBackupRoutes({ backup, jwt }), { prefix: "/api/v1/backup" });
 
   // Phase 5 — browser SSH gateway (WebSocket).
-  await app.register(makeSshGateway({ jwt, hosts, credentials, history, log }), { prefix: "/api/v1/ssh" });
+  await app.register(makeSshGateway({ jwt, hosts, credentials, history, settings: appSettings, log }), { prefix: "/api/v1/ssh" });
   // Phase 4 — browser SFTP gateway (REST, session-based).
   await app.register(makeSftpGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/sftp" });
   // Phase 6 — browser VNC gateway (WebSocket byte relay).

@@ -38,6 +38,7 @@ export interface SshGatewayDeps {
   hosts: HostRepository;
   credentials: CredentialRepository;
   history: ConnectionHistoryRepository;
+  settings: import("../repos/appSettings.js").AppSettingsRepository;
   log: Logger;
 }
 
@@ -129,6 +130,26 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         void deps.history.end(id, status, { errorMessage: errorMessage ?? null, bytesIn, bytesOut }).catch(() => {});
       };
 
+      // Idle timeout (admin-configurable, 0 = disabled): close the session
+      // after N minutes with no client activity.
+      let idleMs = 0;
+      try {
+        const s = await deps.settings.getMany(["ssh_idle_timeout_minutes"]);
+        const mins = Number(s["ssh_idle_timeout_minutes"] ?? 0);
+        if (Number.isFinite(mins) && mins > 0) idleMs = mins * 60_000;
+      } catch { /* default: no idle timeout */ }
+      let idleTimer: NodeJS.Timeout | null = null;
+      const clearIdle = () => { if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } };
+      const armIdle = () => {
+        if (idleMs <= 0) return;
+        clearIdle();
+        idleTimer = setTimeout(() => {
+          if (ws.readyState === ws.OPEN) ws.send(Buffer.from("\r\n\x1b[33m*** session closed: idle timeout ***\x1b[0m\r\n"));
+          try { conn.end(); } catch { /* ignore */ }
+          try { ws.close(); } catch { /* ignore */ }
+        }, idleMs);
+      };
+
       conn.on("ready", () => {
         sendJson(ws, { type: "status", status: "connected" });
         conn.shell({ term: "xterm-256color", cols, rows }, (err, stream) => {
@@ -137,6 +158,7 @@ export function makeSshGateway(deps: SshGatewayDeps) {
             conn.end();
             return;
           }
+          armIdle();
 
           stream.on("data", (data: Buffer) => {
             bytesOut += data.length;
@@ -153,6 +175,7 @@ export function makeSshGateway(deps: SshGatewayDeps) {
           });
 
           ws.on("message", (raw: Buffer, isBinary: boolean) => {
+            armIdle(); // reset idle timer on any client activity
             if (isBinary) {
               bytesIn += raw.length;
               stream.write(raw);
@@ -192,6 +215,7 @@ export function makeSshGateway(deps: SshGatewayDeps) {
       });
 
       ws.on("close", () => {
+        clearIdle();
         endHistory("closed");
         conn.end();
       });
@@ -206,6 +230,9 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         port: host.port,
         username,
         readyTimeout: 20_000,
+        // Keepalive so the session survives network/NAT idle gaps.
+        keepaliveInterval: 30_000,
+        keepaliveCountMax: 3,
         // TOFU: accept the host key on first sight; log its fingerprint.
         hostVerifier: (key: Buffer) => {
           deps.log.info({ host: host.hostname, port: host.port }, "ssh gateway: accepting host key (TOFU)");
