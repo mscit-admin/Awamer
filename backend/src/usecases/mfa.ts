@@ -4,6 +4,7 @@ import qrcode from "qrcode";
 import { Errors } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
 import type { MFADeviceRepository, AuditRepository } from "../repos/otherRepos.js";
+import type { AppSettingsRepository } from "../repos/appSettings.js";
 import type { Config } from "../config/index.js";
 import type { Argon2Service } from "../crypto/argon2.js";
 
@@ -24,13 +25,30 @@ export class MFAUseCase {
     private readonly audit: AuditRepository,
     private readonly cfg: Config,
     private readonly argon2: Argon2Service,
+    private readonly settings: AppSettingsRepository,
   ) {}
+
+  /**
+   * The label shown at the top of the entry in authenticator apps (Google
+   * Authenticator, etc.). Uses the configurable branding app name so admins can
+   * rename it from the Branding screen; falls back to "Awamer". Control chars
+   * and colons are stripped — a colon would corrupt the otpauth label.
+   */
+  private async issuer(): Promise<string> {
+    let name: string | null = null;
+    try {
+      const s = await this.settings.getMany(["app_name"]);
+      name = s["app_name"] ?? null;
+    } catch { /* settings unavailable — use the default */ }
+    const cleaned = (name ?? "").replace(/[\u0000-\u001f:]/g, "").trim();
+    return cleaned || "Awamer";
+  }
 
   async enroll(userId: string, deviceName: string): Promise<EnrollResult> {
     const user = await this.users.getById(userId);
 
     const secret = authenticator.generateSecret();
-    const otpauthUrl = authenticator.keyuri(user.username, this.cfg.env.JWT_ISSUER, secret);
+    const otpauthUrl = authenticator.keyuri(user.username, await this.issuer(), secret);
     const dataUrl = await qrcode.toDataURL(otpauthUrl, { width: 220, margin: 1 });
     const qrPngBase64 = dataUrl.replace(/^data:image\/png;base64,/, "");
 

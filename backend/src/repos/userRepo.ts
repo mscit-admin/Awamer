@@ -91,6 +91,15 @@ export class UserRepository {
     return rowToUser(rows[0]);
   }
 
+  /** Look up by email (case-insensitive). Returns null if not found. */
+  async findByEmail(email: string): Promise<User | null> {
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT ${COLS} FROM users WHERE lower(email) = lower($1)`,
+      [email],
+    );
+    return rows[0] ? rowToUser(rows[0]) : null;
+  }
+
   async update(u: User): Promise<void> {
     const r = await this.pool.query(
       `UPDATE users SET email = lower($2), full_name = $3, role = $4,
@@ -113,6 +122,14 @@ export class UserRepository {
 
   async resetFailedAttempts(id: string): Promise<void> {
     await this.pool.query(`UPDATE users SET failed_attempts = 0 WHERE id = $1`, [id]);
+  }
+
+  async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
+    const r = await this.pool.query(
+      `UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1`,
+      [id, passwordHash],
+    );
+    if (r.rowCount === 0) throw Errors.UserNotFound();
   }
 
   async setLocked(id: string, locked: boolean): Promise<void> {

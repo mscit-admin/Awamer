@@ -65,6 +65,8 @@ export interface Host {
   credential_id: string | null;
   description: string | null;
   is_favorite: boolean;
+  is_shared: boolean;
+  owner_id?: string;
   options: Record<string, unknown>;
   last_used_at: string | null;
   use_count: number;
@@ -207,6 +209,7 @@ export const hostsApi = {
     credential_id?: string | null;
     description?: string | null;
     options?: Record<string, unknown>;
+    is_shared?: boolean;
     tag_ids?: string[];
   }) {
     return request<Host>("/api/v1/hosts", { method: "POST", body: input });
@@ -221,12 +224,22 @@ export const hostsApi = {
     description?: string | null;
     options?: Record<string, unknown>;
     is_favorite?: boolean;
+    is_shared?: boolean;
     tag_ids?: string[];
   }) {
     return request<Host>(`/api/v1/hosts/${id}`, { method: "PATCH", body: patch });
   },
   delete(id: string) {
     return request<void>(`/api/v1/hosts/${id}`, { method: "DELETE" });
+  },
+  getShares(id: string) {
+    return request<{ user_ids: string[] }>(`/api/v1/hosts/${id}/shares`);
+  },
+  setShares(id: string, userIds: string[]) {
+    return request<{ user_ids: string[] }>(`/api/v1/hosts/${id}/shares`, {
+      method: "PUT",
+      body: { user_ids: userIds },
+    });
   },
   toggleFavorite(id: string) {
     return request<{ is_favorite: boolean }>(`/api/v1/hosts/${id}/favorite`, { method: "POST" });

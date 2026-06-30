@@ -5,33 +5,35 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Custom palette for NetSphere — refined dark with phosphor accent
+        // Semantic palette driven by CSS variables (see styles/global.css)
+        // so the whole UI re-themes via a class on <html>. Variables are
+        // space-separated RGB channels to keep Tailwind's /alpha modifiers.
         bg: {
-          DEFAULT: "#0a0c10",
-          surface: "#11141a",
-          elevated: "#161a22",
-          overlay: "rgba(10, 12, 16, 0.7)",
+          DEFAULT: "rgb(var(--c-bg) / <alpha-value>)",
+          surface: "rgb(var(--c-bg-surface) / <alpha-value>)",
+          elevated: "rgb(var(--c-bg-elevated) / <alpha-value>)",
+          overlay: "rgb(var(--c-bg) / 0.7)",
         },
         border: {
-          DEFAULT: "#1f242e",
-          strong: "#2a313e",
+          DEFAULT: "rgb(var(--c-border) / <alpha-value>)",
+          strong: "rgb(var(--c-border-strong) / <alpha-value>)",
         },
         fg: {
-          DEFAULT: "#e6e8ec",
-          muted: "#8a93a3",
-          subtle: "#5a6273",
+          DEFAULT: "rgb(var(--c-fg) / <alpha-value>)",
+          muted: "rgb(var(--c-fg-muted) / <alpha-value>)",
+          subtle: "rgb(var(--c-fg-subtle) / <alpha-value>)",
         },
         accent: {
-          DEFAULT: "#7dd3a0", // phosphor green, refined
-          dim: "#4a8b66",
-          glow: "rgba(125, 211, 160, 0.15)",
+          DEFAULT: "rgb(var(--c-accent) / <alpha-value>)",
+          dim: "rgb(var(--c-accent-dim) / <alpha-value>)",
+          glow: "rgb(var(--c-accent) / 0.15)",
         },
         danger: {
-          DEFAULT: "#ef4444",
+          DEFAULT: "rgb(var(--c-danger) / <alpha-value>)",
           dim: "#7f1d1d",
         },
         warning: {
-          DEFAULT: "#f59e0b",
+          DEFAULT: "rgb(var(--c-warning) / <alpha-value>)",
           dim: "#78350f",
         },
       },

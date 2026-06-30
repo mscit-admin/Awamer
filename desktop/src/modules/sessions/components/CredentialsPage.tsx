@@ -1,11 +1,13 @@
 import { type FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
-  KeyRound, Plus, Trash2, Edit3, Eye, EyeOff, AlertTriangle, X,
+  KeyRound, Plus, Trash2, Edit3, Eye, EyeOff, ShieldCheck, X, Import,
 } from "lucide-react";
 import {
   credentialsApi,
   type CredentialPublic, type CredentialType,
 } from "../api/sessionsApi";
+import { useCan } from "@/shared/lib/permissions";
 
 const CREDENTIAL_TYPES: { value: CredentialType; label: string; description: string }[] = [
   { value: "password",    label: "Password",    description: "Username + password (SSH, RDP)" },
@@ -17,6 +19,7 @@ const CREDENTIAL_TYPES: { value: CredentialType; label: string; description: str
 ];
 
 export function CredentialsPage() {
+  const canWrite = useCan("resources:write");
   const [credentials, setCredentials] = useState<CredentialPublic[]>([]);
   const [editing, setEditing] = useState<CredentialPublic | "new" | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,20 +53,27 @@ export function CredentialsPage() {
     <div className="max-w-4xl mx-auto py-8 px-6 animate-fade-in">
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-xl font-semibold tracking-tight">Credentials</h1>
-        <button onClick={() => setEditing("new")} className="btn-primary">
-          <Plus className="size-4" /> New credential
-        </button>
+        {canWrite && (
+          <div className="flex items-center gap-2">
+            <Link to="/credentials/import/keepass" className="btn-ghost text-xs"><Import className="size-3.5" /> Import from KeePass</Link>
+            <button onClick={() => setEditing("new")} className="btn-primary">
+              <Plus className="size-4" /> New credential
+            </button>
+          </div>
+        )}
       </div>
       <p className="text-sm text-fg-muted mb-4">
         Authentication material for hosts. One credential can be reused across many hosts.
       </p>
 
-      <div className="text-2xs bg-amber-500/10 border border-amber-500/30 text-amber-200 px-3 py-2 rounded mb-6 flex items-start gap-2">
-        <AlertTriangle className="size-3.5 mt-px shrink-0" />
+      <div className="text-2xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 px-3 py-2 rounded mb-6 flex items-start gap-2">
+        <ShieldCheck className="size-3.5 mt-px shrink-0" />
         <div>
-          <span className="font-semibold">Phase 2 storage:</span> secrets are stored as plaintext JSONB
-          in PostgreSQL. Phase 10 will move them to envelope-encrypted blobs with KMS-managed keys.
-          Don't store production secrets yet.
+          <span className="font-semibold">Encrypted at rest:</span> secret material is sealed with
+          AES-256-GCM authenticated encryption before it reaches PostgreSQL — only the envelope
+          (IV, tag, ciphertext) is stored. The data key is held by the server
+          (<span className="font-mono">CREDENTIAL_ENCRYPTION_KEY</span>); a dedicated KMS-backed
+          master key and vault unlock are planned next.
         </div>
       </div>
 
@@ -78,9 +88,9 @@ export function CredentialsPage() {
           <KeyRound className="size-8 mx-auto text-fg-muted mb-2" />
           <div className="font-medium text-sm mb-1">No credentials yet</div>
           <p className="text-xs text-fg-muted mb-4">Add a credential, then attach it to one or more hosts.</p>
-          <button onClick={() => setEditing("new")} className="btn-primary inline-flex">
+          {canWrite && <button onClick={() => setEditing("new")} className="btn-primary inline-flex">
             <Plus className="size-4" /> New credential
-          </button>
+          </button>}
         </div>
       ) : (
         <div className="card divide-y divide-border">
@@ -97,10 +107,10 @@ export function CredentialsPage() {
                   {!c.hasSecret && <span className="text-amber-400 ml-2">no secret set</span>}
                 </div>
               </div>
-              <button onClick={() => setEditing(c)} className="btn-icon"><Edit3 className="size-4" /></button>
-              <button onClick={() => handleDelete(c)} className="btn-icon hover:text-red-500">
+              {canWrite && <button onClick={() => setEditing(c)} className="btn-icon"><Edit3 className="size-4" /></button>}
+              {canWrite && <button onClick={() => handleDelete(c)} className="btn-icon hover:text-red-500">
                 <Trash2 className="size-4" />
-              </button>
+              </button>}
             </div>
           ))}
         </div>

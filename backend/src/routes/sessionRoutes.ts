@@ -10,7 +10,7 @@ import {
 } from "../domain/session.js";
 import { DomainError } from "../domain/index.js";
 import type { AuditRepository } from "../repos/otherRepos.js";
-import { makeAuthMiddleware } from "../middleware/auth.js";
+import { makeAuthMiddleware, requireWrite } from "../middleware/auth.js";
 import type { JwtService } from "../jwt/index.js";
 
 const protocolEnum = z.enum(HOST_PROTOCOLS as unknown as [string, ...string[]]);
@@ -27,6 +27,8 @@ function serializeHost(h: Host, tags: Tag[] = []) {
     credential_id: h.credentialId,
     description: h.description,
     is_favorite: h.isFavorite,
+    is_shared: h.isShared,
+    owner_id: h.userId,
     options: h.options,
     last_used_at: h.lastUsedAt,
     use_count: h.useCount,
@@ -49,6 +51,7 @@ interface HostDeps {
 export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", requireWrite());
 
     // --- List ----------------------------------------------------------
     const listQuery = z.object({
@@ -99,6 +102,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
       credential_id: z.string().uuid().nullable().optional(),
       description: z.string().max(1000).nullable().optional(),
       options: z.record(z.unknown()).optional(),
+      is_shared: z.boolean().optional(),
       tag_ids: z.array(z.string().uuid()).optional(),
     });
 
@@ -119,6 +123,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
           credentialId: parsed.data.credential_id ?? null,
           description: parsed.data.description ?? null,
           options: parsed.data.options ?? {},
+          isShared: parsed.data.is_shared ?? false,
         });
         let tags: Tag[] = [];
         if (parsed.data.tag_ids?.length) {
@@ -158,6 +163,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
       description: z.string().max(1000).nullable().optional(),
       options: z.record(z.unknown()).optional(),
       is_favorite: z.boolean().optional(),
+      is_shared: z.boolean().optional(),
       tag_ids: z.array(z.string().uuid()).optional(),
     });
 
@@ -177,6 +183,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
           description: parsed.data.description,
           options: parsed.data.options,
           isFavorite: parsed.data.is_favorite,
+          isShared: parsed.data.is_shared,
         });
         let tags: Tag[];
         if (parsed.data.tag_ids !== undefined) {
@@ -227,6 +234,33 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
         const current = await deps.hosts.getById(req.auth!.sub, id);
         const updated = await deps.hosts.update(req.auth!.sub, id, { isFavorite: !current.isFavorite });
         return reply.send({ is_favorite: updated.isFavorite });
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
+
+    // --- Per-user shares (owner-managed) ------------------------------
+    app.get("/:id/shares", async (req, reply) => {
+      const { id } = req.params as { id: string };
+      try {
+        const userIds = await deps.hosts.getShareUserIds(req.auth!.sub, id);
+        return reply.send({ user_ids: userIds });
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
+
+    const sharesSchema = z.object({ user_ids: z.array(z.string().uuid()) });
+    app.put("/:id/shares", async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = sharesSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
+      try {
+        await deps.hosts.setShares(req.auth!.sub, id, parsed.data.user_ids);
+        await deps.audit.log({ userId: req.auth!.sub, action: "host_update", success: true, resourceType: "host", resourceId: id });
+        return reply.send({ user_ids: parsed.data.user_ids });
       } catch (e) {
         if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
         throw e;

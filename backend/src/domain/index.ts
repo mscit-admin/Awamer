@@ -1,9 +1,16 @@
-export type Role = "super_admin" | "admin" | "user" | "readonly" | "auditor";
+// Roles are dynamic (admin-managed, stored in the `roles` table), so a role is
+// just its string key. BUILTIN_ROLE_KEYS lists the five seeded, locked roles.
+export type Role = string;
 
-export const ALL_ROLES: Role[] = ["super_admin", "admin", "user", "readonly", "auditor"];
+export const BUILTIN_ROLE_KEYS = ["super_admin", "admin", "user", "readonly", "auditor"] as const;
+export const ALL_ROLES: string[] = [...BUILTIN_ROLE_KEYS];
+
+export function isBuiltinRole(s: string): boolean {
+  return (BUILTIN_ROLE_KEYS as readonly string[]).includes(s);
+}
 
 export function isRole(s: string): s is Role {
-  return (ALL_ROLES as string[]).includes(s);
+  return typeof s === "string" && s.length > 0;
 }
 
 export interface User {

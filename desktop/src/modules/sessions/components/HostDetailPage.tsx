@@ -11,6 +11,8 @@ import {
   type Host, type CredentialPublic, type ConnectionHistoryEntry,
   type HostProtocol,
 } from "../api/sessionsApi";
+import { useCan } from "@/shared/lib/permissions";
+import { useAuthStore } from "@/modules/auth/store/authStore";
 
 const PROTOCOL_ICONS: Record<HostProtocol, string> = {
   ssh: "🔒", sftp: "📁", rdp: "🖥️", vnc: "📺",
@@ -28,6 +30,10 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function HostDetailPage() {
   const navigate = useNavigate();
+  const myId = useAuthStore((s) => s.user?.id);
+  const canWrite = useCan("resources:write");
+  const canConnect = useCan("sessions:connect");
+  const canReveal = useCan("credentials:reveal");
   const params = useParams<{ id: string }>();
   const [host, setHost] = useState<Host | null>(null);
   const [credential, setCredential] = useState<CredentialPublic | null>(null);
@@ -123,6 +129,8 @@ export function HostDetailPage() {
     );
   }
 
+  const isOwner = !host.owner_id || host.owner_id === myId;
+
   return (
     <div className="max-w-3xl mx-auto py-8 px-6 animate-fade-in">
       <button onClick={() => navigate("/hosts")} className="btn-ghost -ml-3 mb-4 text-xs">
@@ -131,13 +139,20 @@ export function HostDetailPage() {
 
       {/* Header */}
       <div className="flex items-start gap-4 mb-6">
-        <div className="size-14 rounded-lg bg-bg-elevated grid place-items-center text-2xl">
-          {PROTOCOL_ICONS[host.protocol]}
+        <div className="size-14 rounded-lg bg-bg-elevated grid place-items-center text-2xl overflow-hidden shrink-0">
+          {typeof host.options?.logo === "string"
+            ? <img src={host.options.logo as string} alt="" className="size-full object-contain" />
+            : PROTOCOL_ICONS[host.protocol]}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight">{host.name}</h1>
             {host.is_favorite && <Star className="size-4 text-yellow-400 fill-yellow-400" />}
+            {host.is_shared && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent/15 border border-accent/30 text-accent">
+                {isOwner ? "Shared" : "Shared with you"}
+              </span>
+            )}
           </div>
           <div className="text-sm text-fg-muted font-mono">
             {host.protocol}://{host.hostname}:{host.port}
@@ -146,6 +161,7 @@ export function HostDetailPage() {
             <div className="text-sm text-fg-muted mt-1">{host.description}</div>
           )}
         </div>
+        {canWrite && isOwner && (
         <div className="flex gap-2">
           <button onClick={toggleFavorite} className="btn-ghost" title="Toggle favorite">
             <Star className={"size-4 " + (host.is_favorite ? "text-yellow-400 fill-yellow-400" : "")} />
@@ -157,9 +173,11 @@ export function HostDetailPage() {
             <Trash2 className="size-4" /> Delete
           </button>
         </div>
+        )}
       </div>
 
-      {/* Connect / SFTP buttons — Phase 3 + 4 */}
+      {/* Connect buttons */}
+      {canConnect && (
       <div className="card p-4 mb-6 flex items-center gap-3">
         <div className="size-9 rounded bg-accent/10 grid place-items-center">
           <Play className="size-4 text-accent" />
@@ -169,32 +187,56 @@ export function HostDetailPage() {
           <div className="text-xs text-fg-muted">
             {host.protocol === "ssh"
               ? "Open an interactive SSH terminal, or browse files over SFTP."
-              : `${host.protocol.toUpperCase()} support arrives in a later phase. SSH is supported as of 1.2.0.`}
+              : host.protocol === "sftp"
+                ? "Browse, upload and download files over SFTP."
+                : host.protocol === "vnc"
+                  ? "Open the remote desktop over VNC."
+                  : host.protocol === "telnet"
+                    ? "Open an interactive Telnet terminal."
+                    : (host.protocol === "http" || host.protocol === "https")
+                      ? "Open the web service in a new tab."
+                      : `${host.protocol.toUpperCase()} is not supported yet.`}
           </div>
         </div>
-        <button
-          disabled={host.protocol !== "ssh"}
-          onClick={() => navigate(`/hosts/${host.id}/sftp`)}
-          className={
-            "btn-ghost " +
-            (host.protocol !== "ssh" ? "opacity-40 cursor-not-allowed" : "")
-          }
-          title={host.protocol !== "ssh" ? "Not yet supported" : "Browse files via SFTP"}
-        >
-          <HardDriveIcon className="size-3.5" /> SFTP
-        </button>
-        <button
-          disabled={host.protocol !== "ssh"}
-          onClick={() => navigate(`/hosts/${host.id}/terminal`)}
-          className={
-            "btn-primary " +
-            (host.protocol !== "ssh" ? "opacity-40 cursor-not-allowed" : "")
-          }
-          title={host.protocol !== "ssh" ? "Not yet supported" : "Open SSH terminal"}
-        >
-          Connect
-        </button>
+        {host.protocol === "ssh" && (
+          <>
+            <button onClick={() => navigate(`/hosts/${host.id}/sftp`)} className="btn-ghost" title="Browse files via SFTP">
+              <HardDriveIcon className="size-3.5" /> SFTP
+            </button>
+            <button onClick={() => navigate(`/hosts/${host.id}/terminal`)} className="btn-primary" title="Open SSH terminal">
+              Connect
+            </button>
+          </>
+        )}
+        {host.protocol === "sftp" && (
+          <button onClick={() => navigate(`/hosts/${host.id}/sftp`)} className="btn-primary" title="Browse files via SFTP">
+            <HardDriveIcon className="size-3.5" /> Browse files
+          </button>
+        )}
+        {host.protocol === "vnc" && (
+          <button onClick={() => navigate(`/hosts/${host.id}/vnc`)} className="btn-primary" title="Open remote desktop">
+            Open desktop
+          </button>
+        )}
+        {host.protocol === "telnet" && (
+          <button onClick={() => navigate(`/hosts/${host.id}/telnet`)} className="btn-primary" title="Open Telnet terminal">
+            Connect
+          </button>
+        )}
+        {(host.protocol === "http" || host.protocol === "https") && (
+          <a
+            href={`${host.protocol}://${host.hostname}:${host.port}`}
+            target="_blank" rel="noreferrer noopener"
+            className="btn-primary" title="Open in browser"
+          >
+            Open
+          </a>
+        )}
+        {!["ssh", "sftp", "vnc", "telnet", "http", "https"].includes(host.protocol) && (
+          <span className="text-xs text-fg-muted">Not supported yet</span>
+        )}
       </div>
+      )}
 
       {/* Metadata grid */}
       <div className="grid grid-cols-2 gap-3 mb-6">
@@ -237,7 +279,7 @@ export function HostDetailPage() {
                 {credential.username && <> · user <span className="font-mono">{credential.username}</span></>}
               </div>
             </div>
-            {!revealed && credential.hasSecret && (
+            {!revealed && credential.hasSecret && canReveal && (
               <button onClick={revealSecret} className="btn-ghost text-xs">Reveal secret</button>
             )}
           </div>

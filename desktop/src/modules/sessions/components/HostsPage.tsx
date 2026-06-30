@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Server, Plus, Search, Star, Trash2, Edit3,
-  Folder as FolderIcon, ChevronRight,
+  Folder as FolderIcon, ChevronRight, Users2,
 } from "lucide-react";
 import {
   hostsApi, foldersApi, tagsApi,
   type Host, type FolderTreeNode, type Tag, type HostProtocol,
 } from "../api/sessionsApi";
+import { useCan } from "@/shared/lib/permissions";
+import { useAuthStore } from "@/modules/auth/store/authStore";
 
 const PROTOCOL_ICONS: Record<HostProtocol, string> = {
   ssh: "🔒", sftp: "📁", rdp: "🖥️", vnc: "📺",
@@ -15,6 +17,7 @@ const PROTOCOL_ICONS: Record<HostProtocol, string> = {
 };
 
 export function HostsPage() {
+  const canWrite = useCan("resources:write");
   const [hosts, setHosts] = useState<Host[]>([]);
   const [folders, setFolders] = useState<FolderTreeNode[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -72,6 +75,20 @@ export function HostsPage() {
     } catch { /* ignore */ }
   }
 
+  async function moveHost(hostId: string, folderId: string | null) {
+    const current = hosts.find((x) => x.id === hostId);
+    if (current && (current.folder_id ?? null) === folderId) return; // no-op
+    // Optimistic: drop it from the current view if it no longer matches the filter.
+    setHosts((arr) => arr.map((x) => x.id === hostId ? { ...x, folder_id: folderId } : x));
+    try {
+      await hostsApi.update(hostId, { folder_id: folderId });
+      void load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Move failed");
+      void load();
+    }
+  }
+
   async function deleteHost(h: Host) {
     if (!confirm(`Delete "${h.name}"? This cannot be undone.`)) return;
     try {
@@ -90,8 +107,8 @@ export function HostsPage() {
 
   return (
     <div className="flex h-full">
-      {/* Sidebar: folders + tags filter */}
-      <aside className="w-56 border-r border-border bg-bg-elevated/40 p-3 overflow-y-auto">
+      {/* Sidebar: folders + tags filter (hidden on small screens) */}
+      <aside className="hidden md:block w-56 border-r border-border bg-bg-elevated/40 p-3 overflow-y-auto">
         <FilterButton
           active={selectedFolder === null && !favoritesOnly}
           onClick={() => { setSelectedFolder(null); setFavoritesOnly(false); }}
@@ -107,6 +124,7 @@ export function HostsPage() {
         <FilterButton
           active={selectedFolder === "root"}
           onClick={() => setSelectedFolder("root")}
+          onDropHost={canWrite ? (id) => moveHost(id, null) : undefined}
         >
           <FolderIcon className="size-4" /> Unfiled
         </FilterButton>
@@ -116,6 +134,7 @@ export function HostsPage() {
           tree={folders}
           selectedId={typeof selectedFolder === "string" && selectedFolder !== "root" ? selectedFolder : null}
           onSelect={(id) => setSelectedFolder(id)}
+          onDropHost={canWrite ? (id, fid) => moveHost(id, fid) : undefined}
         />
 
         {tags.length > 0 && (
@@ -145,14 +164,14 @@ export function HostsPage() {
 
       {/* Main: list */}
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="px-6 py-4 border-b border-border flex items-center gap-3">
-          <div className="flex-1 relative">
+        <header className="px-4 md:px-6 py-3 md:py-4 border-b border-border flex items-center gap-2 md:gap-3 flex-wrap">
+          <div className="flex-1 min-w-[140px] relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-fg-muted" />
             <input
               type="search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search hosts…"
+              placeholder="Search assets…"
               className="w-full pl-8 pr-3 py-1.5 text-sm bg-bg-elevated border border-border rounded
                          focus:outline-none focus:border-accent"
             />
@@ -167,12 +186,14 @@ export function HostsPage() {
               <option key={p} value={p}>{p.toUpperCase()}</option>
             ))}
           </select>
-          <Link
-            to="/hosts/new"
-            className="btn-primary flex items-center gap-1"
-          >
-            <Plus className="size-4" /> New host
-          </Link>
+          {canWrite && (
+            <Link
+              to="/hosts/new"
+              className="btn-primary flex items-center gap-1"
+            >
+              <Plus className="size-4" /> New asset
+            </Link>
+          )}
         </header>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -207,12 +228,20 @@ export function HostsPage() {
 // Subcomponents
 // =====================================================================
 
-function FilterButton({ children, active, onClick }: { children: React.ReactNode; active: boolean; onClick: () => void }) {
+function FilterButton({ children, active, onClick, onDropHost }: {
+  children: React.ReactNode; active: boolean; onClick: () => void;
+  onDropHost?: (hostId: string) => void;
+}) {
+  const [over, setOver] = useState(false);
   return (
     <button
       onClick={onClick}
+      onDragOver={onDropHost ? (e) => { e.preventDefault(); setOver(true); } : undefined}
+      onDragLeave={onDropHost ? () => setOver(false) : undefined}
+      onDrop={onDropHost ? (e) => { e.preventDefault(); setOver(false); const id = e.dataTransfer.getData("text/plain"); if (id) onDropHost(id); } : undefined}
       className={
         "w-full text-left text-sm px-2 py-1.5 rounded flex items-center gap-2 mb-0.5 " +
+        (over ? "ring-2 ring-accent bg-accent/10 " : "") +
         (active ? "bg-accent/10 text-accent" : "hover:bg-bg-elevated text-fg")
       }
     >
@@ -222,24 +251,31 @@ function FilterButton({ children, active, onClick }: { children: React.ReactNode
 }
 
 function FolderTree({
-  tree, selectedId, onSelect, depth = 0,
+  tree, selectedId, onSelect, onDropHost, depth = 0,
 }: {
   tree: FolderTreeNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onDropHost?: (hostId: string, folderId: string) => void;
   depth?: number;
 }) {
+  const [overId, setOverId] = useState<string | null>(null);
   return (
     <div>
       {tree.map((node) => (
         <div key={node.id}>
           <button
             onClick={() => onSelect(node.id)}
+            onDragOver={onDropHost ? (e) => { e.preventDefault(); setOverId(node.id); } : undefined}
+            onDragLeave={onDropHost ? () => setOverId((o) => (o === node.id ? null : o)) : undefined}
+            onDrop={onDropHost ? (e) => { e.preventDefault(); setOverId(null); const id = e.dataTransfer.getData("text/plain"); if (id) onDropHost(id, node.id); } : undefined}
             style={{ paddingLeft: 8 + depth * 12 }}
             className={
               "w-full text-left text-sm py-1 rounded flex items-center gap-1.5 " +
+              (overId === node.id ? "ring-2 ring-accent bg-accent/10 " : "") +
               (selectedId === node.id ? "bg-accent/10 text-accent" : "hover:bg-bg-elevated text-fg")
             }
+            title={onDropHost ? "Drop an asset here to move it into this folder" : undefined}
           >
             <ChevronRight className="size-3 text-fg-muted" />
             <FolderIcon className="size-3.5" style={node.color ? { color: node.color } : undefined} />
@@ -250,6 +286,7 @@ function FolderTree({
               tree={node.children}
               selectedId={selectedId}
               onSelect={onSelect}
+              onDropHost={onDropHost}
               depth={depth + 1}
             />
           )}
@@ -267,19 +304,33 @@ function HostCard({
   onDelete: () => void;
 }) {
   const navigate = useNavigate();
+  const myId = useAuthStore((s) => s.user?.id);
+  const canWrite = useCan("resources:write");
+  // Shared hosts owned by someone else: viewable & connectable, not editable.
+  const isOwner = !host.owner_id || host.owner_id === myId;
+  const canManage = canWrite && isOwner;
   return (
     <div
-      className="card p-4 hover:border-accent/50 transition-colors cursor-pointer group"
+      draggable={canManage}
+      onDragStart={canManage ? (e) => { e.dataTransfer.setData("text/plain", host.id); e.dataTransfer.effectAllowed = "move"; } : undefined}
+      className={"card p-4 hover:border-accent/50 transition-colors group " + (canManage ? "cursor-grab active:cursor-grabbing" : "cursor-pointer")}
       onClick={() => navigate(`/hosts/${host.id}`)}
     >
       <div className="flex items-start gap-3">
-        <div className="size-10 rounded grid place-items-center text-lg bg-bg-elevated">
-          {PROTOCOL_ICONS[host.protocol]}
+        <div className="size-10 rounded grid place-items-center text-lg bg-bg-elevated overflow-hidden shrink-0">
+          {typeof host.options?.logo === "string"
+            ? <img src={host.options.logo as string} alt="" className="size-full object-contain" />
+            : PROTOCOL_ICONS[host.protocol]}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <div className="font-medium truncate">{host.name}</div>
             {host.is_favorite && <Star className="size-3.5 text-yellow-400 fill-yellow-400" />}
+            {host.is_shared && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/15 border border-accent/30 text-accent flex items-center gap-0.5 shrink-0">
+                <Users2 className="size-2.5" /> {isOwner ? "Shared" : "Shared with you"}
+              </span>
+            )}
           </div>
           <div className="text-xs text-fg-muted font-mono truncate">
             {host.protocol}://{host.hostname}:{host.port}
@@ -297,6 +348,7 @@ function HostCard({
             </div>
           )}
         </div>
+        {canManage && (
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-1">
           <button
             className="btn-icon"
@@ -320,6 +372,7 @@ function HostCard({
             <Trash2 className="size-3.5" />
           </button>
         </div>
+        )}
       </div>
     </div>
   );
@@ -331,12 +384,12 @@ function EmptyState() {
       <div className="size-14 mx-auto rounded-full bg-bg-elevated grid place-items-center mb-4">
         <Server className="size-7 text-fg-muted" />
       </div>
-      <div className="text-base font-medium mb-1">No hosts yet</div>
+      <div className="text-base font-medium mb-1">No assets yet</div>
       <p className="text-sm text-fg-muted mb-4 max-w-xs mx-auto">
-        Add your first remote host to get started. Phase 3 will add the SSH terminal that connects to it.
+        Add your first remote asset to get started, then open an SSH terminal or SFTP browser.
       </p>
       <Link to="/hosts/new" className="btn-primary inline-flex items-center gap-1">
-        <Plus className="size-4" /> New host
+        <Plus className="size-4" /> New asset
       </Link>
     </div>
   );

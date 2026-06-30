@@ -117,6 +117,8 @@ export interface Host {
   protocol: HostProtocol;
   description: string | null;
   isFavorite: boolean;
+  /** When true, visible & connectable by all users; editable only by owner. */
+  isShared: boolean;
   options: Record<string, unknown>;
   lastUsedAt: Date | null;
   useCount: number;

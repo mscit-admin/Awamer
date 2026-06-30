@@ -1,11 +1,13 @@
-import { type FormEvent, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Save, Trash2 } from "lucide-react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { ArrowLeft, Save, Trash2, Upload, Image as ImageIcon, Server } from "lucide-react";
 import {
   hostsApi, foldersApi, tagsApi, credentialsApi,
   type Folder, type Tag, type CredentialPublic,
   type HostProtocol,
 } from "../api/sessionsApi";
+import { authApi } from "@/modules/auth/api/authApi";
+import { useAuthStore } from "@/modules/auth/store/authStore";
 
 const PROTOCOLS: HostProtocol[] = ["ssh", "sftp", "rdp", "vnc", "telnet", "serial", "http", "https", "custom"];
 const DEFAULT_PORTS: Record<HostProtocol, number> = {
@@ -16,30 +18,42 @@ const DEFAULT_PORTS: Record<HostProtocol, number> = {
 export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
   const navigate = useNavigate();
   const params = useParams<{ id: string }>();
+  const location = useLocation();
   const isEdit = mode === "edit";
+  // Prefill from "Add as asset" (network discovery).
+  const prefill = (location.state as { prefill?: { name?: string; hostname?: string; protocol?: HostProtocol; port?: number } } | null)?.prefill;
 
-  const [name, setName] = useState("");
-  const [hostname, setHostname] = useState("");
-  const [port, setPort] = useState<number | "">("");
-  const [protocol, setProtocol] = useState<HostProtocol>("ssh");
+  const [name, setName] = useState(prefill?.name ?? "");
+  const [hostname, setHostname] = useState(prefill?.hostname ?? "");
+  const [port, setPort] = useState<number | "">(prefill?.port ?? "");
+  const [protocol, setProtocol] = useState<HostProtocol>(prefill?.protocol ?? "ssh");
   const [folderId, setFolderId] = useState<string>("");
   const [credentialId, setCredentialId] = useState<string>("");
   const [description, setDescription] = useState("");
+  const [isShared, setIsShared] = useState(false);
+  const [shareUserIds, setShareUserIds] = useState<string[]>([]);
+  const [directory, setDirectory] = useState<{ id: string; username: string; full_name: string | null }[]>([]);
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [logo, setLogo] = useState<string | null>(null);
+  const [optionsBase, setOptionsBase] = useState<Record<string, unknown>>({});
+  const logoRef = useRef<HTMLInputElement | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [credentials, setCredentials] = useState<CredentialPublic[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const myId = useAuthStore((s) => s.user?.id);
+
   useEffect(() => {
     void (async () => {
-      const [f, t, c] = await Promise.all([
-        foldersApi.list(), tagsApi.list(), credentialsApi.list(),
+      const [f, t, c, dir] = await Promise.all([
+        foldersApi.list(), tagsApi.list(), credentialsApi.list(), authApi.directory(),
       ]);
       setFolders(f.data);
       setTags(t.data);
       setCredentials(c.data);
+      setDirectory(dir.data.filter((u) => u.id !== myId));
 
       if (isEdit && params.id) {
         try {
@@ -51,7 +65,14 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
           setFolderId(host.folder_id ?? "");
           setCredentialId(host.credential_id ?? "");
           setDescription(host.description ?? "");
+          setIsShared(host.is_shared);
           setTagIds(host.tags.map((tg) => tg.id));
+          setOptionsBase(host.options ?? {});
+          setLogo(typeof host.options?.logo === "string" ? (host.options.logo as string) : null);
+          try {
+            const sh = await hostsApi.getShares(params.id);
+            setShareUserIds(sh.user_ids);
+          } catch { /* not owner / none */ }
         } catch (e) {
           setError(e instanceof Error ? e.message : "Failed to load host");
         }
@@ -64,11 +85,26 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
     if (port === "" || !port) setPort(DEFAULT_PORTS[p] || "");
   }
 
+  const MAX_LOGO_BYTES = 256 * 1024;
+  function onPickLogo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setError("Please choose an image file."); return; }
+    if (file.size > MAX_LOGO_BYTES) { setError(`Logo too large (max ${Math.round(MAX_LOGO_BYTES / 1024)} KB).`); return; }
+    const reader = new FileReader();
+    reader.onload = () => { setLogo(reader.result as string); setError(null); };
+    reader.readAsDataURL(file);
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
+      // Merge the logo into the host's options without clobbering other keys.
+      const options: Record<string, unknown> = { ...optionsBase };
+      if (logo) options.logo = logo; else delete options.logo;
       const payload = {
         name: name.trim(),
         hostname: hostname.trim(),
@@ -77,12 +113,20 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
         folder_id: folderId || null,
         credential_id: credentialId || null,
         description: description.trim() || null,
+        is_shared: isShared,
         tag_ids: tagIds,
+        options,
       };
+      let hostId = params.id;
       if (isEdit && params.id) {
         await hostsApi.update(params.id, payload);
       } else {
-        await hostsApi.create(payload);
+        const created = await hostsApi.create(payload);
+        hostId = created.id;
+      }
+      // Persist the explicit per-user share list (additive to is_shared).
+      if (hostId) {
+        await hostsApi.setShares(hostId, shareUserIds);
       }
       navigate("/hosts");
     } catch (e) {
@@ -129,6 +173,24 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
             required maxLength={100}
             className="input"
           />
+        </Field>
+
+        <Field label="Logo">
+          <div className="flex items-center gap-3">
+            <div className="size-12 rounded-md bg-bg-elevated border border-border grid place-items-center overflow-hidden shrink-0">
+              {logo ? <img src={logo} alt="" className="size-full object-contain" /> : <Server className="size-5 text-fg-subtle" />}
+            </div>
+            <button type="button" onClick={() => logoRef.current?.click()} className="btn-ghost text-xs">
+              <Upload className="size-3.5" /> {logo ? "Change" : "Upload logo"}
+            </button>
+            {logo && (
+              <button type="button" onClick={() => setLogo(null)} className="btn-ghost text-xs text-red-400">
+                <Trash2 className="size-3.5" /> Remove
+              </button>
+            )}
+            <input ref={logoRef} type="file" accept="image/*" hidden onChange={onPickLogo} />
+          </div>
+          <p className="text-2xs text-fg-muted mt-1 flex items-center gap-1"><ImageIcon className="size-3" /> PNG/SVG/JPG up to 256 KB. Shown on the asset card.</p>
         </Field>
 
         <div className="grid grid-cols-12 gap-3">
@@ -181,6 +243,58 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
             rows={2} maxLength={1000}
             className="input resize-y"
           />
+        </Field>
+
+        <Field label="Sharing">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isShared}
+              onChange={(e) => setIsShared(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span className="text-sm">
+              Share with all users
+              <span className="block text-xs text-fg-muted">
+                Everyone can see and connect to this asset using its linked
+                credential. Only you can edit or delete it.
+              </span>
+            </span>
+          </label>
+
+          <div className="mt-3">
+            <div className="text-xs text-fg-muted mb-1">
+              {isShared ? "Already shared with everyone." : "Or share with specific users:"}
+            </div>
+            {!isShared && (
+              <div className="max-h-40 overflow-y-auto border border-border rounded divide-y divide-border">
+                {directory.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-fg-muted">No other users.</div>
+                )}
+                {directory.map((u) => {
+                  const checked = shareUserIds.includes(u.id);
+                  return (
+                    <label key={u.id} className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-bg-elevated/40">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) =>
+                          setShareUserIds((prev) =>
+                            e.target.checked ? [...prev, u.id] : prev.filter((x) => x !== u.id),
+                          )
+                        }
+                      />
+                      <span className="text-sm">{u.username}</span>
+                      {u.full_name && <span className="text-xs text-fg-muted">· {u.full_name}</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {!isShared && shareUserIds.length > 0 && (
+              <div className="text-xs text-fg-muted mt-1">{shareUserIds.length} user(s) selected.</div>
+            )}
+          </div>
         </Field>
 
         <Field label="Tags">

@@ -20,6 +20,7 @@ export interface User {
   email: string;
   full_name?: string;
   role: string;
+  permissions?: string[];
   mfa_enabled: boolean;
 }
 
@@ -74,6 +75,13 @@ export const authApi = {
     return request<User>("/api/v1/users/me");
   },
 
+  /** Minimal user directory for share pickers (any authenticated user). */
+  directory() {
+    return request<{ data: { id: string; username: string; full_name: string | null }[] }>(
+      "/api/v1/users/directory",
+    );
+  },
+
   updateMe(input: { full_name?: string; email?: string }) {
     return request<User>("/api/v1/users/me", {
       method: "PATCH",
@@ -111,6 +119,14 @@ export const authApi = {
     return request<void>("/api/v1/auth/mfa/disable", {
       method: "POST",
       body: { password },
+    });
+  },
+
+  /** Self-service password change. Revokes other sessions on success. */
+  changePassword(currentPassword: string, newPassword: string) {
+    return request<{ status: string }>("/api/v1/auth/change-password", {
+      method: "POST",
+      body: { current_password: currentPassword, new_password: newPassword },
     });
   },
 };

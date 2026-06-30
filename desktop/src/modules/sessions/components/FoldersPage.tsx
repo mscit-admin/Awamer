@@ -1,8 +1,10 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { Folder as FolderIcon, Plus, Trash2, Edit3, X, Check, ChevronRight } from "lucide-react";
 import { foldersApi, type Folder, type FolderTreeNode } from "../api/sessionsApi";
+import { useCan } from "@/shared/lib/permissions";
 
 export function FoldersPage() {
+  const canWrite = useCan("resources:write");
   const [folders, setFolders] = useState<Folder[]>([]);
   const [tree, setTree] = useState<FolderTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,9 +41,9 @@ export function FoldersPage() {
     <div className="max-w-3xl mx-auto py-8 px-6 animate-fade-in">
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-xl font-semibold tracking-tight">Folders</h1>
-        <button onClick={() => setCreating(true)} className="btn-primary">
+        {canWrite && <button onClick={() => setCreating(true)} className="btn-primary">
           <Plus className="size-4" /> New folder
-        </button>
+        </button>}
       </div>
       <p className="text-sm text-fg-muted mb-6">
         Hierarchical organization for hosts. Folders can be nested.
@@ -66,9 +68,9 @@ export function FoldersPage() {
           <FolderIcon className="size-8 mx-auto text-fg-muted mb-2" />
           <div className="font-medium text-sm mb-1">No folders yet</div>
           <p className="text-xs text-fg-muted mb-3">Use folders to group related hosts.</p>
-          <button onClick={() => setCreating(true)} className="btn-primary inline-flex">
+          {canWrite && <button onClick={() => setCreating(true)} className="btn-primary inline-flex">
             <Plus className="size-4" /> New folder
-          </button>
+          </button>}
         </div>
       ) : (
         <div className="card">
@@ -97,6 +99,7 @@ function FolderTreeRows({
   onDelete: (f: Folder) => void;
   onSaved: () => void;
 }) {
+  const canWrite = useCan("resources:write");
   return (
     <>
       {tree.map((node) => (
@@ -116,10 +119,10 @@ function FolderTreeRows({
               <ChevronRight className="size-3 text-fg-muted opacity-50" />
               <FolderIcon className="size-4" style={node.color ? { color: node.color } : undefined} />
               <div className="flex-1 text-sm">{node.name}</div>
-              <button onClick={() => onEdit(node.id)} className="btn-icon"><Edit3 className="size-3.5" /></button>
-              <button onClick={() => onDelete(node)} className="btn-icon hover:text-red-500">
+              {canWrite && <button onClick={() => onEdit(node.id)} className="btn-icon"><Edit3 className="size-3.5" /></button>}
+              {canWrite && <button onClick={() => onDelete(node)} className="btn-icon hover:text-red-500">
                 <Trash2 className="size-3.5" />
-              </button>
+              </button>}
             </div>
           )}
           {node.children.length > 0 && (

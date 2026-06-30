@@ -1,11 +1,14 @@
-import { useState, type FormEvent } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { Loader2, Lock, User as UserIcon, AlertCircle } from "lucide-react";
+import { useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Navigate, useLocation, useNavigate, Link } from "react-router-dom";
+import { Loader2, Lock, User as UserIcon, AlertCircle, GripVertical } from "lucide-react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { Logo, useAppName, useLoginImage } from "@/shared/branding";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const appName = useAppName();
+  const loginImage = useLoginImage();
   const location = useLocation();
   const status = useAuthStore((s) => s.status);
   const error = useAuthStore((s) => s.error);
@@ -15,6 +18,23 @@ export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Draggable card: offset from the centered position.
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+
+  function onHandleDown(e: ReactPointerEvent) {
+    drag.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }
+  function onHandleMove(e: ReactPointerEvent) {
+    if (!drag.current) return;
+    setPos({ x: drag.current.ox + (e.clientX - drag.current.sx), y: drag.current.oy + (e.clientY - drag.current.sy) });
+  }
+  function onHandleUp(e: ReactPointerEvent) {
+    drag.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  }
 
   if (status === "authenticated") {
     const from = (location.state as { from?: { pathname: string } } | null)?.from?.pathname ?? "/";
@@ -36,15 +56,34 @@ export function LoginPage() {
   }
 
   return (
-    <div className="h-full grid place-items-center px-6 animate-fade-in">
-      <div className="w-full max-w-sm">
-        {/* Brand mark */}
-        <div className="flex items-center gap-3 mb-10">
+    <div className="relative h-full overflow-hidden animate-fade-in">
+      {/* Background image (from Branding) */}
+      {loginImage && (
+        <>
+          <img src={loginImage} alt="" className="absolute inset-0 size-full object-cover" />
+          <div className="absolute inset-0 bg-bg/70 backdrop-blur-sm" />
+        </>
+      )}
+
+      <div className="absolute inset-0 grid place-items-center px-6">
+        <div
+          className="w-full max-w-sm card p-8 shadow-2xl"
+          style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
+        >
+        {/* Brand mark — also the drag handle */}
+        <div
+          onPointerDown={onHandleDown}
+          onPointerMove={onHandleMove}
+          onPointerUp={onHandleUp}
+          className="flex items-center gap-3 mb-10 cursor-move select-none touch-none"
+          title="Drag to move"
+        >
           <BrandMark />
-          <div>
-            <div className="font-display font-semibold tracking-tight text-lg leading-none">NetSphere</div>
+          <div className="flex-1">
+            <div className="font-display font-semibold tracking-tight text-lg leading-none">{appName}</div>
             <div className="text-2xs text-fg-subtle font-mono uppercase tracking-widest mt-1">terminal</div>
           </div>
+          <GripVertical className="size-4 text-fg-subtle" />
         </div>
 
         <h1 className="text-xl font-semibold mb-1">Sign in</h1>
@@ -94,12 +133,17 @@ export function LoginPage() {
               "Sign in"
             )}
           </button>
+
+          <div className="text-center">
+            <Link to="/forgot-password" className="text-xs text-fg-muted hover:text-accent">Forgot password?</Link>
+          </div>
         </form>
 
         <div className="mt-10 pt-6 border-t border-border">
           <p className="text-xs text-fg-subtle font-mono">
             v1.0.0 · phase 1 foundation
           </p>
+        </div>
         </div>
       </div>
     </div>
@@ -146,15 +190,7 @@ function Field({ id, label, icon, type = "text", value, onChange, autoComplete, 
 function BrandMark() {
   return (
     <div className="size-9 rounded-md bg-bg-elevated border border-border-strong grid place-items-center shadow-glow">
-      <svg viewBox="0 0 24 24" fill="none" className="size-5">
-        <path
-          d="M12 2L3 7l9 5 9-5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5"
-          stroke="rgb(125 211 160)"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <Logo className="size-5" />
     </div>
   );
 }

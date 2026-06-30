@@ -24,18 +24,22 @@
 import { Client } from "ssh2";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
+import { can } from "../domain/permissions.js";
 import type { Logger } from "../logger/index.js";
 import type {
   HostRepository,
   CredentialRepository,
   ConnectionHistoryRepository,
 } from "../repos/sessionRepos.js";
+import { resolveSshConnection, SshResolveError, type SshAuth } from "./resolveAuth.js";
+import { STATS_CMD, parseStats, type PrevSample } from "./serverStats.js";
 
 export interface SshGatewayDeps {
   jwt: JwtService;
   hosts: HostRepository;
   credentials: CredentialRepository;
   history: ConnectionHistoryRepository;
+  settings: import("../repos/appSettings.js").AppSettingsRepository;
   log: Logger;
 }
 
@@ -67,53 +71,32 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         return fail("bad_request", "token and host_id are required");
       }
 
-      // 1. Authenticate.
+      // 1. Authenticate + authorize.
       let userId: string;
       try {
         const claims = await deps.jwt.verifyAccess(token);
         userId = claims.sub;
+        if (!can(claims.role, "sessions:connect")) {
+          return fail("forbidden", "your role cannot open sessions");
+        }
       } catch {
         return fail("invalid_token", "token is invalid or expired");
       }
 
-      // 2. Resolve host + auth material (user-scoped).
+      // 2. Resolve host + auth material (user-scoped) via the shared resolver.
       let host: Awaited<ReturnType<HostRepository["getById"]>>;
+      let username: string;
+      let auth: SshAuth;
       try {
-        host = await deps.hosts.getById(userId, hostId);
-      } catch {
-        return fail("host_not_found", "host not found");
-      }
-
-      let username = "root";
-      let auth: { password: string } | { privateKey: string; passphrase?: string } | null = null;
-
-      try {
-        if (password_override) {
-          if (host.credentialId) {
-            const c = await deps.credentials.getById(userId, host.credentialId);
-            username = c.username || "root";
-          }
-          auth = { password: password_override };
-        } else if (host.credentialId) {
-          const cred = await deps.credentials.getById(userId, host.credentialId);
-          username = cred.username || "root";
-          const secret = cred.secretData ?? {};
-          if (cred.credentialType === "password") {
-            const pw = secret["password"];
-            if (typeof pw !== "string") return fail("no_credential", "credential has no password");
-            auth = { password: pw };
-          } else if (cred.credentialType === "private_key") {
-            const pem = secret["private_key"];
-            if (typeof pem !== "string") return fail("no_credential", "credential has no private_key");
-            const pp = passphrase_override ?? (typeof secret["passphrase"] === "string" ? (secret["passphrase"] as string) : undefined);
-            auth = { privateKey: pem, ...(pp ? { passphrase: pp } : {}) };
-          } else {
-            return fail("unsupported_credential", `credential type ${cred.credentialType} is not supported for SSH`);
-          }
-        } else {
-          return fail("no_credential", "host has no credential and no password was provided");
-        }
+        const resolved = await resolveSshConnection(deps, userId, hostId, {
+          password: password_override,
+          passphrase: passphrase_override,
+        });
+        host = resolved.host;
+        username = resolved.username;
+        auth = resolved.auth;
       } catch (e) {
+        if (e instanceof SshResolveError) return fail(e.code, e.message);
         deps.log.warn({ err: e }, "ssh gateway: credential resolution failed");
         return fail("credential_error", "could not resolve credentials");
       }
@@ -148,6 +131,48 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         void deps.history.end(id, status, { errorMessage: errorMessage ?? null, bytesIn, bytesOut }).catch(() => {});
       };
 
+      // Idle timeout (admin-configurable, 0 = disabled): close the session
+      // after N minutes with no client activity.
+      let idleMs = 0;
+      try {
+        const s = await deps.settings.getMany(["ssh_idle_timeout_minutes"]);
+        const mins = Number(s["ssh_idle_timeout_minutes"] ?? 0);
+        if (Number.isFinite(mins) && mins > 0) idleMs = mins * 60_000;
+      } catch { /* default: no idle timeout */ }
+      let idleTimer: NodeJS.Timeout | null = null;
+      const clearIdle = () => { if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } };
+      const armIdle = () => {
+        if (idleMs <= 0) return;
+        clearIdle();
+        idleTimer = setTimeout(() => {
+          if (ws.readyState === ws.OPEN) ws.send(Buffer.from("\r\n\x1b[33m*** session closed: idle timeout ***\x1b[0m\r\n"));
+          try { conn.end(); } catch { /* ignore */ }
+          try { ws.close(); } catch { /* ignore */ }
+        }, idleMs);
+      };
+
+      // Periodic server-stats poller (separate exec channel, doesn't touch the
+      // interactive shell). Sends {type:"stats", data} every few seconds.
+      let prevSample: PrevSample = {};
+      let statsTimer: NodeJS.Timeout | null = null;
+      const clearStats = () => { if (statsTimer) { clearInterval(statsTimer); statsTimer = null; } };
+      const pollStats = () => {
+        if (ws.readyState !== ws.OPEN) return;
+        try {
+          conn.exec(STATS_CMD, (err, stream) => {
+            if (err) return;
+            let out = "";
+            stream.on("data", (d: Buffer) => { if (out.length < 16_384) out += d.toString(); });
+            stream.stderr.on("data", () => { /* ignore */ });
+            stream.on("close", () => {
+              const { stats, prev } = parseStats(out, prevSample, Date.now());
+              prevSample = prev;
+              if (Object.keys(stats).length && ws.readyState === ws.OPEN) sendJson(ws, { type: "stats", data: stats });
+            });
+          });
+        } catch { /* ignore */ }
+      };
+
       conn.on("ready", () => {
         sendJson(ws, { type: "status", status: "connected" });
         conn.shell({ term: "xterm-256color", cols, rows }, (err, stream) => {
@@ -156,6 +181,9 @@ export function makeSshGateway(deps: SshGatewayDeps) {
             conn.end();
             return;
           }
+          armIdle();
+          statsTimer = setInterval(pollStats, 5000);
+          pollStats();
 
           stream.on("data", (data: Buffer) => {
             bytesOut += data.length;
@@ -166,12 +194,14 @@ export function makeSshGateway(deps: SshGatewayDeps) {
             if (ws.readyState === ws.OPEN) ws.send(data);
           });
           stream.on("close", () => {
+            clearStats();
             endHistory("closed");
             conn.end();
             if (ws.readyState === ws.OPEN) ws.close();
           });
 
           ws.on("message", (raw: Buffer, isBinary: boolean) => {
+            armIdle(); // reset idle timer on any client activity
             if (isBinary) {
               bytesIn += raw.length;
               stream.write(raw);
@@ -200,17 +230,21 @@ export function makeSshGateway(deps: SshGatewayDeps) {
       });
 
       conn.on("error", (err) => {
+        clearStats();
         deps.log.warn({ err: err.message, host: host.hostname }, "ssh gateway: connection error");
         endHistory("failed", err.message);
         fail("ssh_error", err.message);
       });
 
       conn.on("close", () => {
+        clearStats();
         endHistory("closed");
         if (ws.readyState === ws.OPEN) ws.close();
       });
 
       ws.on("close", () => {
+        clearIdle();
+        clearStats();
         endHistory("closed");
         conn.end();
       });
@@ -225,6 +259,9 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         port: host.port,
         username,
         readyTimeout: 20_000,
+        // Keepalive so the session survives network/NAT idle gaps.
+        keepaliveInterval: 30_000,
+        keepaliveCountMax: 3,
         // TOFU: accept the host key on first sight; log its fingerprint.
         hostVerifier: (key: Buffer) => {
           deps.log.info({ host: host.hostname, port: host.port }, "ssh gateway: accepting host key (TOFU)");

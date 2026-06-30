@@ -7,6 +7,7 @@ import type { UserRepository } from "../repos/userRepo.js";
 import type { JwtService } from "../jwt/index.js";
 import type { User } from "../domain/index.js";
 import { DomainError } from "../domain/index.js";
+import { permissionsFor } from "../domain/permissions.js";
 
 interface Deps {
   login: LoginUseCase;
@@ -23,6 +24,7 @@ export function userView(u: User) {
     email: u.email,
     full_name: u.fullName,
     role: u.role,
+    permissions: permissionsFor(u.role),
     is_active: u.isActive,
     is_locked: u.isLocked,
     mfa_enabled: u.mfaEnabled,

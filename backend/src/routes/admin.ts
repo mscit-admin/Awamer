@@ -1,15 +1,17 @@
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { userView } from "./auth.js";
-import { ALL_ROLES, DomainError } from "../domain/index.js";
+import { DomainError } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
 import type { RegisterUseCase } from "../usecases/register.js";
+import type { RoleService } from "../domain/roleService.js";
 import type { JwtService } from "../jwt/index.js";
 import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
 
 interface Deps {
   users: UserRepository;
   register: RegisterUseCase;
+  roleService: RoleService;
   jwt: JwtService;
 }
 
@@ -44,13 +46,16 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       email: z.string().email(),
       password: z.string().min(12).max(256),
       full_name: z.string().max(120).optional(),
-      role: z.enum(ALL_ROLES as [string, ...string[]]),
+      role: z.string().min(1).max(48),
     });
 
     app.post("/users", async (req, reply) => {
       const parsed = createSchema.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
+      }
+      if (!deps.roleService.has(parsed.data.role)) {
+        return reply.code(400).send({ error: { code: "invalid_role", message: "unknown role" } });
       }
       try {
         const user = await deps.register.execute({
@@ -88,7 +93,7 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
     const updateSchema = z.object({
       full_name: z.string().max(120).nullable().optional(),
       email: z.string().email().optional(),
-      role: z.enum(ALL_ROLES as [string, ...string[]]).optional(),
+      role: z.string().min(1).max(48).optional(),
       is_active: z.boolean().optional(),
       is_locked: z.boolean().optional(),
     });
@@ -98,6 +103,9 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       const bodyP = updateSchema.safeParse(req.body);
       if (!idP.success || !bodyP.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: "" } });
+      }
+      if (bodyP.data.role !== undefined && !deps.roleService.has(bodyP.data.role)) {
+        return reply.code(400).send({ error: { code: "invalid_role", message: "unknown role" } });
       }
       try {
         const u = await deps.users.getById(idP.data.id);

@@ -156,6 +156,9 @@ const VALID_ACTIONS = new Set([
   "user_create", "user_update", "user_delete",
   "config_change",
   "credential_create", "credential_read", "credential_update", "credential_delete",
+  "host_create", "host_update", "host_delete",
+  "folder_create", "folder_update", "folder_delete",
+  "tag_create", "tag_update", "tag_delete",
 ]);
 
 function mapAction(action: string, success: boolean): string {
@@ -190,4 +193,79 @@ export class AuditRepository {
       // by the caller's logger; we just swallow here.
     }
   }
+
+  async list(opts: { limit?: number; offset?: number; action?: string; success?: boolean; userId?: string } = {}): Promise<{ entries: AuditLogEntry[]; total: number }> {
+    const limit = Math.max(1, Math.min(200, opts.limit ?? 50));
+    const offset = Math.max(0, opts.offset ?? 0);
+
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.action) { params.push(opts.action); where.push(`a.action = $${params.length}`); }
+    if (opts.success !== undefined) { params.push(opts.success); where.push(`a.success = $${params.length}`); }
+    if (opts.userId) { params.push(opts.userId); where.push(`a.user_id = $${params.length}`); }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const countParams = [...params];
+    const listParams = [...params, limit, offset];
+    const lp = `$${listParams.length - 1}`;
+    const op = `$${listParams.length}`;
+
+    const countQ = this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM audit_logs a ${whereSql}`,
+      countParams,
+    );
+    const listQ = this.pool.query<AuditLogRow>(
+      `SELECT a.id, a."timestamp", a.user_id, u.username, a.action,
+              a.resource_type, a.resource_id, a.ip_address::text AS ip_address,
+              a.success, a.details
+       FROM audit_logs a
+       LEFT JOIN users u ON u.id = a.user_id
+       ${whereSql}
+       ORDER BY a."timestamp" DESC
+       LIMIT ${lp} OFFSET ${op}`,
+      listParams,
+    );
+    const [c, l] = await Promise.all([countQ, listQ]);
+    return {
+      total: Number(c.rows[0]?.count ?? 0),
+      entries: l.rows.map((r) => ({
+        id: Number(r.id),
+        timestamp: r.timestamp,
+        userId: r.user_id,
+        username: r.username,
+        action: r.action,
+        resourceType: r.resource_type,
+        resourceId: r.resource_id,
+        ipAddress: r.ip_address,
+        success: r.success,
+        details: r.details ?? {},
+      })),
+    };
+  }
+}
+
+interface AuditLogRow {
+  id: string;
+  timestamp: Date;
+  user_id: string | null;
+  username: string | null;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  ip_address: string | null;
+  success: boolean;
+  details: Record<string, unknown>;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  timestamp: Date;
+  userId: string | null;
+  username: string | null;
+  action: string;
+  resourceType: string | null;
+  resourceId: string | null;
+  ipAddress: string | null;
+  success: boolean;
+  details: Record<string, unknown>;
 }
