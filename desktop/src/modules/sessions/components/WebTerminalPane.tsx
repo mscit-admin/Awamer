@@ -75,6 +75,60 @@ function foldKeystrokes(buf: string, chunk: string): { buf: string; commands: st
   return { buf, commands };
 }
 
+interface ServerStats {
+  host?: string; nproc?: number; uptime_sec?: number; load1?: number;
+  cpu?: number; mem?: number; mem_used_mb?: number; mem_total_mb?: number;
+  disk?: number; rx_bps?: number; tx_bps?: number;
+}
+
+function fmtBps(n?: number): string {
+  if (n == null) return "—";
+  if (n < 1024) return `${n} B/s`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB/s`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB/s`;
+}
+function fmtDur(sec: number): string {
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+function barClass(pct?: number): string {
+  if (pct == null) return "text-fg-muted";
+  if (pct >= 90) return "text-red-400";
+  if (pct >= 75) return "text-amber-400";
+  return "text-emerald-400";
+}
+
+function TerminalStatusBar({ stats, connectedAt, fallbackName }: { stats: ServerStats | null; connectedAt: number | null; fallbackName: string }) {
+  const [, force] = useState(0);
+  useEffect(() => { const id = setInterval(() => force((n) => n + 1), 1000); return () => clearInterval(id); }, []);
+  const elapsed = connectedAt ? Math.max(0, Math.round((Date.now() - connectedAt) / 1000)) : 0;
+  const Metric = ({ label, value, cls }: { label: string; value: string; cls?: string }) => (
+    <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
+      <span className="text-fg-subtle uppercase text-[9px] tracking-wider">{label}</span>
+      <span className={"font-mono " + (cls ?? "text-fg")}>{value}</span>
+    </span>
+  );
+  return (
+    <div className="shrink-0 flex items-center gap-3 px-3 py-1 border-t border-border bg-bg-elevated/60 text-2xs overflow-x-auto">
+      <span className="inline-flex items-center gap-1 font-medium text-fg whitespace-nowrap">
+        <span className="size-1.5 rounded-full bg-emerald-400" /> {stats?.host || fallbackName}
+      </span>
+      <Metric label="CPU" value={stats?.cpu != null ? `${stats.cpu}%` : "…"} cls={barClass(stats?.cpu)} />
+      <Metric label="RAM" value={stats?.mem != null ? `${stats.mem}%` : "…"} cls={barClass(stats?.mem)} />
+      {stats?.mem_total_mb != null && <Metric label="" value={`${(stats.mem_used_mb! / 1024).toFixed(1)}/${(stats.mem_total_mb / 1024).toFixed(1)}G`} cls="text-fg-muted" />}
+      <Metric label="DISK" value={stats?.disk != null ? `${stats.disk}%` : "…"} cls={barClass(stats?.disk)} />
+      <Metric label="LOAD" value={stats?.load1 != null ? stats.load1.toFixed(2) + (stats.nproc ? `/${stats.nproc}` : "") : "…"} />
+      <Metric label="NET" value={`↓${fmtBps(stats?.rx_bps)} ↑${fmtBps(stats?.tx_bps)}`} cls="text-fg-muted" />
+      {stats?.uptime_sec != null && <Metric label="UP" value={fmtDur(stats.uptime_sec)} cls="text-fg-muted" />}
+      <span className="ml-auto" />
+      <Metric label="SESSION" value={fmtDur(elapsed)} cls="text-accent" />
+    </div>
+  );
+}
+
 export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const refreshTokens = useAuthStore((s) => s.refreshTokens);
@@ -111,6 +165,8 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [attempt, setAttempt] = useState(0); // bump to force reconnect
+  const [stats, setStats] = useState<ServerStats | null>(null);
+  const [connectedAt, setConnectedAt] = useState<number | null>(null);
 
   // Mount xterm once.
   useEffect(() => {
@@ -172,6 +228,8 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
 
     setPhase("connecting");
     setError(null);
+    setStats(null);
+    setConnectedAt(null);
     updateTab(tab.tabId, { phase: "connecting", errorMessage: null, errorCode: null });
 
     const pw = attempt > 0 && password ? password : undefined;
@@ -201,8 +259,11 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
           const msg = JSON.parse(ev.data);
           if (msg.type === "status" && msg.status === "connected") {
             setPhase("connected");
+            setConnectedAt((t) => t ?? Date.now());
             updateTab(tab.tabId, { phase: "connected" });
             ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+          } else if (msg.type === "stats" && msg.data) {
+            setStats(msg.data as ServerStats);
           } else if (msg.type === "error") {
             if (msg.code === "no_credential") {
               setPhase("need_password");
@@ -265,7 +326,9 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   }
 
   return (
-    <div className="relative h-full w-full bg-[#0b0e14]">
+    <div className="flex flex-col h-full w-full bg-[#0b0e14]" style={{ paddingBottom: bottomGapPx }}>
+      {/* Terminal area — fills the space above the status bar. */}
+      <div className="relative flex-1 min-h-0">
       {/* Faint username watermark behind the terminal so you can tell whose session this is. */}
       {username && (
         <div className="absolute inset-0 z-0 grid place-items-center pointer-events-none select-none overflow-hidden">
@@ -277,9 +340,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
           </div>
         </div>
       )}
-      {/* Bottom padding (user-adjustable in Settings) keeps the prompt clear of
-          the OS taskbar; FitAddon accounts for it so no row is hidden. */}
-      <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2" style={{ paddingBottom: bottomGapPx }} />
+      <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2 pb-2" />
 
       {(phase === "connected" || phase === "error") && (
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
@@ -374,6 +435,13 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
             </button>
           </div>
         </div>
+      )}
+      </div>
+
+      {/* Live server status bar below the terminal (CPU/RAM/disk/load/net/uptime
+          + how long you've been connected). Only while a session is live. */}
+      {phase === "connected" && (
+        <TerminalStatusBar stats={stats} connectedAt={connectedAt} fallbackName={tab.label} />
       )}
     </div>
   );

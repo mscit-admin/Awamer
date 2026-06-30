@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.36.0] — 2026-06-30 — Live server status bar below the terminal
+
+### Added
+- **Server status bar.** A live strip below each SSH terminal shows the remote
+  host's vitals while you work: **server name**, **CPU %**, **RAM %** (with
+  used/total GB), **disk %** (root fs), **1-min load** (per core count),
+  **network throughput** (↓ rx / ↑ tx), **server uptime**, and **how long
+  you've been connected** (session timer). CPU/RAM/disk colour by threshold
+  (green / amber ≥75% / red ≥90%).
+- The backend polls metrics every 5s over a **separate `ssh2` exec channel**
+  (`backend/src/ssh/serverStats.ts`) that never touches the interactive shell —
+  a single marker-delimited shell command reads `/proc` + `df`, parsed
+  server-side into rates (CPU and network are deltas vs the previous sample).
+  Sent to the browser as `{type:"stats"}` WebSocket frames. Best-effort: any
+  field a host doesn't expose is simply omitted. The poller is torn down with
+  the session.
+
+---
+
 ## [1.35.0] — 2026-06-30 — Idle auto-lock (keeps sessions alive)
 
 ### Added

@@ -32,6 +32,7 @@ import type {
   ConnectionHistoryRepository,
 } from "../repos/sessionRepos.js";
 import { resolveSshConnection, SshResolveError, type SshAuth } from "./resolveAuth.js";
+import { STATS_CMD, parseStats, type PrevSample } from "./serverStats.js";
 
 export interface SshGatewayDeps {
   jwt: JwtService;
@@ -150,6 +151,28 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         }, idleMs);
       };
 
+      // Periodic server-stats poller (separate exec channel, doesn't touch the
+      // interactive shell). Sends {type:"stats", data} every few seconds.
+      let prevSample: PrevSample = {};
+      let statsTimer: NodeJS.Timeout | null = null;
+      const clearStats = () => { if (statsTimer) { clearInterval(statsTimer); statsTimer = null; } };
+      const pollStats = () => {
+        if (ws.readyState !== ws.OPEN) return;
+        try {
+          conn.exec(STATS_CMD, (err, stream) => {
+            if (err) return;
+            let out = "";
+            stream.on("data", (d: Buffer) => { if (out.length < 16_384) out += d.toString(); });
+            stream.stderr.on("data", () => { /* ignore */ });
+            stream.on("close", () => {
+              const { stats, prev } = parseStats(out, prevSample, Date.now());
+              prevSample = prev;
+              if (Object.keys(stats).length && ws.readyState === ws.OPEN) sendJson(ws, { type: "stats", data: stats });
+            });
+          });
+        } catch { /* ignore */ }
+      };
+
       conn.on("ready", () => {
         sendJson(ws, { type: "status", status: "connected" });
         conn.shell({ term: "xterm-256color", cols, rows }, (err, stream) => {
@@ -159,6 +182,8 @@ export function makeSshGateway(deps: SshGatewayDeps) {
             return;
           }
           armIdle();
+          statsTimer = setInterval(pollStats, 5000);
+          pollStats();
 
           stream.on("data", (data: Buffer) => {
             bytesOut += data.length;
@@ -169,6 +194,7 @@ export function makeSshGateway(deps: SshGatewayDeps) {
             if (ws.readyState === ws.OPEN) ws.send(data);
           });
           stream.on("close", () => {
+            clearStats();
             endHistory("closed");
             conn.end();
             if (ws.readyState === ws.OPEN) ws.close();
@@ -204,18 +230,21 @@ export function makeSshGateway(deps: SshGatewayDeps) {
       });
 
       conn.on("error", (err) => {
+        clearStats();
         deps.log.warn({ err: err.message, host: host.hostname }, "ssh gateway: connection error");
         endHistory("failed", err.message);
         fail("ssh_error", err.message);
       });
 
       conn.on("close", () => {
+        clearStats();
         endHistory("closed");
         if (ws.readyState === ws.OPEN) ws.close();
       });
 
       ws.on("close", () => {
         clearIdle();
+        clearStats();
         endHistory("closed");
         conn.end();
       });
