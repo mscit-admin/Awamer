@@ -13,6 +13,7 @@ import { ChangePasswordPage } from "@/modules/auth/components/ChangePasswordPage
 import { ProtectedRoute } from "@/modules/auth/components/ProtectedRoute";
 import { DashboardLayout } from "@/modules/dashboard/DashboardLayout";
 import { DashboardHome } from "@/modules/dashboard/DashboardHome";
+import { TerminalRoute } from "@/modules/sessions/components/TerminalRoute";
 import { isTauri } from "@/shared/lib/tauri";
 
 // Everything below is code-split: heavy libraries (xterm, noVNC, Monaco,
@@ -35,7 +36,6 @@ const HostDetailPage = lz(() => import("@/modules/sessions/components/HostDetail
 const CredentialsPage = lz(() => import("@/modules/sessions/components/CredentialsPage"), "CredentialsPage");
 const TagsPage = lz(() => import("@/modules/sessions/components/TagsPage"), "TagsPage");
 const FoldersPage = lz(() => import("@/modules/sessions/components/FoldersPage"), "FoldersPage");
-const TerminalWorkspace = lz(() => import("@/modules/sessions/components/TerminalWorkspace"), "TerminalWorkspace");
 const SftpPage = lz(() => import("@/modules/sessions/components/SftpPage"), "SftpPage");
 const WebSftpPage = lz(() => import("@/modules/sessions/components/WebSftpPage"), "WebSftpPage");
 const VncPage = lz(() => import("@/modules/sessions/components/VncPage"), "VncPage");
@@ -96,11 +96,11 @@ export default function App() {
           <Route path="/hosts/new" element={<HostFormPage mode="create" />} />
           <Route path="/hosts/:id" element={<HostDetailPage />} />
           <Route path="/hosts/:id/edit" element={<HostFormPage mode="edit" />} />
-          <Route path="/hosts/:id/terminal" element={<TerminalWorkspace />} />
+          <Route path="/hosts/:id/terminal" element={<TerminalRoute />} />
           <Route path="/hosts/:id/sftp" element={isTauri ? <SftpPage /> : <WebSftpPage />} />
           <Route path="/hosts/:id/vnc" element={<VncPage />} />
           <Route path="/hosts/:id/telnet" element={<TelnetPage />} />
-          <Route path="/terminal" element={<TerminalWorkspace />} />
+          <Route path="/terminal" element={<TerminalRoute />} />
           <Route path="/files" element={<FilesPage />} />
           <Route path="/network" element={<NetworkPage />} />
           <Route path="/tunnels" element={<TunnelsPage />} />

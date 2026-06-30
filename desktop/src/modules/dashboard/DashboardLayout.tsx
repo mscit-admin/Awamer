@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Home,
   Settings,
@@ -22,12 +22,20 @@ import {
   Sun,
   Moon,
   Palette,
+  Loader2,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Logo, useAppName } from "@/shared/branding";
 import { currentTheme, setTheme, type Theme } from "@/shared/lib/theme";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
+
+// The terminal workspace is mounted once (lazily, on first visit) and kept
+// alive across navigation so its SSH sessions survive switching screens.
+const TerminalWorkspace = lazy(() =>
+  import("@/modules/sessions/components/TerminalWorkspace").then((m) => ({ default: m.TerminalWorkspace })),
+);
+const isTerminalPath = (p: string) => /^\/terminal(\/|$)/.test(p) || /^\/hosts\/[^/]+\/terminal$/.test(p);
 import { hasPerm, type Permission } from "@/shared/lib/permissions";
 import { cn } from "@/shared/lib/cn";
 
@@ -73,6 +81,20 @@ const ADMIN_ROLE_NAV: NavItem[] = [
 
 export function DashboardLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const onTerminal = isTerminalPath(location.pathname);
+  // Mount the terminal on first visit, then keep it mounted forever so SSH
+  // sessions persist while the user works on other screens.
+  const [terminalMounted, setTerminalMounted] = useState(false);
+  useEffect(() => { if (onTerminal) setTerminalMounted(true); }, [onTerminal]);
+  // When the terminal becomes visible again, nudge xterm to refit — it can't
+  // measure its container while hidden (display:none).
+  useEffect(() => {
+    if (!onTerminal) return;
+    const t = setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+    return () => clearTimeout(t);
+  }, [onTerminal]);
+
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
@@ -196,8 +218,19 @@ export function DashboardLayout() {
           <Logo className="size-5" />
           <span className="font-display font-semibold text-sm truncate">{appName}</span>
         </div>
-        <main className="flex-1 min-h-0 overflow-y-auto">
-          <Outlet />
+        <main className="flex-1 min-h-0 relative">
+          {/* Routed pages */}
+          <div className="absolute inset-0 overflow-y-auto" style={{ display: onTerminal ? "none" : "block" }}>
+            <Outlet />
+          </div>
+          {/* Persistent terminal workspace — kept alive across navigation. */}
+          {terminalMounted && (
+            <div className="absolute inset-0" style={{ display: onTerminal ? "block" : "none" }}>
+              <Suspense fallback={<div className="h-full grid place-items-center text-fg-muted"><Loader2 className="size-5 animate-spin" /></div>}>
+                <TerminalWorkspace />
+              </Suspense>
+            </div>
+          )}
         </main>
       </div>
     </div>

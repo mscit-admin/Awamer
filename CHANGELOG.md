@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.33.1] — 2026-06-29 — Terminal survives navigation
+
+### Fixed
+- **SSH terminal sessions no longer drop when you switch screens.** The
+  terminal workspace is now mounted persistently in the app shell and merely
+  hidden when you navigate to Credentials, Settings, etc. — so its WebSocket
+  sessions, scrollback and running work stay alive when you come back. It's
+  still lazy-loaded (xterm only downloads on first terminal use), and xterm
+  refits automatically when the terminal becomes visible again.
+
+---
+
 ## [1.33.0] — 2026-06-29 — Command-history permission
 
 ### Added

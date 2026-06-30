@@ -1,11 +1,9 @@
-import { useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { X, Plus, Server } from "lucide-react";
 
 import { useTerminalTabs } from "../store/terminalTabsStore";
 import { TerminalPane } from "./TerminalPane";
 import { WebTerminalPane } from "./WebTerminalPane";
-import { hostsApi } from "../api/sessionsApi";
 import { isTauri } from "@/shared/lib/tauri";
 
 /**
@@ -24,42 +22,15 @@ import { isTauri } from "@/shared/lib/tauri";
  * visibility with display:none rather than unmounting so the xterm
  * instance and the SSH session both survive a tab switch.
  *
- * The URL `/hosts/:id/terminal` opens a NEW tab for that host (or
- * focuses an existing one). After that, internal state takes over —
- * the URL doesn't track which tab is active.
+ * This component is mounted persistently by DashboardLayout (hidden when off
+ * the terminal route) so sessions also survive navigating to other screens.
+ * Opening a tab from `/hosts/:id/terminal` is handled by TerminalRoute.
  */
 export function TerminalWorkspace() {
-  const params = useParams<{ id?: string }>();
-  const navigate = useNavigate();
-
   const tabs = useTerminalTabs(s => s.tabs);
   const activeTabId = useTerminalTabs(s => s.activeTabId);
-  const openTab = useTerminalTabs(s => s.openTab);
   const setActive = useTerminalTabs(s => s.setActive);
   const closeTab = useTerminalTabs(s => s.closeTab);
-
-  // When navigated to /hosts/:id/terminal, open (or focus) a tab for that host.
-  useEffect(() => {
-    if (!params.id) return;
-    const hostId = params.id;
-    void (async () => {
-      let label = hostId.slice(0, 8);
-      try {
-        const h = await hostsApi.get(hostId);
-        label = h.name;
-      } catch {
-        // Use the short ID as a fallback label
-      }
-      const tabId = openTab(hostId, label);
-      // Strip the host id from the URL so subsequent navigations don't
-      // re-trigger this effect. The route `/terminal` (without :id) still
-      // renders this component.
-      navigate("/terminal", { replace: true });
-      // Ensure the new tab is active even if openTab returned an existing one.
-      setActive(tabId);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id]);
 
   if (tabs.length === 0) {
     return <EmptyState />;
