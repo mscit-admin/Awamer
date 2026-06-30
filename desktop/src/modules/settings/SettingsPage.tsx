@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { sessionSettingsApi } from "./sessionSettingsApi";
+import { useTerminalUi } from "@/modules/sessions/store/terminalUiStore";
 import { ApiError } from "@/shared/lib/api";
 
 export function SettingsPage() {
@@ -41,6 +42,10 @@ export function SettingsPage() {
         />
       </Section>
 
+      <Section title="Terminal">
+        <TerminalUiSettings />
+      </Section>
+
       {isAdmin && (
         <Section title="SSH sessions" icon={<Clock className="size-4" />}>
           <AdminSessionSettings />
@@ -52,6 +57,26 @@ export function SettingsPage() {
         <Row label="Phase" value="1 — Foundation" />
         <Row label="Build" value="dev" mono small last />
       </Section>
+    </div>
+  );
+}
+
+function TerminalUiSettings() {
+  const bottomGapPx = useTerminalUi((s) => s.bottomGapPx);
+  const setBottomGapPx = useTerminalUi((s) => s.setBottomGapPx);
+  return (
+    <div className="px-4 py-4">
+      <label className="block text-xs text-fg-muted mb-1">Bottom spacing (px)</label>
+      <div className="flex items-center gap-3">
+        <input type="range" min={0} max={120} step={4} value={bottomGapPx}
+          onChange={(e) => setBottomGapPx(Number(e.target.value))} className="flex-1 max-w-xs accent-accent" />
+        <input type="number" min={0} max={200} value={bottomGapPx}
+          onChange={(e) => setBottomGapPx(Number(e.target.value))} className="input w-20" />
+      </div>
+      <p className="text-2xs text-fg-muted mt-1">
+        Extra space below the terminal so the prompt isn't hidden behind the OS taskbar. Increase it if the
+        bottom line is covered. Applies live; saved in this browser.
+      </p>
     </div>
   );
 }

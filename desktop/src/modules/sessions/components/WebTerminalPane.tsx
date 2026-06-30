@@ -20,6 +20,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { useTerminalTabs, type TerminalTab } from "../store/terminalTabsStore";
 import { useCommandHistoryPref } from "../store/commandHistoryPref";
+import { useTerminalUi } from "../store/terminalUiStore";
 import { commandHistoryApi } from "../api/commandHistoryApi";
 import { CommandHistoryPanel } from "./CommandHistoryPanel";
 import { NotesPanel } from "@/modules/notes/NotesPanel";
@@ -82,6 +83,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const saveHistory = useCommandHistoryPref((s) => s.saveHistory);
   const setSaveHistory = useCommandHistoryPref((s) => s.setSaveHistory);
   const canHistory = useCan("command_history:read");
+  const bottomGapPx = useTerminalUi((s) => s.bottomGapPx);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -95,6 +97,12 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const lineBufRef = useRef("");
   const saveHistoryRef = useRef(saveHistory && canHistory);
   useEffect(() => { saveHistoryRef.current = saveHistory && canHistory; }, [saveHistory, canHistory]);
+
+  // Refit the terminal when the bottom gap changes.
+  useEffect(() => {
+    const t = setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
+    return () => clearTimeout(t);
+  }, [bottomGapPx]);
 
   const [showHistory, setShowHistory] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -269,9 +277,9 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
           </div>
         </div>
       )}
-      {/* Extra bottom padding keeps the prompt clear of the window edge / OS
-          taskbar; FitAddon accounts for it so no row is hidden. */}
-      <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2 pb-10" />
+      {/* Bottom padding (user-adjustable in Settings) keeps the prompt clear of
+          the OS taskbar; FitAddon accounts for it so no row is hidden. */}
+      <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2" style={{ paddingBottom: bottomGapPx }} />
 
       {(phase === "connected" || phase === "error") && (
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
