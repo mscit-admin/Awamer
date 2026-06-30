@@ -29,6 +29,7 @@ import { Logo, useAppName } from "@/shared/branding";
 import { currentTheme, setTheme, type Theme } from "@/shared/lib/theme";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { IdleLock } from "@/modules/auth/components/IdleLock";
 
 // The terminal workspace is mounted once (lazily, on first visit) and kept
 // alive across navigation so its SSH sessions survive switching screens.
@@ -120,6 +121,8 @@ export function DashboardLayout() {
 
   return (
     <div className="h-full flex md:grid md:grid-cols-[220px_1fr] md:grid-rows-1 md:overflow-hidden bg-bg">
+      {/* Idle auto-lock overlay (keeps terminals alive behind it). */}
+      <IdleLock />
       {/* Backdrop (mobile only, when drawer is open) */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />

@@ -19,6 +19,16 @@ export class ChangePasswordUseCase {
     private readonly argon2: Argon2Service,
   ) {}
 
+  /** Verify a user's current password (used to unlock the app's idle lock). */
+  async verify(userId: string, password: string): Promise<boolean> {
+    try {
+      const user = await this.users.getById(userId);
+      return await this.argon2.verify(user.passwordHash, password);
+    } catch {
+      return false;
+    }
+  }
+
   async execute(userId: string, currentPassword: string, newPassword: string): Promise<void> {
     const user = await this.users.getById(userId);
 

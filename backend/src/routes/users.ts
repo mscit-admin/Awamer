@@ -87,6 +87,18 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
       }
     });
 
+    // ---------- Verify password (idle-lock unlock) ----------------------
+    const verifySchema = z.object({ password: z.string().min(1).max(256) });
+    app.post("/auth/verify-password", async (req, reply) => {
+      const parsed = verifySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
+      }
+      const ok = await deps.changePassword.verify(req.auth!.sub, parsed.data.password);
+      if (!ok) return reply.code(401).send({ error: { code: "invalid_credentials", message: "incorrect password" } });
+      return reply.send({ ok: true });
+    });
+
     // ---------- MFA enroll/activate -------------------------------------
     const enrollSchema = z.object({
       device_name: z.string().min(1).max(64).default("Authenticator"),

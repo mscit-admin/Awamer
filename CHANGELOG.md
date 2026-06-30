@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.35.0] — 2026-06-30 — Idle auto-lock (keeps sessions alive)
+
+### Added
+- **App idle auto-lock.** Set an inactivity timer (Settings → Auto-lock,
+  minutes; 0 = off, plus a "Lock now" button). After that idle time the app
+  shows a **lock screen asking for your password** — but your **open terminals
+  stay connected** behind it (the lock is an overlay; the session/tokens are
+  untouched). Unlock verifies the current user's password
+  (`POST /api/v1/auth/verify-password`, authenticated). The lock persists across
+  a reload. Also added an adjustable **terminal bottom spacing** setting (so the
+  prompt clears the OS taskbar).
+
+---
+
 ## [1.34.1] — 2026-06-30 — Terminal Retry actually reconnects
 
 ### Fixed

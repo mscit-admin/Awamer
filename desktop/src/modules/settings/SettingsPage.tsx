@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { sessionSettingsApi } from "./sessionSettingsApi";
 import { useTerminalUi } from "@/modules/sessions/store/terminalUiStore";
+import { useLockStore } from "@/modules/auth/store/lockStore";
 import { ApiError } from "@/shared/lib/api";
 
 export function SettingsPage() {
@@ -42,6 +43,10 @@ export function SettingsPage() {
         />
       </Section>
 
+      <Section title="Auto-lock" icon={<Shield className="size-4" />}>
+        <AutoLockSettings />
+      </Section>
+
       <Section title="Terminal">
         <TerminalUiSettings />
       </Section>
@@ -57,6 +62,28 @@ export function SettingsPage() {
         <Row label="Phase" value="1 — Foundation" />
         <Row label="Build" value="dev" mono small last />
       </Section>
+    </div>
+  );
+}
+
+function AutoLockSettings() {
+  const idleTimeoutMin = useLockStore((s) => s.idleTimeoutMin);
+  const setIdleTimeout = useLockStore((s) => s.setIdleTimeout);
+  const lock = useLockStore((s) => s.lock);
+  return (
+    <div className="px-4 py-4 space-y-3">
+      <div>
+        <label className="block text-xs text-fg-muted mb-1">Lock after inactivity (minutes)</label>
+        <div className="flex items-center gap-2">
+          <input type="number" min={0} max={480} value={idleTimeoutMin}
+            onChange={(e) => setIdleTimeout(Number(e.target.value))} className="input w-24" />
+          <button onClick={lock} className="btn-ghost text-sm"><Shield className="size-3.5" /> Lock now</button>
+        </div>
+        <p className="text-2xs text-fg-muted mt-1">
+          After this many idle minutes the screen locks and asks for your password — your open
+          terminals stay connected behind it. <span className="font-medium">0 = never</span>. Saved in this browser.
+        </p>
+      </div>
     </div>
   );
 }
