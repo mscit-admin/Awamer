@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.39.1] — 2026-06-30 — Terminal status bar: user / date / time / spend time on the left
+
+### Changed
+- The terminal status bar now opens (left corner) with the **Awamer user** who
+  is signed in, the current **date**, a live **time** clock, and the **session
+  spend time**, followed by a divider and the server name + live vitals. (These
+  moved from the right; the time updates every second.)
+
+---
+
 ## [1.39.0] — 2026-06-30 — Uploadable terminal watermark image
 
 ### Added

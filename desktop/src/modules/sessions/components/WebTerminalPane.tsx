@@ -110,14 +110,26 @@ function TerminalStatusBar({ stats, connectedAt, fallbackName, username }: { sta
   const [, force] = useState(0);
   useEffect(() => { const id = setInterval(() => force((n) => n + 1), 1000); return () => clearInterval(id); }, []);
   const elapsed = connectedAt ? Math.max(0, Math.round((Date.now() - connectedAt) / 1000)) : 0;
+  const now = new Date();
+  const dateStr = now.toLocaleDateString();
+  const timeStr = now.toLocaleTimeString();
   const Metric = ({ label, value, cls }: { label: string; value: string; cls?: string }) => (
     <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
       <span className="text-slate-500 uppercase text-[9px] tracking-wider">{label}</span>
       <span className={"font-mono " + (cls ?? "text-slate-100")}>{value}</span>
     </span>
   );
+  const Divider = () => <span className="h-3 w-px bg-white/10 shrink-0" />;
   return (
     <div className="shrink-0 flex items-center gap-3 px-3 py-1 border-t border-white/10 bg-[#0b0e14] text-2xs text-slate-200 overflow-x-auto">
+      {/* Left corner: who is signed in to Awamer, current date/time, and how long
+          this session has been open. */}
+      {username && <Metric label="USER" value={username} cls="text-slate-100" />}
+      <Metric label="DATE" value={dateStr} cls="text-slate-300" />
+      <Metric label="TIME" value={timeStr} cls="text-slate-300" />
+      <Metric label="SESSION" value={fmtDur(elapsed)} cls="text-sky-300" />
+      <Divider />
+      {/* Server identity + live vitals. */}
       <span className="inline-flex items-center gap-1 font-medium text-slate-100 whitespace-nowrap">
         <span className="size-1.5 rounded-full bg-emerald-400" /> {stats?.host || fallbackName}
       </span>
@@ -129,8 +141,6 @@ function TerminalStatusBar({ stats, connectedAt, fallbackName, username }: { sta
       <Metric label="NET" value={`↓${fmtBps(stats?.rx_bps)} ↑${fmtBps(stats?.tx_bps)}`} cls="text-slate-300" />
       {stats?.uptime_sec != null && <Metric label="UP" value={fmtDur(stats.uptime_sec)} cls="text-slate-300" />}
       <span className="ml-auto" />
-      <Metric label="SESSION" value={fmtDur(elapsed)} cls="text-sky-300" />
-      {username && <Metric label="USER" value={username} cls="text-slate-100" />}
     </div>
   );
 }
