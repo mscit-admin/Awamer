@@ -94,11 +94,14 @@ function fmtDur(sec: number): string {
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
 }
+// The status bar is attached to the always-dark terminal surface, so it uses
+// fixed dark-on-light-text colours (not theme tokens) to stay legible in both
+// light and dark app themes.
 function barClass(pct?: number): string {
-  if (pct == null) return "text-fg-muted";
+  if (pct == null) return "text-slate-300";
   if (pct >= 90) return "text-red-400";
-  if (pct >= 75) return "text-amber-400";
-  return "text-emerald-400";
+  if (pct >= 75) return "text-amber-300";
+  return "text-emerald-300";
 }
 
 function TerminalStatusBar({ stats, connectedAt, fallbackName }: { stats: ServerStats | null; connectedAt: number | null; fallbackName: string }) {
@@ -107,24 +110,24 @@ function TerminalStatusBar({ stats, connectedAt, fallbackName }: { stats: Server
   const elapsed = connectedAt ? Math.max(0, Math.round((Date.now() - connectedAt) / 1000)) : 0;
   const Metric = ({ label, value, cls }: { label: string; value: string; cls?: string }) => (
     <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
-      <span className="text-fg-subtle uppercase text-[9px] tracking-wider">{label}</span>
-      <span className={"font-mono " + (cls ?? "text-fg")}>{value}</span>
+      <span className="text-slate-500 uppercase text-[9px] tracking-wider">{label}</span>
+      <span className={"font-mono " + (cls ?? "text-slate-100")}>{value}</span>
     </span>
   );
   return (
-    <div className="shrink-0 flex items-center gap-3 px-3 py-1 border-t border-border bg-bg-elevated/60 text-2xs overflow-x-auto">
-      <span className="inline-flex items-center gap-1 font-medium text-fg whitespace-nowrap">
+    <div className="shrink-0 flex items-center gap-3 px-3 py-1 border-t border-white/10 bg-[#0b0e14] text-2xs text-slate-200 overflow-x-auto">
+      <span className="inline-flex items-center gap-1 font-medium text-slate-100 whitespace-nowrap">
         <span className="size-1.5 rounded-full bg-emerald-400" /> {stats?.host || fallbackName}
       </span>
       <Metric label="CPU" value={stats?.cpu != null ? `${stats.cpu}%` : "…"} cls={barClass(stats?.cpu)} />
       <Metric label="RAM" value={stats?.mem != null ? `${stats.mem}%` : "…"} cls={barClass(stats?.mem)} />
-      {stats?.mem_total_mb != null && <Metric label="" value={`${(stats.mem_used_mb! / 1024).toFixed(1)}/${(stats.mem_total_mb / 1024).toFixed(1)}G`} cls="text-fg-muted" />}
+      {stats?.mem_total_mb != null && <Metric label="" value={`${(stats.mem_used_mb! / 1024).toFixed(1)}/${(stats.mem_total_mb / 1024).toFixed(1)}G`} cls="text-slate-300" />}
       <Metric label="DISK" value={stats?.disk != null ? `${stats.disk}%` : "…"} cls={barClass(stats?.disk)} />
-      <Metric label="LOAD" value={stats?.load1 != null ? stats.load1.toFixed(2) + (stats.nproc ? `/${stats.nproc}` : "") : "…"} />
-      <Metric label="NET" value={`↓${fmtBps(stats?.rx_bps)} ↑${fmtBps(stats?.tx_bps)}`} cls="text-fg-muted" />
-      {stats?.uptime_sec != null && <Metric label="UP" value={fmtDur(stats.uptime_sec)} cls="text-fg-muted" />}
+      <Metric label="LOAD" value={stats?.load1 != null ? stats.load1.toFixed(2) + (stats.nproc ? `/${stats.nproc}` : "") : "…"} cls="text-slate-200" />
+      <Metric label="NET" value={`↓${fmtBps(stats?.rx_bps)} ↑${fmtBps(stats?.tx_bps)}`} cls="text-slate-300" />
+      {stats?.uptime_sec != null && <Metric label="UP" value={fmtDur(stats.uptime_sec)} cls="text-slate-300" />}
       <span className="ml-auto" />
-      <Metric label="SESSION" value={fmtDur(elapsed)} cls="text-accent" />
+      <Metric label="SESSION" value={fmtDur(elapsed)} cls="text-sky-300" />
     </div>
   );
 }

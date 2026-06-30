@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.36.1] — 2026-06-30 — Status bar legible in light mode
+
+### Fixed
+- The terminal **server status bar** used theme-aware text/background tokens,
+  so in **light mode** its text turned dark against the always-dark terminal
+  surface and washed out. It now uses fixed dark-surface colours (solid
+  `#0b0e14` background, light slate text) so it stays clearly readable in both
+  light and dark app themes.
+
+---
+
 ## [1.36.0] — 2026-06-30 — Live server status bar below the terminal
 
 ### Added
