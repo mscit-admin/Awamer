@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.36.2] — 2026-06-30 — No empty band below the terminal status bar
+
+### Fixed
+- The adjustable terminal **bottom spacing** (for OS-taskbar clearance) was
+  applied to the whole pane, so after the status bar moved to the bottom it
+  showed as an empty dark band **below** the status bar. The spacing now
+  cushions the prompt **above** the status bar, and the **status bar sits flush
+  at the bottom**. Default bottom spacing changed from 40px to **0** (the status
+  bar already separates the prompt from the window edge). Existing users can set
+  it to 0 under Settings → Terminal → Bottom spacing.
+
+---
+
 ## [1.36.1] — 2026-06-30 — Status bar legible in light mode
 
 ### Fixed

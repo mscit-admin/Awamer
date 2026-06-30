@@ -101,8 +101,9 @@ function TerminalUiSettings() {
           onChange={(e) => setBottomGapPx(Number(e.target.value))} className="input w-20" />
       </div>
       <p className="text-2xs text-fg-muted mt-1">
-        Extra space below the terminal so the prompt isn't hidden behind the OS taskbar. Increase it if the
-        bottom line is covered. Applies live; saved in this browser.
+        Extra space between the terminal prompt and the status bar, in case the bottom line is hidden behind the
+        OS taskbar. The status bar stays flush at the bottom. <span className="font-medium">0 = none</span>.
+        Applies live; saved in this browser.
       </p>
     </div>
   );

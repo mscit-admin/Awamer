@@ -329,9 +329,11 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#0b0e14]" style={{ paddingBottom: bottomGapPx }}>
-      {/* Terminal area — fills the space above the status bar. */}
-      <div className="relative flex-1 min-h-0">
+    <div className="flex flex-col h-full w-full bg-[#0b0e14]">
+      {/* Terminal area — fills the space above the status bar. The user-adjustable
+          bottom gap cushions the prompt from the status bar / OS taskbar; the
+          status bar itself stays flush at the window bottom (no dead band). */}
+      <div className="relative flex-1 min-h-0" style={{ paddingBottom: bottomGapPx }}>
       {/* Faint username watermark behind the terminal so you can tell whose session this is. */}
       {username && (
         <div className="absolute inset-0 z-0 grid place-items-center pointer-events-none select-none overflow-hidden">
