@@ -147,6 +147,9 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const quickPasteButton = useTerminalPaste((s) => s.quickButton);
   const editPasteButton = useTerminalPaste((s) => s.editButton);
   const logoUrl = useBranding((s) => s.logoUrl);
+  const terminalWatermark = useBranding((s) => s.terminalWatermark);
+  // Dedicated terminal watermark wins; fall back to the app logo.
+  const watermarkUrl = terminalWatermark || logoUrl;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -405,12 +408,13 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
           bottom gap cushions the prompt from the status bar / OS taskbar; the
           status bar itself stays flush at the window bottom (no dead band). */}
       <div className="relative flex-1 min-h-0" style={{ paddingBottom: bottomGapPx }}>
-      {/* Faint watermark behind the terminal: the branding logo if one is set,
-          otherwise the username (so you can still tell whose session this is). */}
-      {(logoUrl || username) && (
+      {/* Faint watermark behind the terminal: the dedicated terminal watermark
+          (or the app logo) if one is set, otherwise the username (so you can
+          still tell whose session this is). */}
+      {(watermarkUrl || username) && (
         <div className="absolute inset-0 z-0 grid place-items-center pointer-events-none select-none overflow-hidden">
-          {logoUrl ? (
-            <img src={logoUrl} alt="" className="max-w-[45%] max-h-[45%] object-contain opacity-[0.07]" />
+          {watermarkUrl ? (
+            <img src={watermarkUrl} alt="" className="max-w-[45%] max-h-[45%] object-contain opacity-[0.07]" />
           ) : (
             <div className="text-center -rotate-12">
               <div className="font-mono font-bold uppercase tracking-widest text-white/[0.05] leading-none whitespace-nowrap text-[12vw]">

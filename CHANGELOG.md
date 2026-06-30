@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.39.0] — 2026-06-30 — Uploadable terminal watermark image
+
+### Added
+- **Terminal watermark** is now its own uploadable image under
+  **Administration → Branding → Terminal watermark** — upload, preview, replace,
+  or remove it like the logo/login background (new `app_terminal_watermark`
+  branding setting; data-URI or http(s) URL, validated server-side, up to 3 MB).
+- The terminal background shows this image faintly in the centre. Fallback
+  order: **terminal watermark → app logo → username text**, so nothing is lost
+  if it's left empty.
+
+---
+
 ## [1.38.0] — 2026-06-30 — Terminal watermark is the logo; username moved to the status bar
 
 ### Changed

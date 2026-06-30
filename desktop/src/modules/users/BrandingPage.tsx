@@ -17,6 +17,7 @@ export function BrandingPage() {
   const [logo, setLogo] = useState<string | null>(null);
   const [favicon, setFavicon] = useState<string | null>(null);
   const [loginImage, setLoginImage] = useState<string | null>(null);
+  const [terminalWatermark, setTerminalWatermark] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,10 +25,11 @@ export function BrandingPage() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const faviconRef = useRef<HTMLInputElement | null>(null);
   const loginRef = useRef<HTMLInputElement | null>(null);
+  const watermarkRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     brandingApi.get()
-      .then((b) => { setName(b.app_name ?? ""); setLogo(b.logo ?? null); setFavicon(b.favicon ?? null); setLoginImage(b.login_image ?? null); })
+      .then((b) => { setName(b.app_name ?? ""); setLogo(b.logo ?? null); setFavicon(b.favicon ?? null); setLoginImage(b.login_image ?? null); setTerminalWatermark(b.terminal_watermark ?? null); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -59,14 +61,20 @@ export function BrandingPage() {
     readImage(file, setLoginImage, MAX_LOGIN_BYTES);
   }
 
+  function onPickWatermark(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    readImage(file, setTerminalWatermark, MAX_LOGIN_BYTES);
+  }
+
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     setSaved(false);
     try {
-      const b = await brandingApi.update({ app_name: name.trim() || null, logo, favicon, login_image: loginImage });
-      apply({ app_name: b.app_name, logo: b.logo, favicon: b.favicon, login_image: b.login_image });
+      const b = await brandingApi.update({ app_name: name.trim() || null, logo, favicon, login_image: loginImage, terminal_watermark: terminalWatermark });
+      apply({ app_name: b.app_name, logo: b.logo, favicon: b.favicon, login_image: b.login_image, terminal_watermark: b.terminal_watermark });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -165,6 +173,30 @@ export function BrandingPage() {
               <input ref={loginRef} type="file" accept="image/*" hidden onChange={onPickLogin} />
             </div>
             <p className="text-2xs text-fg-muted mt-2">Shown behind the sign-in card (landscape, up to {Math.round(MAX_LOGIN_BYTES / 1024 / 1024 * 10) / 10} MB).</p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-fg-muted mb-2">Terminal watermark</label>
+            <div className="rounded-md border border-border bg-[#0b0e14] overflow-hidden mb-2 aspect-[16/7] grid place-items-center">
+              {terminalWatermark
+                ? <img src={terminalWatermark} alt="terminal watermark preview" className="max-w-[45%] max-h-[70%] object-contain opacity-[0.18]" />
+                : <span className="text-2xs text-fg-subtle">No image — shows the logo, or the username</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => watermarkRef.current?.click()} className="btn-ghost text-xs">
+                <Upload className="size-3.5" /> Upload image
+              </button>
+              {terminalWatermark && (
+                <button type="button" onClick={() => setTerminalWatermark(null)} className="btn-ghost text-xs text-red-400">
+                  <Trash2 className="size-3.5" /> Remove
+                </button>
+              )}
+              <input ref={watermarkRef} type="file" accept="image/*" hidden onChange={onPickWatermark} />
+            </div>
+            <p className="text-2xs text-fg-muted mt-2">
+              Faint image shown in the centre of the terminal background. If empty, the logo is used; if there's no
+              logo either, the username is shown. Up to {Math.round(MAX_LOGIN_BYTES / 1024 / 1024 * 10) / 10} MB.
+            </p>
           </div>
 
           {error && (
