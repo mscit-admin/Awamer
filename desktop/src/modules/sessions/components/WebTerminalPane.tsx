@@ -424,7 +424,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       {(watermarkUrl || username) && (
         <div className="absolute inset-0 z-0 grid place-items-center pointer-events-none select-none overflow-hidden">
           {watermarkUrl ? (
-            <img src={watermarkUrl} alt="" className="max-w-[45%] max-h-[45%] object-contain opacity-[0.07]" />
+            <img src={watermarkUrl} alt="" className="max-w-[45%] max-h-[45%] object-contain opacity-[0.13]" />
           ) : (
             <div className="text-center -rotate-12">
               <div className="font-mono font-bold uppercase tracking-widest text-white/[0.05] leading-none whitespace-nowrap text-[12vw]">
