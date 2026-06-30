@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# =====================================================================
+# NetSphere Terminal — Update / redeploy
+# =====================================================================
+#
+# Pulls the latest code and redeploys. It rebuilds the FRONTEND every
+# time and only rebuilds the BACKEND container when backend code actually
+# changed in the pulled commits — so frontend-only updates are fast.
+#
+# Run from the project root on the server:
+#   ./deploy/scripts/update.sh
+#
+# Override any default via env vars, e.g.:
+#   API_BASE_URL=https://my.domain:6655 BRANCH=main ./deploy/scripts/update.sh
+#
+# Defaults below match this deployment. Adjust if your server differs.
+# =====================================================================
+
+set -euo pipefail
+
+# --- Config (override via environment) -------------------------------
+BRANCH="${BRANCH:-claude/serene-cray-fdzqwy}"
+API_BASE_URL="${API_BASE_URL:-https://161.97.78.116.nip.io:6655}"
+WEB_ROOT="${WEB_ROOT:-/var/www/awamer}"
+COMPOSE_FILE="${COMPOSE_FILE:-deploy/docker-compose.production.yml}"
+ENV_FILE="${ENV_FILE:-.env.production}"
+# ---------------------------------------------------------------------
+
+# Resolve project root (this script lives in deploy/scripts/).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+
+# Pick docker compose flavour.
+if docker compose version >/dev/null 2>&1; then DC=(docker compose); else DC=(docker-compose); fi
+
+say "Project root: $ROOT"
+say "Branch: $BRANCH   API base: $API_BASE_URL   Web root: $WEB_ROOT"
+
+# 1) Record the current commit, then pull the latest code.
+BEFORE="$(git rev-parse HEAD 2>/dev/null || echo none)"
+say "Fetching latest…"
+git fetch origin "$BRANCH"
+git checkout "$BRANCH"
+git pull origin "$BRANCH"
+AFTER="$(git rev-parse HEAD)"
+
+if [ "$BEFORE" = "$AFTER" ]; then
+  say "Already up to date ($AFTER). Rebuilding anyway."
+else
+  say "Updated: $BEFORE -> $AFTER"
+fi
+
+# 2) Did backend code change? (rebuild the container only if so)
+BACKEND_CHANGED=1
+if [ "$BEFORE" != "none" ] && git diff --quiet "$BEFORE" "$AFTER" -- backend; then
+  BACKEND_CHANGED=0
+fi
+
+if [ "$BACKEND_CHANGED" -eq 1 ]; then
+  say "Backend changed — rebuilding the auth-service container…"
+  "${DC[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build auth-service
+  "${DC[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+  say "Waiting for backend health…"
+  for i in $(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8081/healthz >/dev/null 2>&1; then say "Backend healthy."; break; fi
+    sleep 2
+    [ "$i" -eq 30 ] && { echo "Backend did not become healthy in time"; exit 1; }
+  done
+else
+  say "No backend changes — skipping container rebuild."
+fi
+
+# 3) Always rebuild + publish the frontend.
+say "Building frontend (VITE_API_BASE_URL=$API_BASE_URL)…"
+pushd desktop >/dev/null
+VITE_API_BASE_URL="$API_BASE_URL" npm ci
+VITE_API_BASE_URL="$API_BASE_URL" npm run build
+popd >/dev/null
+
+say "Publishing to $WEB_ROOT…"
+mkdir -p "$WEB_ROOT"
+rm -rf "${WEB_ROOT:?}/"*
+cp -r desktop/dist/* "$WEB_ROOT"/
+
+# 4) Reload nginx.
+if command -v nginx >/dev/null 2>&1; then
+  say "Reloading nginx…"
+  nginx -t && systemctl reload nginx
+fi
+
+say "Done. Hard-refresh the browser (Ctrl-Shift-R) to pick up the new frontend."
