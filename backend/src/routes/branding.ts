@@ -23,9 +23,14 @@ const KEY_TERMINAL_WATERMARK = "app_terminal_watermark";
 
 const KEYS = [KEY_NAME, KEY_LOGO, KEY_FAVICON, KEY_LOGIN_IMAGE, KEY_TERMINAL_WATERMARK];
 
-// Logo/favicon are small; the login background can be a larger photo.
-const MAX_LOGO = 700 * 1024;
-const MAX_LOGIN_IMAGE = 3 * 1024 * 1024;
+// Per-field string caps (base64 data URIs). The client downscales/compresses
+// before upload, but keep generous headroom so a legitimate save never 413s.
+const MAX_LOGO = 2 * 1024 * 1024;
+const MAX_LOGIN_IMAGE = 4 * 1024 * 1024;
+// Whole-request cap must comfortably exceed the sum of all image fields, while
+// staying under the nginx client_max_body_size (16M) so the clearer JSON error
+// wins if it's ever hit.
+const MAX_BODY = 15 * 1024 * 1024;
 
 export function makeBrandingRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
@@ -49,7 +54,7 @@ export function makeBrandingRoutes(deps: Deps): FastifyPluginAsync {
 
     app.put(
       "/",
-      { bodyLimit: 4 * 1024 * 1024, preHandler: [makeAuthMiddleware(deps.jwt), requireRole("admin", "super_admin")] },
+      { bodyLimit: MAX_BODY, preHandler: [makeAuthMiddleware(deps.jwt), requireRole("admin", "super_admin")] },
       async (req, reply) => {
         const parsed = putSchema.safeParse(req.body);
         if (!parsed.success) {

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.39.4] — 2026-06-30 — Fix "Request body is too large" when saving branding
+
+### Fixed
+- Saving **Branding** with several images set (logo + favicon + login
+  background + terminal watermark) could fail with **"Request body is too
+  large"**. Images are now **downscaled and compressed in the browser** before
+  upload — PNG for the logo/favicon/watermark (keeps transparency), JPEG for the
+  login photo, SVG passed through untouched — so payloads stay small.
+- Raised the server's branding body limit and per-field caps as a safety net
+  (whole-request cap kept under the nginx limit so the clearer error wins).
+
+---
+
 ## [1.39.3] — 2026-06-30 — Fix terminal Retry not reconnecting
 
 ### Fixed
