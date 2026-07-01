@@ -9,6 +9,14 @@
 -- their own org tree (org:manage). Existing users are moved to a seeded
 -- "Default" company so nothing breaks.
 
+-- Fail fast instead of blocking a deploy indefinitely: the ALTER TABLE below
+-- needs an exclusive lock on `users`, so if another session (e.g. a stalled
+-- pg_dump backup left "idle in transaction") holds a conflicting lock, abort
+-- with a clear error rather than hanging. The whole migration runs in one
+-- transaction, so a timeout rolls it back cleanly.
+SET LOCAL lock_timeout = '30s';
+SET LOCAL statement_timeout = '120s';
+
 -- Companies (tenants).
 CREATE TABLE IF NOT EXISTS companies (
   id         UUID PRIMARY KEY,
