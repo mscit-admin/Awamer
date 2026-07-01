@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.45.2] — 2026-07-01 — Tools menu closes on any outside click
+
+### Fixed
+- Clicking outside the terminal **Tools** menu didn't close it. The click-away
+  backdrop was `position: fixed` inside a `-translate-x-1/2` transformed
+  container, so it only covered the tiny handle. Replaced it with a
+  document-level capture-phase click listener (also closes on **Esc**), so
+  clicking anywhere — including on the terminal — closes the menu.
+
+---
+
 ## [1.45.1] — 2026-07-01 — Floating terminal Tools handle (top-centre, hover to reveal)
 
 ### Changed

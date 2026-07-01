@@ -216,6 +216,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteDraft, setPasteDraft] = useState("");
   const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement | null>(null);
 
   const [phase, setPhase] = useState<"connecting" | "connected" | "error" | "need_password">("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -297,6 +298,22 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
     if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
     else void rootRef.current?.requestFullscreen?.().catch(() => {});
   }
+
+  // Close the Tools menu when clicking anywhere outside it. Capture phase so it
+  // fires even over the xterm canvas (which stops propagation), and Escape closes too.
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) setToolsOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setToolsOpen(false); };
+    window.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [toolsOpen]);
 
   // (Re)connect when token / attempt changes.
   useEffect(() => {
@@ -520,7 +537,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
       {(phase === "connected" || phase === "error") && (
         // Floating tools handle: tucked at the top-centre, faint until you hover
         // the top-centre of the terminal (or while the menu is open).
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-20 group/tools">
+        <div ref={toolsRef} className="absolute top-0 left-1/2 -translate-x-1/2 z-20 group/tools">
           <button
             onClick={() => setToolsOpen((v) => !v)}
             title="Terminal tools"
@@ -537,8 +554,6 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
 
           {toolsOpen && (
             <>
-              {/* click-away backdrop */}
-              <div className="fixed inset-0 z-10" onMouseDown={() => setToolsOpen(false)} />
               <div className="absolute top-full left-1/2 -translate-x-1/2 mt-0.5 z-20 w-52 rounded-md border border-border bg-bg shadow-xl backdrop-blur-sm py-1 text-xs">
                 {canHistory && (
                   <>
