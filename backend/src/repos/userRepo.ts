@@ -162,11 +162,21 @@ export class UserRepository {
     );
   }
 
-  async list(limit: number, offset: number): Promise<{ users: User[]; total: number }> {
-    const totalP = this.pool.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM users`);
+  /**
+   * List users. When `companyId` is given, only that company's users are
+   * returned (tenant isolation for company admins); omit it for a global list
+   * (Super Admin).
+   */
+  async list(limit: number, offset: number, companyId?: string | null): Promise<{ users: User[]; total: number }> {
+    const scoped = companyId != null;
+    const where = scoped ? `WHERE company_id = $3` : ``;
+    const totalP = this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM users ${scoped ? "WHERE company_id = $1" : ""}`,
+      scoped ? [companyId] : [],
+    );
     const usersP = this.pool.query<UserRow>(
-      `SELECT ${COLS} FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
-      [limit, offset],
+      `SELECT ${COLS} FROM users ${where} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      scoped ? [limit, offset, companyId] : [limit, offset],
     );
     const [tRes, uRes] = await Promise.all([totalP, usersP]);
     return {

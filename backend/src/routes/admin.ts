@@ -7,6 +7,7 @@ import type { RegisterUseCase } from "../usecases/register.js";
 import type { RoleService } from "../domain/roleService.js";
 import type { JwtService } from "../jwt/index.js";
 import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
+import { can } from "../domain/permissions.js";
 
 interface Deps {
   users: UserRepository;
@@ -20,6 +21,18 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
     app.addHook("preHandler", requireRole("super_admin", "admin"));
 
+    // Tenant scope: a Super Admin (companies:manage) sees/manages every
+    // company; a company admin is confined to their own company. Returns the
+    // caller's company (null for a global super-admin view) and a same-company
+    // guard used before touching any target user.
+    async function scope(req: import("fastify").FastifyRequest) {
+      const isSuper = can(req.auth!.role, "companies:manage");
+      const me = await deps.users.getById(req.auth!.sub);
+      return { isSuper, companyId: me.companyId };
+    }
+    const sameCompany = (s: { isSuper: boolean; companyId: string | null }, target: { companyId: string | null }) =>
+      s.isSuper || (s.companyId != null && s.companyId === target.companyId);
+
     // ---------- list users ----------------------------------------------
     const listQuerySchema = z.object({
       limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -31,7 +44,8 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       }
-      const { users, total } = await deps.users.list(parsed.data.limit, parsed.data.offset);
+      const s = await scope(req);
+      const { users, total } = await deps.users.list(parsed.data.limit, parsed.data.offset, s.isSuper ? undefined : s.companyId);
       return reply.send({
         data: users.map(userView),
         total,
@@ -58,12 +72,17 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         return reply.code(400).send({ error: { code: "invalid_role", message: "unknown role" } });
       }
       try {
+        // New users join the creating admin's company (isolation). A Super
+        // Admin's new users default to the super-admin's own company; they can
+        // be moved afterward via the org assignment dialog.
+        const s = await scope(req);
         const user = await deps.register.execute({
           username: parsed.data.username,
           email: parsed.data.email,
           password: parsed.data.password,
           fullName: parsed.data.full_name ?? null,
           role: parsed.data.role,
+          companyId: s.companyId,
         });
         return reply.code(201).send(userView(user));
       } catch (e) {
@@ -83,6 +102,8 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       if (!parsed.success) return reply.code(400).send({ error: { code: "invalid_id", message: "" } });
       try {
         const u = await deps.users.getById(parsed.data.id);
+        const s = await scope(req);
+        if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
         return reply.send(userView(u));
       } catch (e) {
         if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
@@ -109,6 +130,8 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       }
       try {
         const u = await deps.users.getById(idP.data.id);
+        const s = await scope(req);
+        if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
         if (bodyP.data.full_name !== undefined) u.fullName = bodyP.data.full_name;
         if (bodyP.data.email !== undefined) u.email = bodyP.data.email;
         if (bodyP.data.role !== undefined) u.role = bodyP.data.role as typeof u.role;
@@ -129,6 +152,9 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         return reply.code(400).send({ error: { code: "cannot_delete_self", message: "cannot delete your own account" } });
       }
       try {
+        const u = await deps.users.getById(parsed.data.id);
+        const s = await scope(req);
+        if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
         await deps.users.delete(parsed.data.id);
         return reply.code(204).send();
       } catch (e) {

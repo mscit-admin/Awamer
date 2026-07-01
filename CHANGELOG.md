@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.41.0] — 2026-07-01 — Company isolation (phase 2): admins see only their own company
+
+### Changed (security / tenant isolation)
+- **User administration is now company-scoped.** A company admin
+  (`users:manage` without `companies:manage`) only lists, views, edits, and
+  deletes users **in their own company**; a **Super Admin** still sees and
+  manages everyone. Users created by a company admin **automatically join that
+  admin's company**.
+- **Audit log is company-scoped** the same way — a company admin sees only
+  events by users of their own company; Super Admin sees all.
+- **Share/user-directory is company-scoped** — you can only share notes with
+  people in your own organization.
+- Note: hosts, credentials, folders and tags were already strictly
+  **per-user**, so they were never visible across users/companies. Roles
+  remain global for now (per-company role catalogs are a later step).
+- Verified against PostgreSQL 16 with two companies: each company's admin sees
+  only its own users and audit events; Super Admin sees all.
+
+---
+
 ## [1.40.1] — 2026-07-01 — Assign users to a company / org unit
 
 ### Added

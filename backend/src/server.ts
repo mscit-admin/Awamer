@@ -154,7 +154,7 @@ async function main() {
   await app.register(makeCredentialRoutes({ credentials, audit, jwt }), { prefix: "/api/v1/credentials" });
   await app.register(makeHostRoutes({ hosts, audit, jwt }), { prefix: "/api/v1/hosts" });
   await app.register(makeHistoryRoutes({ history, hosts, audit, jwt }), { prefix: "/api/v1/history" });
-  await app.register(makeAuditRoutes({ audit, jwt }), { prefix: "/api/v1/audit" });
+  await app.register(makeAuditRoutes({ audit, users, jwt }), { prefix: "/api/v1/audit" });
   await app.register(makeNetworkRoutes({ jwt }), { prefix: "/api/v1/network" });
   await app.register(makeBrandingRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/branding" });
   await app.register(makeOrganizationRoutes({ companies, units: orgUnits, users, audit, jwt }), { prefix: "/api/v1/org" });
