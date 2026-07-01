@@ -147,6 +147,7 @@ function TerminalStatusBar({ stats, connectedAt, fallbackName, username }: { sta
 
 export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const accessToken = useAuthStore((s) => s.accessToken);
+  const hasToken = accessToken != null && accessToken !== "";
   const refreshTokens = useAuthStore((s) => s.refreshTokens);
   const username = useAuthStore((s) => s.user?.username ?? null);
   const updateTab = useTerminalTabs((s) => s.updateTab);
@@ -244,7 +245,12 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   // (Re)connect when token / attempt changes.
   useEffect(() => {
     const term = termRef.current;
-    if (!term || !accessToken) return;
+    // Read the freshest token at connect time (getState), so a token refresh
+    // during Retry does NOT itself re-trigger this effect — only `attempt` does.
+    // That guarantees exactly one reconnect per Retry (no double-open race,
+    // which some browsers — notably Firefox — mishandle).
+    const token = useAuthStore.getState().accessToken;
+    if (!term || !token) return;
 
     try { fitRef.current?.fit(); } catch { /* ignore */ }
     const cols = term.cols || 80;
@@ -257,7 +263,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
     updateTab(tab.tabId, { phase: "connecting", errorMessage: null, errorCode: null });
 
     const pw = attempt > 0 && password ? password : undefined;
-    const ws = new WebSocket(gatewayUrl(accessToken, tab.hostId, cols, rows, pw));
+    const ws = new WebSocket(gatewayUrl(token, tab.hostId, cols, rows, pw));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
     // Tracks whether this specific socket ever reached "connected", so a late
@@ -330,8 +336,10 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       dataDisp.dispose();
       try { ws.close(); } catch { /* ignore */ }
     };
+    // Depend on token PRESENCE (not its value) so a refresh doesn't re-run this;
+    // `attempt` is the single, explicit reconnect trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, tab.hostId, attempt]);
+  }, [hasToken, tab.hostId, attempt]);
 
   function submitPassword(e: FormEvent) {
     e.preventDefault();

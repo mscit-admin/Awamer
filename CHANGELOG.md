@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.41.1] — 2026-07-01 — Terminal Retry: single deterministic reconnect (Firefox fix)
+
+### Fixed
+- The terminal **Retry** button could still appear to do nothing (notably in
+  **Firefox**). Retry refreshed the token *and* bumped the reconnect counter —
+  both were effect dependencies, so it opened **two WebSockets in quick
+  succession**; the rapid open/close race was mishandled by some browsers and
+  left the session stuck on "Connection failed". The reconnect effect now
+  depends on token *presence* (not its changing value) and reads the freshest
+  token at connect time, so **one Retry = exactly one reconnect**.
+- Bonus: a live SSH terminal is no longer torn down when the REST access token
+  auto-refreshes in the background.
+
+---
+
 ## [1.41.0] — 2026-07-01 — Company isolation (phase 2): admins see only their own company
 
 ### Changed (security / tenant isolation)
