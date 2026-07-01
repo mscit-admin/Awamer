@@ -18,6 +18,8 @@ export interface AdminUser {
   is_active: boolean;
   is_locked: boolean;
   mfa_enabled: boolean;
+  company_id: string | null;
+  org_unit_id: string | null;
   last_login_at: string | null;
   created_at: string;
 }

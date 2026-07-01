@@ -6,23 +6,30 @@
  * the backend enforces it too).
  */
 import { useEffect, useState, type FormEvent } from "react";
-import { UserPlus, Loader2, AlertCircle, Trash2, ShieldCheck, X, Download } from "lucide-react";
+import { UserPlus, Loader2, AlertCircle, Trash2, ShieldCheck, X, Download, Building2, Check } from "lucide-react";
 
 import { usersAdminApi, type AdminUser } from "./usersAdminApi";
 import { rolesApi } from "./rolesApi";
 import { exportUsersCsv, exportUsersJson } from "./exportUsers";
+import { orgApi, type Company, type OrgUnit } from "@/modules/org/orgApi";
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { useCan } from "@/shared/lib/permissions";
 import { ApiError } from "@/shared/lib/api";
 
 export interface RoleOption { key: string; name: string }
 
 export function UsersPage() {
   const me = useAuthStore((s) => s.user);
+  const canOrg = useCan("org:manage");
+  const canCompanies = useCan("companies:manage");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roleOpts, setRoleOpts] = useState<RoleOption[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [assigning, setAssigning] = useState<AdminUser | null>(null);
+  const companyName = (id: string | null) => companies.find((c) => c.id === id)?.name ?? (id ? "—" : "Unassigned");
 
   const msg = (e: unknown) => (e instanceof ApiError ? humanize(e.message) : e instanceof Error ? e.message : "error");
   const roleLabel = (key: string) => roleOpts.find((o) => o.key === key)?.name ?? key;
@@ -43,7 +50,8 @@ export function UsersPage() {
   useEffect(() => {
     void load();
     rolesApi.list().then((r) => setRoleOpts(r.data.map((x) => ({ key: x.key, name: x.name })))).catch(() => {});
-  }, []);
+    if (canOrg) orgApi.listCompanies().then(setCompanies).catch(() => {});
+  }, [canOrg]);
 
   async function changeRole(u: AdminUser, role: string) {
     try { await usersAdminApi.update(u.id, { role }); await load(); }
@@ -109,6 +117,7 @@ export function UsersPage() {
               <tr>
                 <th className="text-left font-medium px-4 py-2">User</th>
                 <th className="text-left font-medium px-4 py-2 w-40">Role</th>
+                {canOrg && <th className="text-left font-medium px-4 py-2 w-48">Organization</th>}
                 <th className="text-left font-medium px-4 py-2 w-24">Status</th>
                 <th className="px-4 py-2 w-20"></th>
               </tr>
@@ -141,6 +150,18 @@ export function UsersPage() {
                         {roleOpts.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
                       </select>
                     </td>
+                    {canOrg && (
+                      <td className="px-4 py-2">
+                        <button
+                          onClick={() => setAssigning(u)}
+                          className="flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-border hover:bg-bg-elevated text-fg-muted max-w-full"
+                          title="Assign to a company / org unit"
+                        >
+                          <Building2 className="size-3.5 shrink-0" />
+                          <span className="truncate">{companyName(u.company_id)}</span>
+                        </button>
+                      </td>
+                    )}
                     <td className="px-4 py-2">
                       <button
                         onClick={() => !isSelf && toggleActive(u)}
@@ -163,7 +184,7 @@ export function UsersPage() {
                 );
               })}
               {users.length === 0 && (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-fg-muted text-sm">No users</td></tr>
+                <tr><td colSpan={canOrg ? 5 : 4} className="px-4 py-8 text-center text-fg-muted text-sm">No users</td></tr>
               )}
             </tbody>
           </table>
@@ -178,6 +199,115 @@ export function UsersPage() {
           onError={setError}
         />
       )}
+
+      {assigning && (
+        <AssignOrgModal
+          user={assigning}
+          companies={companies}
+          canPickCompany={canCompanies}
+          onClose={() => setAssigning(null)}
+          onSaved={() => { setAssigning(null); void load(); }}
+          onError={setError}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Flatten an org-unit tree into indented options (depth-first) for a <select>. */
+function flattenUnits(units: OrgUnit[]): { unit: OrgUnit; depth: number }[] {
+  const kids = new Map<string | null, OrgUnit[]>();
+  for (const u of units) {
+    const k = u.parentId ?? null;
+    (kids.get(k) ?? kids.set(k, []).get(k)!).push(u);
+  }
+  const out: { unit: OrgUnit; depth: number }[] = [];
+  const walk = (parent: string | null, depth: number) => {
+    for (const u of (kids.get(parent) ?? []).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name))) {
+      out.push({ unit: u, depth });
+      walk(u.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return out;
+}
+
+function AssignOrgModal({ user, companies, canPickCompany, onClose, onSaved, onError }: {
+  user: AdminUser;
+  companies: Company[];
+  canPickCompany: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (m: string) => void;
+}) {
+  const [companyId, setCompanyId] = useState<string>(user.company_id ?? companies[0]?.id ?? "");
+  const [unitId, setUnitId] = useState<string>(user.org_unit_id ?? "");
+  const [units, setUnits] = useState<OrgUnit[]>([]);
+  const [loadingUnits, setLoadingUnits] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!companyId) { setUnits([]); return; }
+    setLoadingUnits(true);
+    orgApi.listUnits(companyId)
+      .then((us) => { setUnits(us); if (!us.some((u) => u.id === unitId)) setUnitId(""); })
+      .catch((e) => onError(e instanceof ApiError ? e.message : "failed to load units"))
+      .finally(() => setLoadingUnits(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await orgApi.assignUser(user.id, {
+        company_id: canPickCompany ? (companyId || null) : undefined,
+        org_unit_id: unitId || null,
+      });
+      onSaved();
+    } catch (e) {
+      onError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : "assign failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const flat = flattenUnits(units);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="card p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-1">
+          <Building2 className="size-4 text-accent" />
+          <h2 className="text-base font-semibold">Assign to organization</h2>
+        </div>
+        <p className="text-xs text-fg-muted mb-4">Set the company and org unit for <span className="font-medium">{user.username}</span>.</p>
+
+        <label className="block text-xs text-fg-muted mb-1">Company</label>
+        {canPickCompany ? (
+          <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="input w-full mb-3">
+            <option value="">— Unassigned —</option>
+            {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        ) : (
+          <div className="input w-full mb-3 opacity-70">{companies.find((c) => c.id === companyId)?.name ?? "your company"}</div>
+        )}
+
+        <label className="block text-xs text-fg-muted mb-1">Org unit</label>
+        <select value={unitId} onChange={(e) => setUnitId(e.target.value)} disabled={!companyId || loadingUnits} className="input w-full">
+          <option value="">— None (company only) —</option>
+          {flat.map(({ unit, depth }) => (
+            <option key={unit.id} value={unit.id}>{`${"  ".repeat(depth)}${depth ? "└ " : ""}${unit.name} (${unit.kind})`}</option>
+          ))}
+        </select>
+        {loadingUnits && <div className="text-2xs text-fg-muted mt-1 flex items-center gap-1"><Loader2 className="size-3 animate-spin" /> loading units…</div>}
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
+          <button onClick={save} disabled={busy} className="btn-primary text-sm inline-flex gap-1">
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Save
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

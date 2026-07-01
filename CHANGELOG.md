@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.40.1] — 2026-07-01 — Assign users to a company / org unit
+
+### Added
+- **Users → Organization column & Assign dialog.** From Administration → Users,
+  each row now shows the user's company; clicking it opens a dialog to assign
+  the user to a **company** (Super Admin) and an **org unit** (the company's
+  hierarchy, shown as an indented tree). Company admins can assign users to
+  units within their own company; the server scopes this on
+  `PUT /api/v1/org/users/:id/assignment`. Requires `org:manage`.
+
+### Fixed / Ops
+- Hardened migration `012` with `SET LOCAL lock_timeout`/`statement_timeout` so a
+  locked `users` table (e.g. a stalled `pg_dump` left "idle in transaction")
+  makes the migration **fail fast** instead of hanging backend startup.
+
+---
+
 ## [1.40.0] — 2026-07-01 — Companies & organizational hierarchy (multi-tenant foundation, phase 1)
 
 ### Added
