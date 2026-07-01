@@ -24,8 +24,16 @@ import { can } from "../domain/permissions.js";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 import type { JwtService } from "../jwt/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
-import type { CompanyRepository, OrgUnitRepository } from "../repos/orgRepos.js";
+import type { CompanyRepository, OrgUnitRepository, Company } from "../repos/orgRepos.js";
 import type { AuditRepository } from "../repos/otherRepos.js";
+
+// Serialize a company to the snake_case shape the client (and the rest of the
+// API) uses. Without this the client read `is_active` off a camelCase object
+// and every company looked "off".
+const companyView = (c: Company) => ({
+  id: c.id, name: c.name, slug: c.slug, is_active: c.isActive,
+  created_at: c.createdAt, updated_at: c.updatedAt,
+});
 
 interface Deps {
   companies: CompanyRepository;
@@ -56,11 +64,11 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
     // ---- Companies -----------------------------------------------------
     app.get("/companies", async (req, reply) => {
       const s = await scope(req);
-      if (s.isSuper) return reply.send({ companies: await deps.companies.list() });
+      if (s.isSuper) return reply.send({ companies: (await deps.companies.list()).map(companyView) });
       // Non-super: only their own company (so the UI can show its name).
       if (!s.companyId) return reply.send({ companies: [] });
       const c = await deps.companies.getById(s.companyId);
-      return reply.send({ companies: c ? [c] : [] });
+      return reply.send({ companies: c ? [companyView(c)] : [] });
     });
 
     const companySchema = z.object({
@@ -73,7 +81,7 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
       if (!p.success) return err(reply, 400, "validation_failed", p.error.message);
       const c = await deps.companies.create(p.data.name.trim(), p.data.slug?.toLowerCase() ?? null);
       await deps.audit.log({ userId: req.auth!.sub, action: "company_create", success: true, resourceType: "company", resourceId: c.id }).catch(() => {});
-      return reply.code(201).send({ company: c });
+      return reply.code(201).send({ company: companyView(c) });
     });
 
     app.put("/companies/:id", { preHandler: requirePermission("companies:manage") }, async (req, reply) => {
@@ -86,7 +94,7 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
       if (!p.success) return err(reply, 400, "validation_failed", p.error.message);
       const c = await deps.companies.update(id, { name: p.data.name?.trim(), slug: p.data.slug ?? undefined, isActive: p.data.is_active });
       if (!c) return err(reply, 404, "not_found", "company not found");
-      return reply.send({ company: c });
+      return reply.send({ company: companyView(c) });
     });
 
     app.delete("/companies/:id", { preHandler: requirePermission("companies:manage") }, async (req, reply) => {

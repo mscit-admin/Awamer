@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.45.3] — 2026-07-01 — Fix companies always showing "off"
+
+### Fixed
+- Every company in Administration → Organization showed **"off"** (inactive)
+  and toggling Activate/Deactivate appeared to do nothing. The org API returned
+  companies in camelCase (`isActive`) while the client read snake_case
+  (`is_active`), so the active flag was always `undefined`. Companies are now
+  serialized to snake_case (like the rest of the API), so their real active
+  state shows and the toggle works.
+
+---
+
 ## [1.45.2] — 2026-07-01 — Tools menu closes on any outside click
 
 ### Fixed
