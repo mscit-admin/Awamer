@@ -23,6 +23,7 @@ import {
   Moon,
   Palette,
   Loader2,
+  Building2,
 } from "lucide-react";
 import { useState, useEffect, lazy, Suspense } from "react";
 import { Logo, useAppName } from "@/shared/branding";
@@ -71,6 +72,7 @@ const SECONDARY_NAV: NavItem[] = [
 
 // Shown only to admin / super_admin.
 const ADMIN_NAV: NavItem[] = [
+  { to: "/organization", label: "Organization", icon: <Building2 className="size-4" />, available: true, perm: "org:manage" },
   { to: "/users", label: "Users", icon: <Users className="size-4" />, available: true, perm: "users:manage" },
   { to: "/roles", label: "Roles & Permissions", icon: <Shield className="size-4" />, available: true, perm: "users:manage" },
 ];

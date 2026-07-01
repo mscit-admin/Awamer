@@ -18,6 +18,8 @@ export const PERMISSIONS = [
   "command_history:read",
   "users:manage",
   "audit:read",
+  "companies:manage",
+  "org:manage",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

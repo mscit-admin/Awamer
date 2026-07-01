@@ -30,8 +30,9 @@ When adding such a feature:
 
 Current permissions: `resources:write`, `sessions:connect`,
 `credentials:reveal`, `tunnels:manage`, `backup:manage`,
-`command_history:read`, `users:manage`, `audit:read` — defined in code; add new
-ones here when a feature needs them.
+`command_history:read`, `users:manage`, `audit:read`, `companies:manage`
+(Super Admin: manage companies/tenants), `org:manage` (manage a company's
+org hierarchy) — defined in code; add new ones here when a feature needs them.
 
 **Roles are dynamic** (DB table `roles`, migration `007`). The 5 built-ins
 (super_admin, admin, user, readonly, auditor) are seeded and **locked**; admins

@@ -28,6 +28,8 @@ export function userView(u: User) {
     is_active: u.isActive,
     is_locked: u.isLocked,
     mfa_enabled: u.mfaEnabled,
+    company_id: u.companyId,
+    org_unit_id: u.orgUnitId,
     last_login_at: u.lastLoginAt,
     created_at: u.createdAt,
   };

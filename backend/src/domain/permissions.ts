@@ -22,6 +22,8 @@ export const PERMISSIONS = [
   "command_history:read", // save & view own terminal command history
   "users:manage",       // admin user management
   "audit:read",         // view audit logs
+  "companies:manage",   // super-admin: create/manage companies (tenants)
+  "org:manage",         // manage the organizational hierarchy within a company
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -36,14 +38,19 @@ export const PERMISSION_META: Record<Permission, { label: string; description: s
   "command_history:read": { label: "Command history", description: "Save and view your own terminal command history" },
   "users:manage":       { label: "Manage users", description: "Create, edit and delete user accounts and roles" },
   "audit:read":         { label: "View audit log", description: "Read the audit log" },
+  "companies:manage":   { label: "Manage companies", description: "Create and manage companies (tenants) — Super Admin only" },
+  "org:manage":         { label: "Manage organization", description: "Manage the organizational hierarchy (departments, sections, units) within a company" },
 };
 
 const ALL: Permission[] = [...PERMISSIONS];
+// Company (tenant) management is a Super-Admin-only, cross-company capability;
+// regular admins get everything else, scoped to their own company.
+const ADMIN_ALL: Permission[] = ALL.filter((p) => p !== "companies:manage");
 
 /** Seed definitions for the built-in roles (also the static fallback matrix). */
 export const BUILTIN_ROLES: { key: string; name: string; description: string; permissions: Permission[] }[] = [
   { key: "super_admin", name: "Super admin", description: "Full access to everything.", permissions: ALL },
-  { key: "admin",       name: "Admin",       description: "Full access to everything.", permissions: ALL },
+  { key: "admin",       name: "Admin",       description: "Full access within their company.", permissions: ADMIN_ALL },
   { key: "user",        name: "User",        description: "Self-service over own resources; no user administration.",
     permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage", "command_history:read"] },
   { key: "readonly",    name: "Read-only",   description: "Browse the inventory; cannot modify, connect, or reveal secrets.", permissions: [] },

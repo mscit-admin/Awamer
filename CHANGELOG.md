@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.40.0] — 2026-07-01 — Companies & organizational hierarchy (multi-tenant foundation, phase 1)
+
+### Added
+- **Companies (tenants).** A **Super Admin** can create and manage multiple
+  companies, each separated from the others. New permission **`companies:manage`**
+  (Super Admin only).
+- **Organizational hierarchy.** Each company owns an **arbitrary-depth tree** —
+  departments → sections → units → … (any levels). Managed on a new
+  **Administration → Organization** page: pick a company, then add/rename/delete
+  nodes in the tree. New permission **`org:manage`** (granted to super_admin and
+  admin). Deleting a node cascades to everything beneath it.
+- **Users are attached to a company** (and optionally an org unit). Migration
+  `012` adds `companies`, `org_units`, and `users.company_id` / `users.org_unit_id`,
+  seeds a **Default** company, and moves all existing users into it so nothing
+  breaks. The user payload now includes `company_id` / `org_unit_id`.
+- Backend API under `/api/v1/org` (companies CRUD, org-unit tree CRUD, and user
+  assignment). Non-super-admins are scoped to **their own company** on every
+  endpoint; the Super Admin is global.
+
+### Notes
+- This is **phase 1 (structure + scoping)**. Full data isolation of existing
+  resources (hosts, credentials, folders, notes, sessions) per company is the
+  next phase — those remain shared until then.
+- Verified end-to-end against PostgreSQL 16 (migrations up/down, repo CRUD,
+  tree cascade, user assignment).
+
+---
+
 ## [1.39.4] — 2026-06-30 — Fix "Request body is too large" when saving branding
 
 ### Fixed

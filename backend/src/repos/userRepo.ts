@@ -14,6 +14,8 @@ interface UserRow {
   last_login_at: Date | null;
   last_login_ip: string | null;
   mfa_enabled: boolean;
+  company_id: string | null;
+  org_unit_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -22,7 +24,7 @@ const COLS = `
   id, username, email, password_hash, full_name, role,
   is_active, is_locked, failed_attempts,
   last_login_at, last_login_ip::text AS last_login_ip,
-  mfa_enabled, created_at, updated_at
+  mfa_enabled, company_id, org_unit_id, created_at, updated_at
 `;
 
 function rowToUser(r: UserRow): User {
@@ -40,6 +42,8 @@ function rowToUser(r: UserRow): User {
     lastLoginAt: r.last_login_at,
     lastLoginIp: r.last_login_ip,
     mfaEnabled: r.mfa_enabled,
+    companyId: r.company_id,
+    orgUnitId: r.org_unit_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -52,6 +56,8 @@ export interface CreateUserInput {
   passwordHash: string;
   fullName?: string | null;
   role: Role;
+  companyId?: string | null;
+  orgUnitId?: string | null;
 }
 
 export class UserRepository {
@@ -60,10 +66,10 @@ export class UserRepository {
   async create(input: CreateUserInput): Promise<User> {
     try {
       const { rows } = await this.pool.query<UserRow>(
-        `INSERT INTO users (id, username, email, password_hash, full_name, role, is_active)
-         VALUES ($1, lower($2), lower($3), $4, $5, $6, TRUE)
+        `INSERT INTO users (id, username, email, password_hash, full_name, role, is_active, company_id, org_unit_id)
+         VALUES ($1, lower($2), lower($3), $4, $5, $6, TRUE, $7, $8)
          RETURNING ${COLS}`,
-        [input.id, input.username, input.email, input.passwordHash, input.fullName ?? null, input.role],
+        [input.id, input.username, input.email, input.passwordHash, input.fullName ?? null, input.role, input.companyId ?? null, input.orgUnitId ?? null],
       );
       return rowToUser(rows[0]!);
     } catch (e) {
@@ -78,6 +84,16 @@ export class UserRepository {
 
   async getById(id: string): Promise<User> {
     const { rows } = await this.pool.query<UserRow>(`SELECT ${COLS} FROM users WHERE id = $1`, [id]);
+    if (!rows[0]) throw Errors.UserNotFound();
+    return rowToUser(rows[0]);
+  }
+
+  /** Assign a user to a company and (optionally) an org unit. */
+  async setOrg(id: string, companyId: string | null, orgUnitId: string | null): Promise<User> {
+    const { rows } = await this.pool.query<UserRow>(
+      `UPDATE users SET company_id = $2, org_unit_id = $3, updated_at = NOW() WHERE id = $1 RETURNING ${COLS}`,
+      [id, companyId, orgUnitId],
+    );
     if (!rows[0]) throw Errors.UserNotFound();
     return rowToUser(rows[0]);
   }

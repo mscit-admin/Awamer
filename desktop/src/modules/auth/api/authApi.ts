@@ -22,6 +22,8 @@ export interface User {
   role: string;
   permissions?: string[];
   mfa_enabled: boolean;
+  company_id?: string | null;
+  org_unit_id?: string | null;
 }
 
 export interface LoginResponse {
