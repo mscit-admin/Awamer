@@ -518,22 +518,28 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
       <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2 pb-2" />
 
       {(phase === "connected" || phase === "error") && (
-        <div className="absolute top-2 right-2 z-20">
+        // Floating tools handle: tucked at the top-centre, faint until you hover
+        // the top-centre of the terminal (or while the menu is open).
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-20 group/tools">
           <button
             onClick={() => setToolsOpen((v) => !v)}
             title="Terminal tools"
-            className={"flex items-center gap-1.5 px-2 py-1 rounded text-2xs border backdrop-blur-sm transition-colors " +
-              (toolsOpen ? "bg-bg-elevated border-accent/40 text-fg" : "bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated")}
+            className={"flex items-center gap-1.5 px-2 py-1 rounded-b-md border border-t-0 text-2xs backdrop-blur-sm transition-all duration-200 " +
+              (toolsOpen
+                ? "bg-bg-elevated border-accent/40 text-fg opacity-100 translate-y-0"
+                : "bg-bg/60 border-border text-fg-muted opacity-25 -translate-y-1 hover:opacity-100 group-hover/tools:opacity-100 group-hover/tools:translate-y-0")}
           >
-            <LayoutGrid className="size-3.5" /> Tools
-            {saveHistory && <span className="size-1.5 rounded-full bg-emerald-400" title="Saving command history" />}
+            <LayoutGrid className="size-3.5 shrink-0" />
+            <span className={"overflow-hidden whitespace-nowrap transition-all duration-200 " +
+              (toolsOpen ? "max-w-[80px]" : "max-w-0 group-hover/tools:max-w-[80px]")}>Tools</span>
+            {saveHistory && <span className="size-1.5 rounded-full bg-emerald-400 shrink-0" title="Saving command history" />}
           </button>
 
           {toolsOpen && (
             <>
               {/* click-away backdrop */}
               <div className="fixed inset-0 z-10" onMouseDown={() => setToolsOpen(false)} />
-              <div className="absolute right-0 mt-1 z-20 w-52 rounded-md border border-border bg-bg shadow-xl backdrop-blur-sm py-1 text-xs">
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-0.5 z-20 w-52 rounded-md border border-border bg-bg shadow-xl backdrop-blur-sm py-1 text-xs">
                 {canHistory && (
                   <>
                     <ToolItem icon={saveHistory ? <Check className="size-3.5 text-emerald-400" /> : <History className="size-3.5" />}

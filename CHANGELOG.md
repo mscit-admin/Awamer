@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.45.1] — 2026-07-01 — Floating terminal Tools handle (top-centre, hover to reveal)
+
+### Changed
+- The terminal **Tools** menu is now a **floating handle at the top-centre** of
+  each pane. It stays **faintly tucked away** (just the grid icon, dimmed) and
+  **reveals on hover** — sliding fully into view with its label — so it doesn't
+  cover the terminal output. It stays visible while its menu is open; the menu
+  drops centred below it.
+
+---
+
 ## [1.45.0] — 2026-07-01 — Auto-reconcile built-in role permissions on startup
 
 ### Changed
