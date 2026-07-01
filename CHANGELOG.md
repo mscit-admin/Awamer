@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.44.0] — 2026-07-01 — Split-view terminals (multiple panes per tab)
+
+### Added
+- **Split the terminal into multiple panes.** Each terminal tab can now be split
+  **left/right** and **top/bottom** — recursively — into as many panes as you
+  like. Hover a pane to reveal its controls (top-left):
+  - **Split ⬌ / Split ⬍** — divide the pane.
+  - **Maximize / Restore** — zoom one pane to fill the tab (others stay
+    connected in the background) and back.
+  - **Open in new tab** — open the pane's host in a fresh tab.
+  - **Close** — close the pane (closing the last one closes the tab).
+- **Draggable dividers** resize neighbouring panes; each pane re-fits itself.
+- Every pane is a full terminal with its **own History / Notes / Paste /
+  Fullscreen** toolbar, and its own live SSH session. Panes are never unmounted
+  when you split/resize/maximize, so sessions keep running. The focused pane is
+  outlined. (Split layout is per session and resets on reload.)
+
+---
+
 ## [1.43.1] — 2026-07-01 — Fix "Body cannot be empty" on body-less requests
 
 ### Fixed
