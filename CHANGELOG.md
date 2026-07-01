@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.43.1] — 2026-07-01 — Fix "Body cannot be empty" on body-less requests
+
+### Fixed
+- The API client always sent `Content-Type: application/json`, even for requests
+  with **no body** (e.g. admin **Disable 2FA**), so Fastify rejected them with
+  *"Body cannot be empty when content-type is set to 'application/json'"*. The
+  `Content-Type` header is now only sent when there's an actual JSON body.
+
+---
+
 ## [1.43.0] — 2026-07-01 — Admin: reset passwords, disable 2FA, edit accounts
 
 ### Added

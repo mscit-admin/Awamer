@@ -52,7 +52,6 @@ export function configureApiClient(opts: { token: TokenProvider; onUnauthorized?
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     Accept: "application/json",
     ...opts.headers,
   };
@@ -66,7 +65,11 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
     method: opts.method ?? "GET",
     headers,
   };
+  // Only declare a JSON body (and its Content-Type) when there actually is one:
+  // a POST/DELETE with no body + "Content-Type: application/json" makes Fastify
+  // reject with "Body cannot be empty when content-type is set to ...".
   if (opts.body !== undefined) {
+    if (!("Content-Type" in headers)) headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(opts.body);
   }
 
