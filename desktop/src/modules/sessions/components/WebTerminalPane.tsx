@@ -557,7 +557,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       )}
 
       {phase === "connecting" && (
-        <div className="absolute inset-0 grid place-items-center bg-bg/60 backdrop-blur-sm">
+        <div className="absolute inset-0 z-30 grid place-items-center bg-bg/60 backdrop-blur-sm">
           <div className="flex items-center gap-2 text-sm text-fg-muted">
             <Loader2 className="size-4 animate-spin" /> Connecting to {tab.label}…
           </div>
@@ -565,7 +565,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       )}
 
       {phase === "need_password" && (
-        <div className="absolute inset-0 grid place-items-center bg-bg/80 backdrop-blur-sm">
+        <div className="absolute inset-0 z-30 grid place-items-center bg-bg/80 backdrop-blur-sm">
           <form onSubmit={submitPassword} className="card p-6 w-full max-w-sm m-4">
             <div className="flex items-center gap-2 mb-4">
               <Lock className="size-4 text-accent" />
@@ -590,7 +590,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       )}
 
       {phase === "error" && (
-        <div className="absolute inset-0 grid place-items-center bg-bg/80 backdrop-blur-sm">
+        <div className="absolute inset-0 z-30 grid place-items-center bg-bg/80 backdrop-blur-sm">
           <div className="card p-6 w-full max-w-sm m-4 text-center">
             <AlertCircle className="size-6 text-red-400 mx-auto mb-2" />
             <div className="text-sm font-medium mb-1">Connection failed</div>

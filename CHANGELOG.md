@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.41.2] — 2026-07-01 — Terminal Retry button is actually clickable
+
+### Fixed
+- The terminal **Retry / Connecting / SSH-password** overlays had no z-index, so
+  the transparent xterm layer (`z-10`) sat on top and **intercepted the clicks** —
+  the "Connection failed" card was visible but its **Retry button couldn't be
+  clicked**. The overlays are now `z-30`, above the terminal, so their buttons
+  and the password field work.
+
+---
+
 ## [1.41.1] — 2026-07-01 — Terminal Retry: single deterministic reconnect (Firefox fix)
 
 ### Fixed
