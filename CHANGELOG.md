@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.42.1] — 2026-07-01 — No branding flash on load
+
+### Fixed
+- On load you could briefly see the **defaults** before the branded values
+  arrived — the terminal watermark flashed the **username** before the logo, and
+  the app name showed **"NetSphere"** before the configured name. Branding is now
+  **cached in localStorage and hydrated synchronously** on startup (name, logo,
+  favicon, login image, terminal watermark), so returning users get the branded
+  values on the first paint. The username watermark fallback no longer renders
+  until branding is known.
+
+---
+
 ## [1.42.0] — 2026-07-01 — Terminal fullscreen (double-click; Esc to exit)
 
 ### Added

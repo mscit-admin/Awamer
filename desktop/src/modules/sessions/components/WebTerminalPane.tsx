@@ -159,8 +159,12 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const editPasteButton = useTerminalPaste((s) => s.editButton);
   const logoUrl = useBranding((s) => s.logoUrl);
   const terminalWatermark = useBranding((s) => s.terminalWatermark);
+  const brandingLoaded = useBranding((s) => s.loaded);
   // Dedicated terminal watermark wins; fall back to the app logo.
   const watermarkUrl = terminalWatermark || logoUrl;
+  // Only fall back to the username watermark once branding is known — otherwise
+  // the username would flash before the logo loads.
+  const showUsernameWatermark = brandingLoaded && !watermarkUrl && !!username;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -472,7 +476,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       {/* Faint watermark behind the terminal: the dedicated terminal watermark
           (or the app logo) if one is set, otherwise the username (so you can
           still tell whose session this is). */}
-      {(watermarkUrl || username) && (
+      {(watermarkUrl || showUsernameWatermark) && (
         <div className="absolute inset-0 z-0 grid place-items-center pointer-events-none select-none overflow-hidden">
           {watermarkUrl ? (
             <img src={watermarkUrl} alt="" className="max-w-[45%] max-h-[45%] object-contain opacity-[0.13]" />
