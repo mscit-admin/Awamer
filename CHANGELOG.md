@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.44.2] — 2026-07-01 — "Open host in new tab" always opens a new tab
+
+### Fixed
+- **Open host in new tab** did nothing when a tab for that host was already
+  open (the usual case, since the pane you clicked from is one). `openTab` now
+  takes a `force` flag so this action always opens a brand-new tab instead of
+  focusing the existing one.
+
+---
+
 ## [1.44.1] — 2026-07-01 — Unified terminal "Tools" dropdown
 
 ### Changed

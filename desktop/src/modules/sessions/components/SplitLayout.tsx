@@ -121,7 +121,7 @@ export function SplitLayout({ tab }: { tab: TerminalTab }) {
                 onSplitH: () => split(tab.tabId, pane.paneId, "row"),
                 onSplitV: () => split(tab.tabId, pane.paneId, "col"),
                 onMaximize: () => { toggleMax(tab.tabId, pane.paneId); setTimeout(() => window.dispatchEvent(new Event("resize")), 40); },
-                onNewTab: () => openTab(pane.hostId, pane.label),
+                onNewTab: () => openTab(pane.hostId, pane.label, true),
                 onClose: () => closePane(pane),
               }}
             />
