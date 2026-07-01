@@ -10,8 +10,8 @@
  *   send: binary = keystrokes, text JSON = {type:"resize",cols,rows}
  *   recv: binary = output, text JSON = {type:"status"|"error",...}
  */
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, Loader2, Lock, Power, History, Check, StickyNote, ClipboardPaste, Maximize2, Minimize2 } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { AlertCircle, Loader2, Lock, Power, History, Check, StickyNote, ClipboardPaste, Maximize2, Minimize2, LayoutGrid, SplitSquareHorizontal, SplitSquareVertical, ExternalLink, X } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -145,7 +145,31 @@ function TerminalStatusBar({ stats, connectedAt, fallbackName, username }: { sta
   );
 }
 
-export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
+function ToolItem({ icon, label, onClick, danger, keepOpen }: { icon: ReactNode; label: string; onClick: () => void; danger?: boolean; keepOpen?: boolean }) {
+  return (
+    <button
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onClick={onClick}
+      className={"w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-elevated " + (danger ? "text-red-400" : "text-fg")}
+    >
+      <span className="shrink-0 text-fg-muted">{icon}</span>
+      <span className="truncate">{label}</span>
+      {keepOpen && <span className="ml-auto text-2xs text-fg-subtle">•</span>}
+    </button>
+  );
+}
+
+export interface PaneActions {
+  onSplitH: () => void;
+  onSplitV: () => void;
+  onMaximize: () => void;
+  isMaximized: boolean;
+  onNewTab: () => void;
+  onClose: () => void;
+  isSplit: boolean;
+}
+
+export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneActions?: PaneActions }) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const hasToken = accessToken != null && accessToken !== "";
   const refreshTokens = useAuthStore((s) => s.refreshTokens);
@@ -191,6 +215,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const [showNotes, setShowNotes] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteDraft, setPasteDraft] = useState("");
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const [phase, setPhase] = useState<"connecting" | "connected" | "error" | "need_password">("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -493,53 +518,60 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2 pb-2" />
 
       {(phase === "connected" || phase === "error") && (
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
-          {canHistory && (
+        <div className="absolute top-2 right-2 z-20">
+          <button
+            onClick={() => setToolsOpen((v) => !v)}
+            title="Terminal tools"
+            className={"flex items-center gap-1.5 px-2 py-1 rounded text-2xs border backdrop-blur-sm transition-colors " +
+              (toolsOpen ? "bg-bg-elevated border-accent/40 text-fg" : "bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated")}
+          >
+            <LayoutGrid className="size-3.5" /> Tools
+            {saveHistory && <span className="size-1.5 rounded-full bg-emerald-400" title="Saving command history" />}
+          </button>
+
+          {toolsOpen && (
             <>
-              <button
-                onClick={() => setSaveHistory(!saveHistory)}
-                title={saveHistory ? "Saving command history — click to stop" : "Save command history (off)"}
-                className={
-                  "flex items-center gap-1.5 px-2 py-1 rounded text-2xs border backdrop-blur-sm transition-colors " +
-                  (saveHistory
-                    ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
-                    : "bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated")
-                }
-              >
-                {saveHistory ? <Check className="size-3.5" /> : <History className="size-3.5" />}
-                {saveHistory ? "Saving history" : "Save history"}
-              </button>
-              <button
-                onClick={() => setShowHistory(true)}
-                title="View command history"
-                className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
-              >
-                <History className="size-3.5" /> History
-              </button>
+              {/* click-away backdrop */}
+              <div className="fixed inset-0 z-10" onMouseDown={() => setToolsOpen(false)} />
+              <div className="absolute right-0 mt-1 z-20 w-52 rounded-md border border-border bg-bg shadow-xl backdrop-blur-sm py-1 text-xs">
+                {canHistory && (
+                  <>
+                    <ToolItem icon={saveHistory ? <Check className="size-3.5 text-emerald-400" /> : <History className="size-3.5" />}
+                      label={saveHistory ? "Saving history — stop" : "Save command history"}
+                      onClick={() => { setSaveHistory(!saveHistory); }} keepOpen />
+                    <ToolItem icon={<History className="size-3.5" />} label="View history"
+                      onClick={() => { setShowHistory(true); setToolsOpen(false); }} />
+                  </>
+                )}
+                <ToolItem icon={<StickyNote className="size-3.5" />} label="Notes"
+                  onClick={() => { setShowNotes(true); setToolsOpen(false); }} />
+                <ToolItem icon={<ClipboardPaste className="size-3.5" />} label="Paste…"
+                  onClick={() => { void openPasteDialog(); setToolsOpen(false); }} />
+                <ToolItem icon={isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                  label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                  onClick={() => { toggleFullscreen(); setToolsOpen(false); }} />
+
+                {paneActions && (
+                  <>
+                    <div className="my-1 border-t border-border" />
+                    <ToolItem icon={<SplitSquareHorizontal className="size-3.5" />} label="Split left / right"
+                      onClick={() => { paneActions.onSplitH(); setToolsOpen(false); }} />
+                    <ToolItem icon={<SplitSquareVertical className="size-3.5" />} label="Split top / bottom"
+                      onClick={() => { paneActions.onSplitV(); setToolsOpen(false); }} />
+                    {paneActions.isSplit && (
+                      <ToolItem icon={paneActions.isMaximized ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                        label={paneActions.isMaximized ? "Restore pane" : "Maximize pane"}
+                        onClick={() => { paneActions.onMaximize(); setToolsOpen(false); }} />
+                    )}
+                    <ToolItem icon={<ExternalLink className="size-3.5" />} label="Open host in new tab"
+                      onClick={() => { paneActions.onNewTab(); setToolsOpen(false); }} />
+                    <ToolItem icon={<X className="size-3.5" />} danger label={paneActions.isSplit ? "Close pane" : "Close terminal"}
+                      onClick={() => { paneActions.onClose(); setToolsOpen(false); }} />
+                  </>
+                )}
+              </div>
             </>
           )}
-          <button
-            onClick={() => void openPasteDialog()}
-            title="Paste — review/edit the text before sending it to the terminal"
-            className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
-          >
-            <ClipboardPaste className="size-3.5" /> Paste
-          </button>
-          <button
-            onClick={toggleFullscreen}
-            title={isFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen (or double-click the terminal; Esc to exit)"}
-            className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
-          >
-            {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-            {isFullscreen ? "Exit" : "Fullscreen"}
-          </button>
-          <button
-            onClick={() => setShowNotes(true)}
-            title="Notes for this host"
-            className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
-          >
-            <StickyNote className="size-3.5" /> Notes
-          </button>
         </div>
       )}
 

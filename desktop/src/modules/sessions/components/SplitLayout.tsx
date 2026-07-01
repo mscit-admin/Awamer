@@ -9,9 +9,6 @@
  * controls, and draggable dividers resize neighbouring panes.
  */
 import { useEffect, useMemo, useRef } from "react";
-import {
-  SplitSquareHorizontal, SplitSquareVertical, Maximize2, Minimize2, ExternalLink, X,
-} from "lucide-react";
 
 import { useTerminalTabs, type TerminalTab } from "../store/terminalTabsStore";
 import { useSplit, collectPanes, type SplitNode, type Pane } from "../store/splitStore";
@@ -114,20 +111,20 @@ export function SplitLayout({ tab }: { tab: TerminalTab }) {
             key={pane.paneId}
             style={{ ...style, display: hidden ? "none" : undefined }}
             onMouseDownCapture={() => setFocus(tab.tabId, pane.paneId)}
-            className={"group/pane overflow-hidden " + (!single && !isMax ? "ring-1 " + (focused === pane.paneId ? "ring-accent/50" : "ring-white/10") : "")}
+            className={"overflow-hidden " + (!single && !isMax ? "ring-1 " + (focused === pane.paneId ? "ring-accent/50" : "ring-white/10") : "")}
           >
-            <WebTerminalPane tab={tabFor(pane)} />
-
-            {/* Per-pane controls (top-left; the pane's own toolbar sits top-right). */}
-            <div className="absolute top-2 left-2 z-20 flex items-center gap-1 opacity-40 hover:opacity-100 group-hover/pane:opacity-100 transition-opacity">
-              <PaneBtn title="Split left / right" onClick={() => split(tab.tabId, pane.paneId, "row")}><SplitSquareHorizontal className="size-3.5" /></PaneBtn>
-              <PaneBtn title="Split top / bottom" onClick={() => split(tab.tabId, pane.paneId, "col")}><SplitSquareVertical className="size-3.5" /></PaneBtn>
-              <PaneBtn title={isMax ? "Restore" : "Maximize"} onClick={() => { toggleMax(tab.tabId, pane.paneId); setTimeout(() => window.dispatchEvent(new Event("resize")), 40); }}>
-                {isMax ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-              </PaneBtn>
-              <PaneBtn title="Open this host in a new tab" onClick={() => openTab(pane.hostId, pane.label)}><ExternalLink className="size-3.5" /></PaneBtn>
-              <PaneBtn title={single ? "Close terminal" : "Close pane"} danger onClick={() => closePane(pane)}><X className="size-3.5" /></PaneBtn>
-            </div>
+            <WebTerminalPane
+              tab={tabFor(pane)}
+              paneActions={{
+                isSplit: !single,
+                isMaximized: isMax,
+                onSplitH: () => split(tab.tabId, pane.paneId, "row"),
+                onSplitV: () => split(tab.tabId, pane.paneId, "col"),
+                onMaximize: () => { toggleMax(tab.tabId, pane.paneId); setTimeout(() => window.dispatchEvent(new Event("resize")), 40); },
+                onNewTab: () => openTab(pane.hostId, pane.label),
+                onClose: () => closePane(pane),
+              }}
+            />
           </div>
         );
       })}
@@ -146,17 +143,5 @@ export function SplitLayout({ tab }: { tab: TerminalTab }) {
         </div>
       ))}
     </div>
-  );
-}
-
-function PaneBtn({ children, title, onClick, danger }: { children: React.ReactNode; title: string; onClick: () => void; danger?: boolean }) {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      title={title}
-      className={"grid place-items-center size-6 rounded border bg-bg/70 border-border backdrop-blur-sm hover:bg-bg-elevated " + (danger ? "text-red-400" : "text-fg-muted")}
-    >
-      {children}
-    </button>
   );
 }

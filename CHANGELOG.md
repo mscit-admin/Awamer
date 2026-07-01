@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.44.1] — 2026-07-01 — Unified terminal "Tools" dropdown
+
+### Changed
+- Consolidated every per-pane action into a single **Tools** dropdown (grid
+  icon, top-right of each pane) instead of a row of separate icons: Save/View
+  command history, Notes, Paste, Fullscreen, and — for split panes — Split
+  left/right, Split top/bottom, Maximize/Restore, Open host in new tab, and
+  Close pane. A green dot on the Tools button indicates command history is being
+  saved. Much tidier, especially with several split panes on screen.
+
+---
+
 ## [1.44.0] — 2026-07-01 — Split-view terminals (multiple panes per tab)
 
 ### Added
