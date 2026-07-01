@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.42.0] — 2026-07-01 — Terminal fullscreen (double-click; Esc to exit)
+
+### Added
+- **Double-click the terminal to go fullscreen**, and press **Esc** to return.
+  Uses the browser's native Fullscreen API, so Esc exiting fullscreen never
+  clashes with the shell's Esc key during normal use. A **Fullscreen / Exit**
+  button was also added to the terminal toolbar. The terminal re-fits its size
+  automatically when entering/leaving fullscreen.
+
+---
+
 ## [1.41.2] — 2026-07-01 — Terminal Retry button is actually clickable
 
 ### Fixed

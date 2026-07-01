@@ -11,7 +11,7 @@
  *   recv: binary = output, text JSON = {type:"status"|"error",...}
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, Loader2, Lock, Power, History, Check, StickyNote, ClipboardPaste } from "lucide-react";
+import { AlertCircle, Loader2, Lock, Power, History, Check, StickyNote, ClipboardPaste, Maximize2, Minimize2 } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -163,9 +163,11 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   const watermarkUrl = terminalWatermark || logoUrl;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Command-history capture. We reconstruct each typed line from the user's
   // keystrokes (xterm.onData) and POST it on Enter — but only when the user
@@ -241,6 +243,31 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
       termRef.current = null;
     };
   }, []);
+
+  // Fullscreen: double-click the terminal to fill the screen; the browser's
+  // native Escape returns (so it never clashes with the shell's Esc key while
+  // not in fullscreen). Refit xterm whenever fullscreen toggles.
+  useEffect(() => {
+    const el = containerRef.current;
+    const onDbl = () => {
+      if (!document.fullscreenElement) void rootRef.current?.requestFullscreen?.().catch(() => {});
+    };
+    const onFsChange = () => {
+      setIsFullscreen(document.fullscreenElement === rootRef.current);
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+    };
+    el?.addEventListener("dblclick", onDbl);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => {
+      el?.removeEventListener("dblclick", onDbl);
+      document.removeEventListener("fullscreenchange", onFsChange);
+    };
+  }, []);
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+    else void rootRef.current?.requestFullscreen?.().catch(() => {});
+  }
 
   // (Re)connect when token / attempt changes.
   useEffect(() => {
@@ -437,7 +464,7 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
   }, [quickPasteButton, editPasteButton]);
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#0b0e14]">
+    <div ref={rootRef} className="flex flex-col h-full w-full bg-[#0b0e14]">
       {/* Terminal area — fills the space above the status bar. The user-adjustable
           bottom gap cushions the prompt from the status bar / OS taskbar; the
           status bar itself stays flush at the window bottom (no dead band). */}
@@ -493,6 +520,14 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
             className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
           >
             <ClipboardPaste className="size-3.5" /> Paste
+          </button>
+          <button
+            onClick={toggleFullscreen}
+            title={isFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen (or double-click the terminal; Esc to exit)"}
+            className="flex items-center gap-1.5 px-2 py-1 rounded text-2xs border bg-bg/70 border-border text-fg-muted hover:bg-bg-elevated backdrop-blur-sm"
+          >
+            {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+            {isFullscreen ? "Exit" : "Fullscreen"}
           </button>
           <button
             onClick={() => setShowNotes(true)}
