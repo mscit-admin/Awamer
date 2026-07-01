@@ -260,6 +260,9 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
     const ws = new WebSocket(gatewayUrl(accessToken, tab.hostId, cols, rows, pw));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
+    // Tracks whether this specific socket ever reached "connected", so a late
+    // close can tell a real disconnect from a failed handshake.
+    let opened = false;
 
     const dataDisp = term.onData((d) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));
@@ -278,10 +281,12 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
     });
 
     ws.onmessage = (ev) => {
+      if (wsRef.current !== ws) return; // ignore messages from a superseded socket
       if (typeof ev.data === "string") {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === "status" && msg.status === "connected") {
+            opened = true;
             setPhase("connected");
             setConnectedAt((t) => t ?? Date.now());
             updateTab(tab.tabId, { phase: "connected" });
@@ -306,14 +311,18 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
 
     ws.onclose = () => {
       dataDisp.dispose();
-      setPhase((p) => (p === "connected" ? "error" : p));
-      if (phase === "connected") {
+      if (wsRef.current !== ws) return; // a newer socket took over — ignore
+      // Closing while connecting or connected means the attempt failed / dropped.
+      setPhase((p) => (p === "connected" || p === "connecting" ? "error" : p));
+      if (opened) {
         term.writeln("\r\n\x1b[31m*** disconnected ***\x1b[0m");
         updateTab(tab.tabId, { phase: "disconnected" });
+        setError((e) => e ?? "The connection was closed.");
       }
     };
     ws.onerror = () => {
-      setPhase("error");
+      if (wsRef.current !== ws) return; // ignore errors from a superseded socket
+      setPhase((p) => (p === "need_password" ? p : "error"));
       setError((e) => e ?? "WebSocket error — check the server is reachable");
     };
 
@@ -332,11 +341,18 @@ export function WebTerminalPane({ tab }: { tab: TerminalTab }) {
 
   // Retry: refresh the access token first (the WS uses it directly and doesn't
   // get the auto-refresh that REST calls do, so a long session's token may have
-  // expired), then force a fresh reconnect.
+  // expired), then force a fresh reconnect. If the refresh token is also gone,
+  // don't silently hang on "connecting" — surface a clear error.
   async function reconnect() {
     setPhase("connecting");
     setError(null);
-    try { await refreshTokens(); } catch { /* reconnect with the current token */ }
+    let token: string | null = accessToken;
+    try { token = await refreshTokens(); } catch { token = accessToken; }
+    if (!token) {
+      setPhase("error");
+      setError("Your session has expired. Please sign in again.");
+      return;
+    }
     setAttempt((n) => n + 1);
   }
 

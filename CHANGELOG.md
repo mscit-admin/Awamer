@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.39.3] — 2026-06-30 — Fix terminal Retry not reconnecting
+
+### Fixed
+- The terminal **Retry** button could appear to do nothing. Refreshing the
+  token and forcing a reconnect briefly opened two WebSockets, and the old
+  socket's late `close`/`error` events knocked the freshly-connected session
+  back into the "Connection failed" state. Socket callbacks are now scoped to
+  the current socket, so a superseded connection can't clobber the new one.
+- If the refresh token has also expired, Retry no longer hangs on
+  "connecting" — it shows **"Your session has expired. Please sign in again."**
+- A close while still connecting now surfaces an error instead of leaving the
+  overlay stuck.
+
+---
+
 ## [1.39.2] — 2026-06-30 — Slightly more visible terminal watermark
 
 ### Changed
