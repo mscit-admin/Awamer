@@ -45,4 +45,10 @@ export const usersAdminApi = {
   remove(id: string) {
     return request<void>(`/api/v1/admin/users/${id}`, { method: "DELETE" });
   },
+  resetPassword(id: string, password: string) {
+    return request<{ ok: true }>(`/api/v1/admin/users/${id}/reset-password`, { method: "POST", body: { password } });
+  },
+  disableMfa(id: string) {
+    return request<{ ok: true }>(`/api/v1/admin/users/${id}/disable-mfa`, { method: "POST" });
+  },
 };

@@ -4,6 +4,8 @@ import { userView } from "./auth.js";
 import { DomainError } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
 import type { RegisterUseCase } from "../usecases/register.js";
+import type { ChangePasswordUseCase } from "../usecases/changePassword.js";
+import type { MFAUseCase } from "../usecases/mfa.js";
 import type { RoleService } from "../domain/roleService.js";
 import type { JwtService } from "../jwt/index.js";
 import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
@@ -12,6 +14,8 @@ import { can } from "../domain/permissions.js";
 interface Deps {
   users: UserRepository;
   register: RegisterUseCase;
+  changePassword: ChangePasswordUseCase;
+  mfa: MFAUseCase;
   roleService: RoleService;
   jwt: JwtService;
 }
@@ -157,6 +161,43 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
         await deps.users.delete(parsed.data.id);
         return reply.code(204).send();
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
+
+    // ---------- reset another user's password ---------------------------
+    const resetSchema = z.object({ password: z.string().min(12).max(256) });
+    app.post("/users/:id/reset-password", async (req, reply) => {
+      const idP = idSchema.safeParse(req.params);
+      const bodyP = resetSchema.safeParse(req.body);
+      if (!idP.success || !bodyP.success) return reply.code(400).send({ error: { code: "validation_failed", message: "a password of at least 12 characters is required" } });
+      try {
+        const u = await deps.users.getById(idP.data.id);
+        const s = await scope(req);
+        if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
+        await deps.changePassword.adminReset(req.auth!.sub, idP.data.id, bodyP.data.password);
+        return reply.send({ ok: true });
+      } catch (e) {
+        if (e instanceof DomainError) {
+          const status = e.code === "weak_password" ? 400 : 404;
+          return reply.code(status).send({ error: { code: e.code, message: e.message } });
+        }
+        throw e;
+      }
+    });
+
+    // ---------- disable another user's 2FA ------------------------------
+    app.post("/users/:id/disable-mfa", async (req, reply) => {
+      const idP = idSchema.safeParse(req.params);
+      if (!idP.success) return reply.code(400).send({ error: { code: "invalid_id", message: "" } });
+      try {
+        const u = await deps.users.getById(idP.data.id);
+        const s = await scope(req);
+        if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
+        await deps.mfa.adminDisable(req.auth!.sub, idP.data.id);
+        return reply.send({ ok: true });
       } catch (e) {
         if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
         throw e;

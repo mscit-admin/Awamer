@@ -6,7 +6,7 @@
  * the backend enforces it too).
  */
 import { useEffect, useState, type FormEvent } from "react";
-import { UserPlus, Loader2, AlertCircle, Trash2, ShieldCheck, X, Download, Building2, Check } from "lucide-react";
+import { UserPlus, Loader2, AlertCircle, Trash2, ShieldCheck, ShieldOff, KeyRound, Pencil, X, Download, Building2, Check } from "lucide-react";
 
 import { usersAdminApi, type AdminUser } from "./usersAdminApi";
 import { rolesApi } from "./rolesApi";
@@ -29,6 +29,8 @@ export function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [assigning, setAssigning] = useState<AdminUser | null>(null);
+  const [editing, setEditing] = useState<AdminUser | null>(null);
+  const [resetting, setResetting] = useState<AdminUser | null>(null);
   const companyName = (id: string | null) => companies.find((c) => c.id === id)?.name ?? (id ? "—" : "Unassigned");
 
   const msg = (e: unknown) => (e instanceof ApiError ? humanize(e.message) : e instanceof Error ? e.message : "error");
@@ -66,6 +68,12 @@ export function UsersPage() {
   async function remove(u: AdminUser) {
     if (!window.confirm(`Delete user "${u.username}"? This cannot be undone.`)) return;
     try { await usersAdminApi.remove(u.id); await load(); }
+    catch (e) { setError(msg(e)); }
+  }
+
+  async function disableMfa(u: AdminUser) {
+    if (!window.confirm(`Disable two-factor authentication for "${u.username}"? They'll be able to sign in without a code and can re-enroll later.`)) return;
+    try { await usersAdminApi.disableMfa(u.id); await load(); }
     catch (e) { setError(msg(e)); }
   }
 
@@ -173,12 +181,25 @@ export function UsersPage() {
                         {u.is_active ? "Active" : "Disabled"}
                       </button>
                     </td>
-                    <td className="px-4 py-2 text-right">
-                      {!isSelf && (
-                        <button onClick={() => remove(u)} className="p-1 hover:bg-bg rounded text-red-400" title="Delete">
-                          <Trash2 className="size-3.5" />
+                    <td className="px-4 py-2">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => setEditing(u)} className="p-1 hover:bg-bg rounded text-fg-muted" title="Edit account">
+                          <Pencil className="size-3.5" />
                         </button>
-                      )}
+                        <button onClick={() => setResetting(u)} className="p-1 hover:bg-bg rounded text-fg-muted" title="Reset password">
+                          <KeyRound className="size-3.5" />
+                        </button>
+                        {u.mfa_enabled && (
+                          <button onClick={() => disableMfa(u)} className="p-1 hover:bg-bg rounded text-amber-400" title="Disable two-factor (2FA)">
+                            <ShieldOff className="size-3.5" />
+                          </button>
+                        )}
+                        {!isSelf && (
+                          <button onClick={() => remove(u)} className="p-1 hover:bg-bg rounded text-red-400" title="Delete">
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -210,6 +231,159 @@ export function UsersPage() {
           onError={setError}
         />
       )}
+
+      {editing && (
+        <EditUserModal
+          user={editing}
+          roleOpts={roleOpts}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); void load(); }}
+          onError={(m) => setError(m)}
+        />
+      )}
+
+      {resetting && (
+        <ResetPasswordModal
+          user={resetting}
+          onClose={() => setResetting(null)}
+          onError={(m) => setError(m)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditUserModal({ user, roleOpts, onClose, onSaved, onError }: {
+  user: AdminUser;
+  roleOpts: RoleOption[];
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (m: string) => void;
+}) {
+  const [fullName, setFullName] = useState(user.full_name ?? "");
+  const [email, setEmail] = useState(user.email);
+  const [role, setRole] = useState(user.role);
+  const [active, setActive] = useState(user.is_active);
+  const [locked, setLocked] = useState(user.is_locked);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await usersAdminApi.update(user.id, {
+        full_name: fullName.trim() || null,
+        email: email.trim(),
+        role,
+        is_active: active,
+        is_locked: locked,
+      });
+      onSaved();
+    } catch (e) {
+      onError(e instanceof ApiError ? humanize(e.message) : e instanceof Error ? e.message : "save failed");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="card p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-4">
+          <Pencil className="size-4 text-accent" />
+          <h2 className="text-base font-semibold">Edit {user.username}</h2>
+        </div>
+        <label className="block text-xs text-fg-muted mb-1">Full name</label>
+        <input value={fullName} onChange={(e) => setFullName(e.target.value)} className="input w-full mb-3" placeholder="Full name" />
+        <label className="block text-xs text-fg-muted mb-1">Email</label>
+        <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" className="input w-full mb-3" />
+        <label className="block text-xs text-fg-muted mb-1">Role</label>
+        <select value={role} onChange={(e) => setRole(e.target.value)} className="input w-full mb-3">
+          {roleOpts.length === 0 && <option value={role}>{role}</option>}
+          {roleOpts.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
+        </select>
+        <div className="flex items-center gap-4 mb-4">
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={locked} onChange={(e) => setLocked(e.target.checked)} /> Locked</label>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
+          <button onClick={save} disabled={busy || !email.trim()} className="btn-primary text-sm inline-flex gap-1">
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Password policy mirror: ≥12 chars with upper, lower, digit and symbol.
+function strongPassword(): string {
+  const U = "ABCDEFGHJKLMNPQRSTUVWXYZ", L = "abcdefghijkmnpqrstuvwxyz", D = "23456789", S = "!@#$%^&*-_=+";
+  const all = U + L + D + S;
+  const pick = (set: string) => set[Math.floor(Math.random() * set.length)];
+  let out = pick(U) + pick(L) + pick(D) + pick(S);
+  for (let i = 0; i < 12; i++) out += pick(all);
+  return out.split("").sort(() => Math.random() - 0.5).join("");
+}
+
+function ResetPasswordModal({ user, onClose, onError }: {
+  user: AdminUser;
+  onClose: () => void;
+  onError: (m: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [show, setShow] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const ok = password.length >= 12;
+
+  async function save() {
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await usersAdminApi.resetPassword(user.id, password);
+      setDone(true);
+    } catch (e) {
+      onError(e instanceof ApiError ? humanize(e.message) : e instanceof Error ? e.message : "reset failed");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="card p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-2">
+          <KeyRound className="size-4 text-accent" />
+          <h2 className="text-base font-semibold">Reset password — {user.username}</h2>
+        </div>
+        {done ? (
+          <>
+            <div className="px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs rounded mb-3 flex items-center gap-2">
+              <Check className="size-3.5" /> Password updated. All of the user's sessions were signed out.
+            </div>
+            <p className="text-xs text-fg-muted mb-4">Share this password with the user securely — it isn't stored in plain text and can't be shown again:</p>
+            <div className="font-mono text-sm bg-bg-elevated border border-border rounded px-3 py-2 mb-4 break-all select-all">{password}</div>
+            <div className="flex justify-end"><button onClick={onClose} className="btn-primary text-sm">Done</button></div>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-fg-muted mb-3">Set a new password for this account. The user's other sessions are signed out, and a locked account is unlocked.</p>
+            <div className="flex items-center gap-2 mb-1">
+              <input type={show ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="New password (min 12 chars)" className="input font-mono w-full" autoFocus />
+              <button type="button" onClick={() => setShow((v) => !v)} className="btn-ghost text-xs px-2">{show ? "Hide" : "Show"}</button>
+            </div>
+            <button type="button" onClick={() => { setPassword(strongPassword()); setShow(true); }} className="btn-ghost text-xs mb-1">Generate strong password</button>
+            <p className={"text-2xs mb-4 " + (ok ? "text-emerald-400" : "text-fg-muted")}>
+              At least 12 characters with upper & lower case, a digit and a symbol.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
+              <button onClick={save} disabled={busy || !ok} className="btn-primary text-sm inline-flex gap-1">
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />} Reset
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

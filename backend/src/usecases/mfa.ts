@@ -105,6 +105,23 @@ export class MFAUseCase {
   }
 
   /**
+   * Admin action: disable MFA for another user (no password needed). Removes
+   * every MFA device and clears the flag; the acting admin is audit-logged.
+   * Used by user administration to help a user locked out of their authenticator.
+   */
+  async adminDisable(adminId: string, userId: string): Promise<void> {
+    const user = await this.users.getById(userId);
+    const devices = await this.devices.listByUser(userId);
+    for (const d of devices) await this.devices.delete(d.id, userId);
+    user.mfaEnabled = false;
+    await this.users.update(user);
+    await this.audit.log({
+      userId: adminId, action: "mfa_disable", success: true,
+      resourceType: "user", resourceId: userId, details: { admin_disable: true, devices_removed: devices.length },
+    });
+  }
+
+  /**
    * Disable MFA for the user. Requires the current password as a
    * re-authentication step — stops a stolen access token from being
    * enough to weaken the account's security.

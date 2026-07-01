@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.43.0] — 2026-07-01 — Admin: reset passwords, disable 2FA, edit accounts
+
+### Added
+- **Admins & Super Admins can reset another user's password.** Administration →
+  Users → the key icon opens a dialog to set (or generate) a new password;
+  the account is **unlocked**, failed-attempt count cleared, all the user's
+  sessions signed out, and the new password shown once to hand over securely.
+  (`POST /api/v1/admin/users/:id/reset-password`.)
+- **Admins can disable 2FA for a user** (shield icon, shown when the user has
+  2FA on) — removes their authenticator devices so they can sign in and
+  re-enroll. (`POST /api/v1/admin/users/:id/disable-mfa`.)
+- **Edit account dialog** (pencil icon): change full name, email, role, and
+  active/locked state in one place.
+- All three are **company-scoped** (a company admin can only act on users in
+  their own company; Super Admin on anyone) and **audit-logged** with the acting
+  admin recorded. Verified end-to-end against PostgreSQL 16.
+
+---
+
 ## [1.42.1] — 2026-07-01 — No branding flash on load
 
 ### Fixed
