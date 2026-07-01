@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.45.0] — 2026-07-01 — Auto-reconcile built-in role permissions on startup
+
+### Changed
+- The **locked built-in roles** (super_admin, admin, user, readonly, auditor)
+  are now **reconciled from the code permission catalog on every startup**
+  (`RoleService.syncBuiltins()`), so newly added permissions (e.g.
+  `companies:manage`, `org:manage`) are always granted to the right built-ins
+  without needing a separate migration each time. **Custom roles are left
+  untouched.** This "rebuilds" the permission matrix to match the latest code on
+  each deploy. Verified against PostgreSQL 16 (an out-of-date DB was corrected;
+  a custom role was preserved).
+
+---
+
 ## [1.44.2] — 2026-07-01 — "Open host in new tab" always opens a new tab
 
 ### Fixed

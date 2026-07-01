@@ -45,6 +45,25 @@ export class RoleRepository {
     return rowToRole(rows[0]);
   }
 
+  /**
+   * Upsert a locked built-in role from the code catalog. Keeps built-in roles'
+   * permission sets in sync with the code (so new permissions apply without a
+   * dedicated migration). Never touches custom (non-built-in) roles.
+   */
+  async upsertBuiltin(b: { key: string; name: string; description?: string | null; permissions: string[] }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO roles (key, name, description, permissions, is_builtin)
+       VALUES ($1, $2, $3, $4::text[], TRUE)
+       ON CONFLICT (key) DO UPDATE SET
+         name = EXCLUDED.name,
+         description = EXCLUDED.description,
+         permissions = EXCLUDED.permissions,
+         is_builtin = TRUE,
+         updated_at = NOW()`,
+      [b.key, b.name, b.description ?? null, b.permissions],
+    );
+  }
+
   async create(input: { key: string; name: string; description?: string | null; permissions: string[] }): Promise<RoleRecord> {
     try {
       const { rows } = await this.pool.query<RoleRow>(

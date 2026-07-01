@@ -94,6 +94,9 @@ async function main() {
   // Custom roles — load the DB-backed RBAC resolver before serving traffic.
   const roles = new RoleRepository(pool);
   const roleService = new RoleService(roles);
+  // Reconcile locked built-in roles with the code catalog first, so the latest
+  // permissions are always granted to them without a per-permission migration.
+  await roleService.syncBuiltins();
   await roleService.reload();
 
   // Use cases

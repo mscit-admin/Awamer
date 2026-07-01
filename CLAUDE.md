@@ -42,8 +42,10 @@ startup + reloaded on role changes). `users.role` is an FK to `roles.key`. The
 server sends each user's **effective permissions** in the user payload; the
 client gates UI off `user.permissions` (`useCan` / `hasPerm`), not a static
 matrix. When adding a permission, update its grants in the built-in role
-definitions in `permissions.ts` AND the seed in a new migration if you want
-existing built-in roles to include it.
+definitions (`BUILTIN_ROLES`) in `permissions.ts` — the **locked built-in roles
+are reconciled from that code catalog on every startup** (`RoleService.syncBuiltins()`,
+called before `reload()`), so new permissions reach existing built-ins
+automatically (no per-permission migration needed; custom roles are untouched).
 
 ## General conventions
 
