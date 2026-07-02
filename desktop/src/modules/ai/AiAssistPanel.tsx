@@ -4,7 +4,7 @@
  * explains commands, and analyzes errors. Commands are inserted into the
  * terminal (never auto-run) so the user reviews before pressing Enter.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, Loader2, X, CornerDownLeft, Wand2, HelpCircle, Bug, AlertTriangle } from "lucide-react";
 import { aiApi, type AiProvider } from "./aiApi";
 import { ApiError } from "@/shared/lib/api";
@@ -19,15 +19,17 @@ function firstCommand(text: string): string | null {
   return line ?? null;
 }
 
-export function AiAssistPanel({ hostLabel, onInsert, onClose }: { hostLabel: string; onInsert: (cmd: string) => void; onClose: () => void }) {
+export function AiAssistPanel({ hostLabel, onInsert, onClose, initialInput, autoSuggest }: { hostLabel: string; onInsert: (cmd: string) => void; onClose: () => void; initialInput?: string; autoSuggest?: boolean }) {
   const [providers, setProviders] = useState<AiProvider[]>([]);
   const [providerId, setProviderId] = useState<string>("");
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialInput ?? "");
   const [mode, setMode] = useState<Mode>("suggest");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingProviders, setLoadingProviders] = useState(true);
+  const [needsPick, setNeedsPick] = useState(false);
+  const [didAuto, setDidAuto] = useState(false);
 
   useEffect(() => {
     aiApi.available()
@@ -39,15 +41,33 @@ export function AiAssistPanel({ hostLabel, onInsert, onClose }: { hostLabel: str
   const danger = useMemo(() => result != null && /⚠\s*DANGER/i.test(result), [result]);
   const suggested = useMemo(() => (result ? firstCommand(result) : null), [result]);
 
-  async function run(m: Mode) {
-    if (!providerId || !input.trim()) return;
+  const runWith = useCallback(async (m: Mode, id: string, text: string) => {
+    if (!id || !text.trim()) return;
     setMode(m); setBusy(true); setError(null); setResult(null);
     try {
-      setResult(await aiApi.chat({ provider_id: providerId, mode: m, input: input.trim() }));
+      setResult(await aiApi.chat({ provider_id: id, mode: m, input: text.trim() }));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : "AI request failed");
     } finally { setBusy(false); }
-  }
+  }, []);
+
+  const run = (m: Mode) => runWith(m, providerId, input);
+
+  // Auto-run for the inline "AI: …" trigger: use the default provider (or the
+  // only one) straight away; if there's no default and several providers, ask
+  // the user to pick which AI first.
+  useEffect(() => {
+    if (didAuto || !autoSuggest || loadingProviders || !initialInput) return;
+    if (providers.length === 0) { setDidAuto(true); return; }
+    const hasDefault = providers.some((p) => p.is_default);
+    if (hasDefault || providers.length === 1) {
+      setDidAuto(true);
+      void runWith("suggest", providerId, initialInput);
+    } else {
+      setDidAuto(true);
+      setNeedsPick(true); // no default + multiple → let the user choose
+    }
+  }, [didAuto, autoSuggest, loadingProviders, initialInput, providers, providerId, runWith]);
 
   return (
     <div className="absolute inset-y-0 right-0 z-40 w-full max-w-md bg-bg border-l border-border shadow-2xl flex flex-col animate-slide-in-right">
@@ -66,6 +86,11 @@ export function AiAssistPanel({ hostLabel, onInsert, onClose }: { hostLabel: str
           </div>
         ) : (
           <>
+            {needsPick && (
+              <div className="px-3 py-2 bg-accent/10 border border-accent/30 text-accent text-xs rounded">
+                You have no default AI provider — choose which AI to use, then click <span className="font-medium">Suggest command</span>.
+              </div>
+            )}
             <div>
               <label className="block text-2xs text-fg-muted mb-1 uppercase tracking-wide">Provider</label>
               <select value={providerId} onChange={(e) => setProviderId(e.target.value)} className="input w-full text-sm">

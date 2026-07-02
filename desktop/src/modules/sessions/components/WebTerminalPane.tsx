@@ -207,6 +207,15 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const saveHistoryRef = useRef(saveHistory && canHistory);
   useEffect(() => { saveHistoryRef.current = saveHistory && canHistory; }, [saveHistory, canHistory]);
 
+  // Inline "AI: <question>" trigger. We track the current line and, when the
+  // user submits a line starting with "AI:", open the assistant instead of
+  // running it in the shell. Read live values through refs so the keystroke
+  // handler never needs to re-subscribe.
+  const aiLineRef = useRef("");
+  const canAiRef = useRef(canAi);
+  useEffect(() => { canAiRef.current = canAi; }, [canAi]);
+  const aiTriggerRef = useRef<(q: string) => void>(() => {});
+
   // Refit the terminal when the bottom gap changes.
   useEffect(() => {
     const t = setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
@@ -219,7 +228,10 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const [pasteDraft, setPasteDraft] = useState("");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [showAi, setShowAi] = useState(false);
+  const [aiQuestion, setAiQuestion] = useState<string | null>(null);
   const toolsRef = useRef<HTMLDivElement | null>(null);
+  // Stable opener used by the inline "AI:" interceptor (avoids re-subscribing onData).
+  useEffect(() => { aiTriggerRef.current = (q: string) => { setAiQuestion(q); setShowAi(true); }; }, []);
 
   const [phase, setPhase] = useState<"connecting" | "connected" | "error" | "need_password">("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -347,7 +359,27 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
     let opened = false;
 
     const dataDisp = term.onData((d) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));
+      const send = (s: string) => { if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(s)); };
+
+      // Inline "AI: <question>" — intercept on Enter so it never runs in the shell.
+      if (canAiRef.current && (d === "\r" || d === "\n")) {
+        const m = /^\s*ai:\s*(.+)$/i.exec(aiLineRef.current);
+        if (m && m[1]!.trim()) {
+          send("\x15");            // Ctrl-U: clear the typed line from the shell prompt
+          aiLineRef.current = "";
+          lineBufRef.current = "";
+          aiTriggerRef.current(m[1]!.trim());
+          return;                  // swallow the Enter
+        }
+      }
+
+      send(d);
+
+      // Track the current line for the AI trigger.
+      if (canAiRef.current) {
+        aiLineRef.current = (d === "\r" || d === "\n") ? "" : foldKeystrokes(aiLineRef.current, d).buf;
+      }
+
       // Capture typed commands when the user has opted in.
       if (saveHistoryRef.current) {
         const { buf, commands } = foldKeystrokes(lineBufRef.current, d);
@@ -618,9 +650,12 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
 
       {showAi && (
         <AiAssistPanel
+          key={aiQuestion ?? "manual"}
           hostLabel={tab.label}
-          onInsert={(cmd) => { insertCommand(cmd); setShowAi(false); }}
-          onClose={() => setShowAi(false)}
+          initialInput={aiQuestion ?? undefined}
+          autoSuggest={aiQuestion != null}
+          onInsert={(cmd) => { insertCommand(cmd); setShowAi(false); setAiQuestion(null); }}
+          onClose={() => { setShowAi(false); setAiQuestion(null); }}
         />
       )}
 

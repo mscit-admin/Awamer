@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.46.1] — 2026-07-02 — Inline "AI:" trigger in the terminal
+
+### Added
+- Type **`AI: <your question>`** on the terminal prompt and press Enter — it's
+  **intercepted before it runs in the shell** (the line is cleared) and the AI
+  assistant opens with your question. It answers using your **default** AI
+  provider automatically; if you have **no default** and several providers, it
+  **asks which AI to use** first. Suggested commands are still inserted (not
+  run) so you review them. Requires `ai:use`.
+
+---
+
 ## [1.46.0] — 2026-07-02 — AI assistant + AI provider management (phase 1)
 
 ### Added
