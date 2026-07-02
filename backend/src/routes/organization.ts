@@ -178,15 +178,19 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
       if (!p.success) return err(reply, 400, "validation_failed", p.error.message);
       const s = await scope(req);
 
+      // Tenant guard: a non-super admin may only act on a user already in their
+      // own company (otherwise they could pull a foreign user into their tenant
+      // and then take the account over via the admin routes).
+      let target;
+      try { target = await deps.users.getById(id); }
+      catch { return err(reply, 404, "not_found", "user not found"); }
+      if (!mayTouch(s, target.companyId ?? "")) return err(reply, 404, "not_found", "user not found");
+
       // Determine the target company. Non-super admins can only assign within
       // their own company.
       let companyId = p.data.company_id ?? undefined;
       if (!s.isSuper) companyId = s.companyId ?? undefined;
-      if (companyId === undefined) {
-        // Keep the user's current company if the caller didn't (and can't) change it.
-        const target = await deps.users.getById(id);
-        companyId = target.companyId ?? undefined;
-      }
+      if (companyId === undefined) companyId = target.companyId ?? undefined;
 
       // The org unit, if given, must live in the resolved company.
       let orgUnitId = p.data.org_unit_id ?? null;

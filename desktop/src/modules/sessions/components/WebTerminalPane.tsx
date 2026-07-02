@@ -200,6 +200,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   // Auto-reconnect on unexpected drops: count consecutive attempts + a pending timer.
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Command-history capture. We reconstruct each typed line from the user's
@@ -288,6 +289,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
     ro.observe(containerRef.current);
 
     return () => {
+      mountedRef.current = false;
       window.removeEventListener("resize", onResize);
       ro.disconnect();
       cancelAnimationFrame(raf);
@@ -438,13 +440,16 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
       term.write(new Uint8Array(ev.data as ArrayBuffer));
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       dataDisp.dispose();
-      if (wsRef.current !== ws) return; // a newer socket took over — ignore
-      if (opened) {
-        // Unexpected drop while connected — auto-reconnect a few times with
-        // backoff (refreshing the token first) before giving up. This makes
-        // brief network blips self-heal instead of dumping the user on Retry.
+      if (!mountedRef.current || wsRef.current !== ws) return; // superseded / unmounted — ignore
+      // Only auto-reconnect on an ABNORMAL close (network drop → code 1006 /
+      // !wasClean). Deliberate server closes — shell `exit`, idle timeout,
+      // auth error — arrive as a clean 1000 close and must NOT reconnect
+      // (otherwise idle-timeout loops forever and `exit` re-opens the shell).
+      const abnormal = !ev.wasClean || ev.code === 1006;
+      if (opened && abnormal) {
+        // Brief network blip — self-heal with backoff (refresh token first).
         updateTab(tab.tabId, { phase: "disconnected" });
         if (reconnectAttemptsRef.current < 6) {
           reconnectAttemptsRef.current += 1;
@@ -461,6 +466,13 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
           setPhase("error");
           setError("Connection keeps dropping. Check the network/server, then click Retry.");
         }
+      } else if (opened) {
+        // Clean, deliberate close (exit / idle timeout / server) — end the
+        // session; the user can click Retry to reconnect.
+        term.writeln("\r\n\x1b[31m*** disconnected ***\x1b[0m");
+        updateTab(tab.tabId, { phase: "disconnected" });
+        setPhase((p) => (p === "connected" ? "error" : p));
+        setError((e) => e ?? "The session was closed.");
       } else {
         // Never fully connected — a failed attempt.
         setPhase((p) => (p === "connecting" ? "error" : p));

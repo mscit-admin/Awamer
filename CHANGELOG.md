@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.48.1] — 2026-07-02 — Security & stability hardening (audit follow-up)
+
+### Fixed / Security
+- **Privilege-escalation guard (users).** A company admin can no longer create
+  or update a user with a role more powerful than their own — the server now
+  rejects granting any role whose permission set isn't a subset of the caller's
+  (e.g. an admin minting a `super_admin`), returning `403 forbidden`. Super
+  admins are unaffected.
+- **Cross-tenant assignment guard.** `PUT /organization/users/:id/assignment`
+  now verifies the target user is already in the caller's company before acting,
+  so a company admin can no longer pull a foreign user into their tenant.
+- **SSRF hardening (AI providers).** A provider `base_url` pointing at a
+  loopback / private / link-local / CGNAT address (incl. the cloud metadata
+  endpoint `169.254.169.254`) is now rejected at validation — the server
+  `fetch()`es that origin from its own network position, so internal targets are
+  refused. Public DNS/hosts are still allowed.
+- **SSH shell stream crash path.** The interactive shell channel now has an
+  `error` handler; an unhandled channel error previously threw and could crash
+  the backend process, dropping *every* user's session. It now closes just the
+  affected session cleanly.
+- **Auto-reconnect correctness.** The web terminal only auto-reconnects on
+  *abnormal* closes (network drop / code 1006); deliberate server-side closes
+  (idle timeout, clean shutdown) no longer trigger a reconnect loop. A
+  mounted-guard prevents reconnect timers firing after the pane is unmounted.
+
+---
+
 ## [1.48.0] — 2026-07-02 — More stable SSH terminals (keepalive + auto-reconnect)
 
 ### Fixed / Changed

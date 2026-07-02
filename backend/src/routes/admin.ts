@@ -9,7 +9,7 @@ import type { MFAUseCase } from "../usecases/mfa.js";
 import type { RoleService } from "../domain/roleService.js";
 import type { JwtService } from "../jwt/index.js";
 import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
-import { can } from "../domain/permissions.js";
+import { can, permissionsFor } from "../domain/permissions.js";
 
 interface Deps {
   users: UserRepository;
@@ -36,6 +36,16 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
     }
     const sameCompany = (s: { isSuper: boolean; companyId: string | null }, target: { companyId: string | null }) =>
       s.isSuper || (s.companyId != null && s.companyId === target.companyId);
+
+    // Privilege-escalation guard: a caller may only grant a role whose
+    // permission set is a subset of their own. This blocks a company admin from
+    // minting a `super_admin` (which carries `companies:manage`) or any custom
+    // role that holds a permission the admin themselves lacks — the classic
+    // "create an account more powerful than me, then log in as it" attack.
+    const mayGrantRole = (callerRole: string, targetRole: string): boolean => {
+      const mine = new Set(permissionsFor(callerRole));
+      return permissionsFor(targetRole).every((p) => mine.has(p));
+    };
 
     // ---------- list users ----------------------------------------------
     const listQuerySchema = z.object({
@@ -74,6 +84,9 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       }
       if (!deps.roleService.has(parsed.data.role)) {
         return reply.code(400).send({ error: { code: "invalid_role", message: "unknown role" } });
+      }
+      if (!mayGrantRole(req.auth!.role, parsed.data.role)) {
+        return reply.code(403).send({ error: { code: "forbidden", message: "you cannot grant a role with more privileges than your own" } });
       }
       try {
         // New users join the creating admin's company (isolation). A Super
@@ -131,6 +144,9 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       }
       if (bodyP.data.role !== undefined && !deps.roleService.has(bodyP.data.role)) {
         return reply.code(400).send({ error: { code: "invalid_role", message: "unknown role" } });
+      }
+      if (bodyP.data.role !== undefined && !mayGrantRole(req.auth!.role, bodyP.data.role)) {
+        return reply.code(403).send({ error: { code: "forbidden", message: "you cannot grant a role with more privileges than your own" } });
       }
       try {
         const u = await deps.users.getById(idP.data.id);

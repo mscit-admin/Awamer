@@ -28,6 +28,42 @@ interface Deps {
 
 const err = (reply: FastifyReply, code: number, k: string, m: string) => reply.code(code).send({ error: { code: k, message: m } });
 
+// SSRF guard for the configurable provider `base_url`: the server fetch()es
+// this origin from its own network position, so an internal address would let a
+// tenant admin probe/reach services behind the firewall (cloud metadata, DBs,
+// other tenants' backends). Reject loopback / private / link-local literals.
+// A hostname (DNS name) is allowed — resolution-time rebinding is out of scope
+// here and belongs to egress firewalling; this stops the obvious literal cases.
+export function isPublicHttpUrl(raw: string): boolean {
+  let u: URL;
+  try { u = new URL(raw); } catch { return false; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  if (host === "" || host === "0.0.0.0" || host === "::" || host === "::1") return false;
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const o = v4.slice(1).map(Number);
+    if (o.some((n) => n > 255)) return false;
+    const a = o[0] ?? 0, b = o[1] ?? 0;
+    if (a === 0 || a === 127 || a === 10) return false;             // this-net / loopback / private
+    if (a === 172 && b >= 16 && b <= 31) return false;              // private
+    if (a === 192 && b === 168) return false;                       // private
+    if (a === 169 && b === 254) return false;                       // link-local (incl. cloud metadata)
+    if (a === 100 && b >= 64 && b <= 127) return false;             // CGNAT
+    return true;
+  }
+  if (host.includes(":")) {                                        // IPv6 literal
+    if (host.startsWith("fe80") || host.startsWith("fc") || host.startsWith("fd")) return false; // link-local / ULA
+    const mapped = host.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/); // ::ffff:127.0.0.1 etc
+    if (mapped) return isPublicHttpUrl(`http://${mapped[1]}`);
+    return true;
+  }
+  return true; // DNS name
+}
+
+const baseUrlSchema = z.string().url().max(300).refine(isPublicHttpUrl, "base_url must be a public http(s) URL (loopback/private/link-local addresses are not allowed)");
+
 // Public view — never includes the key.
 const view = (p: AiProvider) => ({
   id: p.id, scope: p.scope, provider: p.provider, label: p.label, model: p.model,
@@ -88,7 +124,7 @@ export function makeAiRoutes(deps: Deps): FastifyPluginAsync {
       label: z.string().min(1).max(80),
       model: z.string().min(1).max(120),
       api_key: z.string().min(1).max(400),
-      base_url: z.string().url().max(300).nullable().optional(),
+      base_url: baseUrlSchema.nullable().optional(),
       is_default: z.boolean().optional(),
       allow_roles: z.array(z.string().max(48)).max(30).optional(),
       allow_users: z.array(z.string().uuid()).max(500).optional(),
@@ -138,7 +174,7 @@ export function makeAiRoutes(deps: Deps): FastifyPluginAsync {
       label: z.string().min(1).max(80).optional(),
       model: z.string().min(1).max(120).optional(),
       api_key: z.string().min(1).max(400).optional(),
-      base_url: z.string().url().max(300).nullable().optional(),
+      base_url: baseUrlSchema.nullable().optional(),
       is_active: z.boolean().optional(),
       is_default: z.boolean().optional(),
       allow_roles: z.array(z.string().max(48)).max(30).optional(),

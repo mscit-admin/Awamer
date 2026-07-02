@@ -209,6 +209,17 @@ export function makeSshGateway(deps: SshGatewayDeps) {
           statsTimer = setInterval(pollStats, 8000);
           pollStats();
 
+          // ssh2 channels are Node streams — an unhandled 'error' would throw
+          // and crash the whole process (killing every other user's session).
+          stream.on("error", (e: Error) => {
+            deps.log.warn({ err: e.message, host: host.hostname }, "ssh gateway: shell stream error");
+            clearStats();
+            clearWsPing();
+            endHistory("failed", e.message);
+            try { conn.end(); } catch { /* ignore */ }
+            if (ws.readyState === ws.OPEN) ws.close();
+          });
+          stream.stderr.on("error", () => { /* ignore stderr channel errors */ });
           stream.on("data", (data: Buffer) => {
             bytesOut += data.length;
             if (ws.readyState === ws.OPEN) ws.send(data);
