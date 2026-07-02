@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.46.3] — 2026-07-02 — Inline AI provider selector: "AI @name:"
+
+### Added
+- Choose a specific AI inline: type **`AI @<provider>: <question>`** in the
+  terminal (e.g. `AI @Cohere: test internet speed`) to route that question to a
+  named provider instead of your default. The name matches a provider's label
+  (or type) case-insensitively. If the name isn't found, the assistant opens and
+  asks you to pick. Plain `AI: <question>` still uses your default. The first-run
+  hint now mentions the `@name` form.
+
+---
+
 ## [1.46.2] — 2026-07-02 — First-run AI hint in new terminals
 
 ### Added

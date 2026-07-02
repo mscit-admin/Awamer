@@ -11,6 +11,16 @@ import { ApiError } from "@/shared/lib/api";
 
 type Mode = "suggest" | "explain" | "error";
 
+/** Find a provider by a user-typed name (label match, then provider kind). */
+function findProvider(ps: AiProvider[], name: string): AiProvider | undefined {
+  const n = name.trim().toLowerCase();
+  if (!n) return undefined;
+  return ps.find((p) => p.label.toLowerCase() === n)
+    ?? ps.find((p) => p.label.toLowerCase().startsWith(n))
+    ?? ps.find((p) => p.label.toLowerCase().includes(n))
+    ?? ps.find((p) => p.provider.toLowerCase() === n);
+}
+
 /** Extract the first fenced code block (or the first non-empty line) as a command. */
 function firstCommand(text: string): string | null {
   const fence = /```(?:[a-zA-Z]*)\n([\s\S]*?)```/.exec(text);
@@ -19,7 +29,7 @@ function firstCommand(text: string): string | null {
   return line ?? null;
 }
 
-export function AiAssistPanel({ hostLabel, onInsert, onClose, initialInput, autoSuggest }: { hostLabel: string; onInsert: (cmd: string) => void; onClose: () => void; initialInput?: string; autoSuggest?: boolean }) {
+export function AiAssistPanel({ hostLabel, onInsert, onClose, initialInput, initialProvider, autoSuggest }: { hostLabel: string; onInsert: (cmd: string) => void; onClose: () => void; initialInput?: string; initialProvider?: string; autoSuggest?: boolean }) {
   const [providers, setProviders] = useState<AiProvider[]>([]);
   const [providerId, setProviderId] = useState<string>("");
   const [input, setInput] = useState(initialInput ?? "");
@@ -30,10 +40,21 @@ export function AiAssistPanel({ hostLabel, onInsert, onClose, initialInput, auto
   const [loadingProviders, setLoadingProviders] = useState(true);
   const [needsPick, setNeedsPick] = useState(false);
   const [didAuto, setDidAuto] = useState(false);
+  const [explicit, setExplicit] = useState(false); // a specific provider was requested (AI @name:)
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     aiApi.available()
-      .then((ps) => { setProviders(ps); setProviderId((ps.find((p) => p.is_default) ?? ps[0])?.id ?? ""); })
+      .then((ps) => {
+        setProviders(ps);
+        let chosen = ps.find((p) => p.is_default) ?? ps[0];
+        if (initialProvider) {
+          const match = findProvider(ps, initialProvider);
+          if (match) { chosen = match; setExplicit(true); }
+          else setNotice(`No AI provider named “${initialProvider}”. Pick one below.`);
+        }
+        setProviderId(chosen?.id ?? "");
+      })
       .catch((e) => setError(e instanceof ApiError ? e.message : "failed to load AI providers"))
       .finally(() => setLoadingProviders(false));
   }, []);
@@ -59,15 +80,15 @@ export function AiAssistPanel({ hostLabel, onInsert, onClose, initialInput, auto
   useEffect(() => {
     if (didAuto || !autoSuggest || loadingProviders || !initialInput) return;
     if (providers.length === 0) { setDidAuto(true); return; }
+    setDidAuto(true);
+    if (notice) { setNeedsPick(true); return; } // requested provider not found → pick
     const hasDefault = providers.some((p) => p.is_default);
-    if (hasDefault || providers.length === 1) {
-      setDidAuto(true);
-      void runWith("suggest", providerId, initialInput);
+    if (explicit || hasDefault || providers.length === 1) {
+      void runWith("suggest", providerId, initialInput); // explicit @name, or a default/only provider
     } else {
-      setDidAuto(true);
       setNeedsPick(true); // no default + multiple → let the user choose
     }
-  }, [didAuto, autoSuggest, loadingProviders, initialInput, providers, providerId, runWith]);
+  }, [didAuto, autoSuggest, loadingProviders, initialInput, providers, providerId, runWith, explicit, notice]);
 
   return (
     <div className="absolute inset-y-0 right-0 z-40 w-full max-w-md bg-bg border-l border-border shadow-2xl flex flex-col animate-slide-in-right">
@@ -86,7 +107,10 @@ export function AiAssistPanel({ hostLabel, onInsert, onClose, initialInput, auto
           </div>
         ) : (
           <>
-            {needsPick && (
+            {notice && (
+              <div className="px-3 py-2 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs rounded">{notice}</div>
+            )}
+            {needsPick && !notice && (
               <div className="px-3 py-2 bg-accent/10 border border-accent/30 text-accent text-xs rounded">
                 You have no default AI provider — choose which AI to use, then click <span className="font-medium">Suggest command</span>.
               </div>

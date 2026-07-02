@@ -214,7 +214,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const aiLineRef = useRef("");
   const canAiRef = useRef(canAi);
   useEffect(() => { canAiRef.current = canAi; }, [canAi]);
-  const aiTriggerRef = useRef<(q: string) => void>(() => {});
+  const aiTriggerRef = useRef<(q: string, provider?: string) => void>(() => {});
 
   // Refit the terminal when the bottom gap changes.
   useEffect(() => {
@@ -229,12 +229,13 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const [toolsOpen, setToolsOpen] = useState(false);
   const [showAi, setShowAi] = useState(false);
   const [aiQuestion, setAiQuestion] = useState<string | null>(null);
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [showAiHint, setShowAiHint] = useState(false);
   const aiHintOffRef = useRef(false);
   useEffect(() => { try { aiHintOffRef.current = localStorage.getItem("netsphere.ai-hint-off") === "1"; } catch { /* ignore */ } }, []);
   const toolsRef = useRef<HTMLDivElement | null>(null);
   // Stable opener used by the inline "AI:" interceptor (avoids re-subscribing onData).
-  useEffect(() => { aiTriggerRef.current = (q: string) => { setAiQuestion(q); setShowAi(true); }; }, []);
+  useEffect(() => { aiTriggerRef.current = (q: string, provider?: string) => { setAiQuestion(q); setAiProvider(provider ?? null); setShowAi(true); }; }, []);
 
   const [phase, setPhase] = useState<"connecting" | "connected" | "error" | "need_password">("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -364,14 +365,15 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
     const dataDisp = term.onData((d) => {
       const send = (s: string) => { if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(s)); };
 
-      // Inline "AI: <question>" — intercept on Enter so it never runs in the shell.
+      // Inline AI trigger — "AI: <q>" or "AI @provider: <q>" — intercepted on
+      // Enter so it never runs in the shell.
       if (canAiRef.current && (d === "\r" || d === "\n")) {
-        const m = /^\s*ai:\s*(.+)$/i.exec(aiLineRef.current);
-        if (m && m[1]!.trim()) {
+        const m = /^\s*ai\s*(?:@\s*([^:]+?)\s*)?:\s*(.+)$/i.exec(aiLineRef.current);
+        if (m && m[2]!.trim()) {
           send("\x15");            // Ctrl-U: clear the typed line from the shell prompt
           aiLineRef.current = "";
           lineBufRef.current = "";
-          aiTriggerRef.current(m[1]!.trim());
+          aiTriggerRef.current(m[2]!.trim(), m[1]?.trim() || undefined);
           return;                  // swallow the Enter
         }
       }
@@ -586,13 +588,13 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
               <div className="text-fg-muted mb-2">Type <span className="font-mono text-accent">AI:</span> then what you want and press Enter. Try one:</div>
               <div className="flex flex-wrap gap-1.5">
                 {["show the 10 largest files", "restart nginx", "why is my disk full", "open ports and who is listening"].map((ex) => (
-                  <button key={ex} onClick={() => { setAiQuestion(ex); setShowAi(true); setShowAiHint(false); }}
+                  <button key={ex} onClick={() => { setAiQuestion(ex); setAiProvider(null); setShowAi(true); setShowAiHint(false); }}
                     className="px-2 py-1 rounded bg-bg-elevated border border-border font-mono text-2xs text-fg-muted hover:border-accent/40 hover:text-accent transition-colors">
                     AI: {ex}
                   </button>
                 ))}
               </div>
-              <div className="text-2xs text-fg-muted mt-2">Or open <span className="font-medium">Tools → Ask AI</span>. Suggested commands are inserted, never run.</div>
+              <div className="text-2xs text-fg-muted mt-2">Pick a specific AI with <span className="font-mono text-accent">AI @Cohere:</span> …, or open <span className="font-medium">Tools → Ask AI</span>. Suggested commands are inserted, never run.</div>
               <button onClick={() => { try { localStorage.setItem("netsphere.ai-hint-off", "1"); } catch { /* ignore */ } aiHintOffRef.current = true; setShowAiHint(false); }}
                 className="mt-2 text-2xs text-fg-subtle hover:text-fg-muted underline">Don't show this again</button>
             </div>
@@ -635,7 +637,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
                   onClick={() => { setShowNotes(true); setToolsOpen(false); }} />
                 {canAi && (
                   <ToolItem icon={<Bot className="size-3.5" />} label="Ask AI"
-                    onClick={() => { setShowAi(true); setToolsOpen(false); }} />
+                    onClick={() => { setAiQuestion(null); setAiProvider(null); setShowAi(true); setToolsOpen(false); }} />
                 )}
                 <ToolItem icon={<ClipboardPaste className="size-3.5" />} label="Paste…"
                   onClick={() => { void openPasteDialog(); setToolsOpen(false); }} />
@@ -682,12 +684,13 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
 
       {showAi && (
         <AiAssistPanel
-          key={aiQuestion ?? "manual"}
+          key={`${aiQuestion ?? "manual"}|${aiProvider ?? ""}`}
           hostLabel={tab.label}
           initialInput={aiQuestion ?? undefined}
+          initialProvider={aiProvider ?? undefined}
           autoSuggest={aiQuestion != null}
-          onInsert={(cmd) => { insertCommand(cmd); setShowAi(false); setAiQuestion(null); }}
-          onClose={() => { setShowAi(false); setAiQuestion(null); }}
+          onInsert={(cmd) => { insertCommand(cmd); setShowAi(false); setAiQuestion(null); setAiProvider(null); }}
+          onClose={() => { setShowAi(false); setAiQuestion(null); setAiProvider(null); }}
         />
       )}
 
