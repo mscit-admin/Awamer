@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.48.0] — 2026-07-02 — More stable SSH terminals (keepalive + auto-reconnect)
+
+### Fixed / Changed
+- **Auto-reconnect.** If a live SSH terminal drops unexpectedly, the client now
+  **reconnects automatically** (up to 6 tries with exponential backoff, refreshing
+  the token first) instead of dropping you on the Retry screen — brief network
+  blips self-heal. It shows "connection lost — reconnecting (n)…" and resumes;
+  only after repeated failures does it show Retry.
+- **WebSocket heartbeat.** The gateway now pings the browser every 25s (and reaps
+  peers that stop answering), so idle proxies can't silently drop the socket.
+- **Hardened stats poller.** The 5s server-stats poll is now **8s, non-overlapping**
+  (skips if the previous poll is still running) and has an error handler on its
+  exec stream — preventing SSH-channel pile-ups (which can exhaust the target's
+  MaxSessions and cause mid-session drops) and an unhandled-error crash path.
+- **nginx**: `proxy_send_timeout` raised to 3600s (matching read) so idle SSH
+  WebSockets aren't cut at 60s.
+
+---
+
 ## [1.47.0] — 2026-07-02 — Per-provider access control for org AI
 
 ### Added

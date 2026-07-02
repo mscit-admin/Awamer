@@ -152,25 +152,48 @@ export function makeSshGateway(deps: SshGatewayDeps) {
       };
 
       // Periodic server-stats poller (separate exec channel, doesn't touch the
-      // interactive shell). Sends {type:"stats", data} every few seconds.
+      // interactive shell). Non-overlapping (skips if the previous poll is still
+      // running) so a slow link can't pile up exec channels and exhaust the
+      // target's MaxSessions — a common cause of mid-session drops.
       let prevSample: PrevSample = {};
       let statsTimer: NodeJS.Timeout | null = null;
+      let statsInFlight = false;
       const clearStats = () => { if (statsTimer) { clearInterval(statsTimer); statsTimer = null; } };
       const pollStats = () => {
-        if (ws.readyState !== ws.OPEN) return;
+        if (ws.readyState !== ws.OPEN || statsInFlight) return;
+        statsInFlight = true;
         try {
           conn.exec(STATS_CMD, (err, stream) => {
-            if (err) return;
+            if (err) { statsInFlight = false; return; }
             let out = "";
             stream.on("data", (d: Buffer) => { if (out.length < 16_384) out += d.toString(); });
             stream.stderr.on("data", () => { /* ignore */ });
+            // Without this handler an exec-channel error would crash the process.
+            stream.on("error", () => { statsInFlight = false; });
             stream.on("close", () => {
+              statsInFlight = false;
               const { stats, prev } = parseStats(out, prevSample, Date.now());
               prevSample = prev;
               if (Object.keys(stats).length && ws.readyState === ws.OPEN) sendJson(ws, { type: "stats", data: stats });
             });
           });
-        } catch { /* ignore */ }
+        } catch { statsInFlight = false; }
+      };
+
+      // WebSocket heartbeat: ping the browser periodically so idle proxies
+      // (nginx) keep the socket open, and reap peers that stop answering.
+      let wsAlive = true;
+      let wsPingTimer: NodeJS.Timeout | null = null;
+      const clearWsPing = () => { if (wsPingTimer) { clearInterval(wsPingTimer); wsPingTimer = null; } };
+      ws.on("pong", () => { wsAlive = true; });
+      const startWsPing = () => {
+        clearWsPing();
+        wsPingTimer = setInterval(() => {
+          if (ws.readyState !== ws.OPEN) return;
+          if (!wsAlive) { try { ws.terminate(); } catch { /* ignore */ } return; }
+          wsAlive = false;
+          try { ws.ping(); } catch { /* ignore */ }
+        }, 25_000);
       };
 
       conn.on("ready", () => {
@@ -182,7 +205,8 @@ export function makeSshGateway(deps: SshGatewayDeps) {
             return;
           }
           armIdle();
-          statsTimer = setInterval(pollStats, 5000);
+          startWsPing();
+          statsTimer = setInterval(pollStats, 8000);
           pollStats();
 
           stream.on("data", (data: Buffer) => {
@@ -195,6 +219,7 @@ export function makeSshGateway(deps: SshGatewayDeps) {
           });
           stream.on("close", () => {
             clearStats();
+            clearWsPing();
             endHistory("closed");
             conn.end();
             if (ws.readyState === ws.OPEN) ws.close();
@@ -231,6 +256,7 @@ export function makeSshGateway(deps: SshGatewayDeps) {
 
       conn.on("error", (err) => {
         clearStats();
+        clearWsPing();
         deps.log.warn({ err: err.message, host: host.hostname }, "ssh gateway: connection error");
         endHistory("failed", err.message);
         fail("ssh_error", err.message);
@@ -238,6 +264,7 @@ export function makeSshGateway(deps: SshGatewayDeps) {
 
       conn.on("close", () => {
         clearStats();
+        clearWsPing();
         endHistory("closed");
         if (ws.readyState === ws.OPEN) ws.close();
       });
@@ -245,8 +272,15 @@ export function makeSshGateway(deps: SshGatewayDeps) {
       ws.on("close", () => {
         clearIdle();
         clearStats();
+        clearWsPing();
         endHistory("closed");
         conn.end();
+      });
+      ws.on("error", () => {
+        clearIdle();
+        clearStats();
+        clearWsPing();
+        try { conn.end(); } catch { /* ignore */ }
       });
 
       // Initial resize hint if the client passed one in the query.

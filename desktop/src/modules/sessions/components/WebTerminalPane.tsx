@@ -197,6 +197,9 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  // Auto-reconnect on unexpected drops: count consecutive attempts + a pending timer.
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Command-history capture. We reconstruct each typed line from the user's
@@ -288,6 +291,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
       window.removeEventListener("resize", onResize);
       ro.disconnect();
       cancelAnimationFrame(raf);
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
       term.dispose();
       termRef.current = null;
     };
@@ -406,6 +410,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
           const msg = JSON.parse(ev.data);
           if (msg.type === "status" && msg.status === "connected") {
             opened = true;
+            reconnectAttemptsRef.current = 0; // healthy again — reset the backoff
             setPhase("connected");
             setConnectedAt((t) => t ?? Date.now());
             updateTab(tab.tabId, { phase: "connected" });
@@ -436,12 +441,29 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
     ws.onclose = () => {
       dataDisp.dispose();
       if (wsRef.current !== ws) return; // a newer socket took over — ignore
-      // Closing while connecting or connected means the attempt failed / dropped.
-      setPhase((p) => (p === "connected" || p === "connecting" ? "error" : p));
       if (opened) {
-        term.writeln("\r\n\x1b[31m*** disconnected ***\x1b[0m");
+        // Unexpected drop while connected — auto-reconnect a few times with
+        // backoff (refreshing the token first) before giving up. This makes
+        // brief network blips self-heal instead of dumping the user on Retry.
         updateTab(tab.tabId, { phase: "disconnected" });
-        setError((e) => e ?? "The connection was closed.");
+        if (reconnectAttemptsRef.current < 6) {
+          reconnectAttemptsRef.current += 1;
+          const n = reconnectAttemptsRef.current;
+          const delay = Math.min(8000, 1000 * 2 ** (n - 1));
+          term.writeln(`\r\n\x1b[33m*** connection lost — reconnecting (${n})… ***\x1b[0m`);
+          setPhase("connecting");
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = setTimeout(() => {
+            void refreshTokens().catch(() => {}).finally(() => setAttempt((a) => a + 1));
+          }, delay);
+        } else {
+          term.writeln("\r\n\x1b[31m*** disconnected — reconnect failed ***\x1b[0m");
+          setPhase("error");
+          setError("Connection keeps dropping. Check the network/server, then click Retry.");
+        }
+      } else {
+        // Never fully connected — a failed attempt.
+        setPhase((p) => (p === "connecting" ? "error" : p));
       }
     };
     ws.onerror = () => {
@@ -470,6 +492,8 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   // expired), then force a fresh reconnect. If the refresh token is also gone,
   // don't silently hang on "connecting" — surface a clear error.
   async function reconnect() {
+    reconnectAttemptsRef.current = 0;
+    if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
     setPhase("connecting");
     setError(null);
     let token: string | null = accessToken;
