@@ -4,13 +4,25 @@
  * so `can()` / `permissionsFor()` (used by middleware and gateways) reflect
  * live role definitions without requiring users to re-authenticate.
  */
-import { setPermissionResolver } from "./permissions.js";
+import { setPermissionResolver, BUILTIN_ROLES } from "./permissions.js";
 import type { RoleRepository, RoleRecord } from "../repos/roleRepo.js";
 
 export class RoleService {
   private cache: RoleRecord[] = [];
 
   constructor(private readonly repo: RoleRepository) {}
+
+  /**
+   * Reconcile the locked built-in roles in the DB with the code catalog, so the
+   * latest permissions (e.g. companies:manage, org:manage) are always granted to
+   * the built-ins on startup. Custom roles are left untouched. Call before
+   * reload().
+   */
+  async syncBuiltins(): Promise<void> {
+    for (const b of BUILTIN_ROLES) {
+      await this.repo.upsertBuiltin({ key: b.key, name: b.name, description: b.description, permissions: b.permissions });
+    }
+  }
 
   async reload(): Promise<void> {
     const roles = await this.repo.listAll();

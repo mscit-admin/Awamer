@@ -52,7 +52,9 @@ interface TabsState {
   activeTabId: string | null;
 
   // ---- mutators ---------------------------------------------------
-  openTab(hostId: string, label: string): string;
+  /** Open a terminal tab for a host. Focuses an existing live tab for that host
+   *  unless `force` is true (then always opens a brand-new tab). */
+  openTab(hostId: string, label: string, force?: boolean): string;
   setActive(tabId: string): void;
   closeTab(tabId: string): void;
   updateTab(tabId: string, patch: Partial<TerminalTab>): void;
@@ -67,15 +69,18 @@ export const useTerminalTabs = create<TabsState>()(
       tabs: [],
       activeTabId: null,
 
-      openTab(hostId, label) {
+      openTab(hostId, label, force = false) {
         // If a tab for this host is already in "connecting" or "connected"
-        // state, just focus it instead of opening a duplicate.
-        const existing = get().tabs.find(t =>
-          t.hostId === hostId && (t.phase === "connecting" || t.phase === "connected")
-        );
-        if (existing) {
-          set({ activeTabId: existing.tabId });
-          return existing.tabId;
+        // state, just focus it instead of opening a duplicate — unless the
+        // caller forces a new tab (e.g. "Open host in new tab").
+        if (!force) {
+          const existing = get().tabs.find(t =>
+            t.hostId === hostId && (t.phase === "connecting" || t.phase === "connected")
+          );
+          if (existing) {
+            set({ activeTabId: existing.tabId });
+            return existing.tabId;
+          }
         }
         const tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const newTab: TerminalTab = {

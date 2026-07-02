@@ -1,11 +1,14 @@
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import type { AuditRepository } from "../repos/otherRepos.js";
+import type { UserRepository } from "../repos/userRepo.js";
 import type { JwtService } from "../jwt/index.js";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
+import { can } from "../domain/permissions.js";
 
 interface Deps {
   audit: AuditRepository;
+  users: UserRepository;
   jwt: JwtService;
 }
 
@@ -29,10 +32,17 @@ export function makeAuditRoutes(deps: Deps): FastifyPluginAsync {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       }
       const { limit, offset, action, success, user_id } = parsed.data;
+      // Company admins see only their own company's events; Super Admin sees all.
+      let companyId: string | undefined;
+      if (!can(req.auth!.role, "companies:manage")) {
+        const me = await deps.users.getById(req.auth!.sub);
+        companyId = me.companyId ?? undefined;
+      }
       const { entries, total } = await deps.audit.list({
         limit, offset, action,
         success: success === undefined ? undefined : success === "true",
         userId: user_id,
+        companyId,
       });
       return reply.send({
         data: entries.map((e) => ({

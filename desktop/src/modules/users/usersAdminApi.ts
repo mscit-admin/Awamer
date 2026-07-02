@@ -18,6 +18,8 @@ export interface AdminUser {
   is_active: boolean;
   is_locked: boolean;
   mfa_enabled: boolean;
+  company_id: string | null;
+  org_unit_id: string | null;
   last_login_at: string | null;
   created_at: string;
 }
@@ -42,5 +44,11 @@ export const usersAdminApi = {
   },
   remove(id: string) {
     return request<void>(`/api/v1/admin/users/${id}`, { method: "DELETE" });
+  },
+  resetPassword(id: string, password: string) {
+    return request<{ ok: true }>(`/api/v1/admin/users/${id}/reset-password`, { method: "POST", body: { password } });
+  },
+  disableMfa(id: string) {
+    return request<{ ok: true }>(`/api/v1/admin/users/${id}/disable-mfa`, { method: "POST" });
   },
 };

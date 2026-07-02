@@ -9,6 +9,390 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.48.1] — 2026-07-02 — Security & stability hardening (audit follow-up)
+
+### Fixed / Security
+- **Privilege-escalation guard (users).** A company admin can no longer create
+  or update a user with a role more powerful than their own — the server now
+  rejects granting any role whose permission set isn't a subset of the caller's
+  (e.g. an admin minting a `super_admin`), returning `403 forbidden`. Super
+  admins are unaffected.
+- **Cross-tenant assignment guard.** `PUT /organization/users/:id/assignment`
+  now verifies the target user is already in the caller's company before acting,
+  so a company admin can no longer pull a foreign user into their tenant.
+- **SSRF hardening (AI providers).** A provider `base_url` pointing at a
+  loopback / private / link-local / CGNAT address (incl. the cloud metadata
+  endpoint `169.254.169.254`) is now rejected at validation — the server
+  `fetch()`es that origin from its own network position, so internal targets are
+  refused. Public DNS/hosts are still allowed.
+- **SSH shell stream crash path.** The interactive shell channel now has an
+  `error` handler; an unhandled channel error previously threw and could crash
+  the backend process, dropping *every* user's session. It now closes just the
+  affected session cleanly.
+- **Auto-reconnect correctness.** The web terminal only auto-reconnects on
+  *abnormal* closes (network drop / code 1006); deliberate server-side closes
+  (idle timeout, clean shutdown) no longer trigger a reconnect loop. A
+  mounted-guard prevents reconnect timers firing after the pane is unmounted.
+
+---
+
+## [1.48.0] — 2026-07-02 — More stable SSH terminals (keepalive + auto-reconnect)
+
+### Fixed / Changed
+- **Auto-reconnect.** If a live SSH terminal drops unexpectedly, the client now
+  **reconnects automatically** (up to 6 tries with exponential backoff, refreshing
+  the token first) instead of dropping you on the Retry screen — brief network
+  blips self-heal. It shows "connection lost — reconnecting (n)…" and resumes;
+  only after repeated failures does it show Retry.
+- **WebSocket heartbeat.** The gateway now pings the browser every 25s (and reaps
+  peers that stop answering), so idle proxies can't silently drop the socket.
+- **Hardened stats poller.** The 5s server-stats poll is now **8s, non-overlapping**
+  (skips if the previous poll is still running) and has an error handler on its
+  exec stream — preventing SSH-channel pile-ups (which can exhaust the target's
+  MaxSessions and cause mid-session drops) and an unhandled-error crash path.
+- **nginx**: `proxy_send_timeout` raised to 3600s (matching read) so idle SSH
+  WebSockets aren't cut at 60s.
+
+---
+
+## [1.47.0] — 2026-07-02 — Per-provider access control for org AI
+
+### Added
+- Each **organization AI provider** can now be limited to **specific roles
+  and/or specific users** — allow some, deny others. Administration → AI
+  Providers → the **Access** button on an org provider opens a dialog:
+  **Everyone in the company** (default) or **Only selected roles / users**
+  (role chips + a searchable user list). The summary chip shows *Everyone* or
+  *Only N roles + M users*.
+- Enforced server-side: a provider only appears in a user's picker (and is only
+  usable in chat) if it's unrestricted, or their **role** or **user id** is on
+  its allowlist. Personal providers are unaffected. Migration `014` adds
+  `allow_roles` / `allow_users`. Verified against PostgreSQL 16 (role-match,
+  user-match, and unrestricted all scoped correctly).
+
+---
+
+## [1.46.3] — 2026-07-02 — Inline AI provider selector: "AI @name:"
+
+### Added
+- Choose a specific AI inline: type **`AI @<provider>: <question>`** in the
+  terminal (e.g. `AI @Cohere: test internet speed`) to route that question to a
+  named provider instead of your default. The name matches a provider's label
+  (or type) case-insensitively. If the name isn't found, the assistant opens and
+  asks you to pick. Plain `AI: <question>` still uses your default. The first-run
+  hint now mentions the `@name` form.
+
+---
+
+## [1.46.2] — 2026-07-02 — First-run AI hint in new terminals
+
+### Added
+- When a terminal connects, users who can use AI now see a short **hint banner**
+  showing how to use the assistant — with clickable examples ("AI: show the 10
+  largest files", "AI: restart nginx", …) that run instantly, plus a pointer to
+  Tools → Ask AI. It auto-hides after ~15s, has a dismiss (×), and a **"Don't
+  show this again"** option (saved in the browser).
+
+---
+
+## [1.46.1] — 2026-07-02 — Inline "AI:" trigger in the terminal
+
+### Added
+- Type **`AI: <your question>`** on the terminal prompt and press Enter — it's
+  **intercepted before it runs in the shell** (the line is cleared) and the AI
+  assistant opens with your question. It answers using your **default** AI
+  provider automatically; if you have **no default** and several providers, it
+  **asks which AI to use** first. Suggested commands are still inserted (not
+  run) so you review them. Requires `ai:use`.
+
+---
+
+## [1.46.0] — 2026-07-02 — AI assistant + AI provider management (phase 1)
+
+### Added
+- **AI providers** (Administration/Settings → **AI Providers**). Configure AI
+  subscriptions at two scopes:
+  - **Organization** providers (permission `ai:manage`, company-scoped) shared
+    with the company's users.
+  - **Personal** providers (permission `ai:use_personal`) with your own API key.
+  Supports **Anthropic, OpenAI, Google, Azure, and custom OpenAI-compatible**
+  endpoints; pick a **default** per scope. API keys are **encrypted at rest**
+  (SecretBox) and never returned to the client — the server proxies all calls.
+- **In-terminal AI assistant** (Tools → **Ask AI**, permission `ai:use`):
+  - **Natural language → command** (with a one-line explanation),
+  - **Explain** a command, **Analyze error** output,
+  - **destructive-command warning** (⚠ DANGER) surfaced prominently,
+  - suggested commands are **inserted, not executed** — you press Enter.
+  A provider **picker** lets you choose org vs personal per request; if your
+  role can't use personal AI, only the organization's providers appear.
+- New permissions `ai:use`, `ai:manage`, `ai:use_personal` (migration `013`;
+  granted to the built-ins and auto-reconciled on startup).
+- Verified against PostgreSQL 16 (key encryption at rest, tenant + permission
+  scoping of available providers, migration up/down).
+
+---
+
+## [1.45.3] — 2026-07-01 — Fix companies always showing "off"
+
+### Fixed
+- Every company in Administration → Organization showed **"off"** (inactive)
+  and toggling Activate/Deactivate appeared to do nothing. The org API returned
+  companies in camelCase (`isActive`) while the client read snake_case
+  (`is_active`), so the active flag was always `undefined`. Companies are now
+  serialized to snake_case (like the rest of the API), so their real active
+  state shows and the toggle works.
+
+---
+
+## [1.45.2] — 2026-07-01 — Tools menu closes on any outside click
+
+### Fixed
+- Clicking outside the terminal **Tools** menu didn't close it. The click-away
+  backdrop was `position: fixed` inside a `-translate-x-1/2` transformed
+  container, so it only covered the tiny handle. Replaced it with a
+  document-level capture-phase click listener (also closes on **Esc**), so
+  clicking anywhere — including on the terminal — closes the menu.
+
+---
+
+## [1.45.1] — 2026-07-01 — Floating terminal Tools handle (top-centre, hover to reveal)
+
+### Changed
+- The terminal **Tools** menu is now a **floating handle at the top-centre** of
+  each pane. It stays **faintly tucked away** (just the grid icon, dimmed) and
+  **reveals on hover** — sliding fully into view with its label — so it doesn't
+  cover the terminal output. It stays visible while its menu is open; the menu
+  drops centred below it.
+
+---
+
+## [1.45.0] — 2026-07-01 — Auto-reconcile built-in role permissions on startup
+
+### Changed
+- The **locked built-in roles** (super_admin, admin, user, readonly, auditor)
+  are now **reconciled from the code permission catalog on every startup**
+  (`RoleService.syncBuiltins()`), so newly added permissions (e.g.
+  `companies:manage`, `org:manage`) are always granted to the right built-ins
+  without needing a separate migration each time. **Custom roles are left
+  untouched.** This "rebuilds" the permission matrix to match the latest code on
+  each deploy. Verified against PostgreSQL 16 (an out-of-date DB was corrected;
+  a custom role was preserved).
+
+---
+
+## [1.44.2] — 2026-07-01 — "Open host in new tab" always opens a new tab
+
+### Fixed
+- **Open host in new tab** did nothing when a tab for that host was already
+  open (the usual case, since the pane you clicked from is one). `openTab` now
+  takes a `force` flag so this action always opens a brand-new tab instead of
+  focusing the existing one.
+
+---
+
+## [1.44.1] — 2026-07-01 — Unified terminal "Tools" dropdown
+
+### Changed
+- Consolidated every per-pane action into a single **Tools** dropdown (grid
+  icon, top-right of each pane) instead of a row of separate icons: Save/View
+  command history, Notes, Paste, Fullscreen, and — for split panes — Split
+  left/right, Split top/bottom, Maximize/Restore, Open host in new tab, and
+  Close pane. A green dot on the Tools button indicates command history is being
+  saved. Much tidier, especially with several split panes on screen.
+
+---
+
+## [1.44.0] — 2026-07-01 — Split-view terminals (multiple panes per tab)
+
+### Added
+- **Split the terminal into multiple panes.** Each terminal tab can now be split
+  **left/right** and **top/bottom** — recursively — into as many panes as you
+  like. Hover a pane to reveal its controls (top-left):
+  - **Split ⬌ / Split ⬍** — divide the pane.
+  - **Maximize / Restore** — zoom one pane to fill the tab (others stay
+    connected in the background) and back.
+  - **Open in new tab** — open the pane's host in a fresh tab.
+  - **Close** — close the pane (closing the last one closes the tab).
+- **Draggable dividers** resize neighbouring panes; each pane re-fits itself.
+- Every pane is a full terminal with its **own History / Notes / Paste /
+  Fullscreen** toolbar, and its own live SSH session. Panes are never unmounted
+  when you split/resize/maximize, so sessions keep running. The focused pane is
+  outlined. (Split layout is per session and resets on reload.)
+
+---
+
+## [1.43.1] — 2026-07-01 — Fix "Body cannot be empty" on body-less requests
+
+### Fixed
+- The API client always sent `Content-Type: application/json`, even for requests
+  with **no body** (e.g. admin **Disable 2FA**), so Fastify rejected them with
+  *"Body cannot be empty when content-type is set to 'application/json'"*. The
+  `Content-Type` header is now only sent when there's an actual JSON body.
+
+---
+
+## [1.43.0] — 2026-07-01 — Admin: reset passwords, disable 2FA, edit accounts
+
+### Added
+- **Admins & Super Admins can reset another user's password.** Administration →
+  Users → the key icon opens a dialog to set (or generate) a new password;
+  the account is **unlocked**, failed-attempt count cleared, all the user's
+  sessions signed out, and the new password shown once to hand over securely.
+  (`POST /api/v1/admin/users/:id/reset-password`.)
+- **Admins can disable 2FA for a user** (shield icon, shown when the user has
+  2FA on) — removes their authenticator devices so they can sign in and
+  re-enroll. (`POST /api/v1/admin/users/:id/disable-mfa`.)
+- **Edit account dialog** (pencil icon): change full name, email, role, and
+  active/locked state in one place.
+- All three are **company-scoped** (a company admin can only act on users in
+  their own company; Super Admin on anyone) and **audit-logged** with the acting
+  admin recorded. Verified end-to-end against PostgreSQL 16.
+
+---
+
+## [1.42.1] — 2026-07-01 — No branding flash on load
+
+### Fixed
+- On load you could briefly see the **defaults** before the branded values
+  arrived — the terminal watermark flashed the **username** before the logo, and
+  the app name showed **"NetSphere"** before the configured name. Branding is now
+  **cached in localStorage and hydrated synchronously** on startup (name, logo,
+  favicon, login image, terminal watermark), so returning users get the branded
+  values on the first paint. The username watermark fallback no longer renders
+  until branding is known.
+
+---
+
+## [1.42.0] — 2026-07-01 — Terminal fullscreen (double-click; Esc to exit)
+
+### Added
+- **Double-click the terminal to go fullscreen**, and press **Esc** to return.
+  Uses the browser's native Fullscreen API, so Esc exiting fullscreen never
+  clashes with the shell's Esc key during normal use. A **Fullscreen / Exit**
+  button was also added to the terminal toolbar. The terminal re-fits its size
+  automatically when entering/leaving fullscreen.
+
+---
+
+## [1.41.2] — 2026-07-01 — Terminal Retry button is actually clickable
+
+### Fixed
+- The terminal **Retry / Connecting / SSH-password** overlays had no z-index, so
+  the transparent xterm layer (`z-10`) sat on top and **intercepted the clicks** —
+  the "Connection failed" card was visible but its **Retry button couldn't be
+  clicked**. The overlays are now `z-30`, above the terminal, so their buttons
+  and the password field work.
+
+---
+
+## [1.41.1] — 2026-07-01 — Terminal Retry: single deterministic reconnect (Firefox fix)
+
+### Fixed
+- The terminal **Retry** button could still appear to do nothing (notably in
+  **Firefox**). Retry refreshed the token *and* bumped the reconnect counter —
+  both were effect dependencies, so it opened **two WebSockets in quick
+  succession**; the rapid open/close race was mishandled by some browsers and
+  left the session stuck on "Connection failed". The reconnect effect now
+  depends on token *presence* (not its changing value) and reads the freshest
+  token at connect time, so **one Retry = exactly one reconnect**.
+- Bonus: a live SSH terminal is no longer torn down when the REST access token
+  auto-refreshes in the background.
+
+---
+
+## [1.41.0] — 2026-07-01 — Company isolation (phase 2): admins see only their own company
+
+### Changed (security / tenant isolation)
+- **User administration is now company-scoped.** A company admin
+  (`users:manage` without `companies:manage`) only lists, views, edits, and
+  deletes users **in their own company**; a **Super Admin** still sees and
+  manages everyone. Users created by a company admin **automatically join that
+  admin's company**.
+- **Audit log is company-scoped** the same way — a company admin sees only
+  events by users of their own company; Super Admin sees all.
+- **Share/user-directory is company-scoped** — you can only share notes with
+  people in your own organization.
+- Note: hosts, credentials, folders and tags were already strictly
+  **per-user**, so they were never visible across users/companies. Roles
+  remain global for now (per-company role catalogs are a later step).
+- Verified against PostgreSQL 16 with two companies: each company's admin sees
+  only its own users and audit events; Super Admin sees all.
+
+---
+
+## [1.40.1] — 2026-07-01 — Assign users to a company / org unit
+
+### Added
+- **Users → Organization column & Assign dialog.** From Administration → Users,
+  each row now shows the user's company; clicking it opens a dialog to assign
+  the user to a **company** (Super Admin) and an **org unit** (the company's
+  hierarchy, shown as an indented tree). Company admins can assign users to
+  units within their own company; the server scopes this on
+  `PUT /api/v1/org/users/:id/assignment`. Requires `org:manage`.
+
+### Fixed / Ops
+- Hardened migration `012` with `SET LOCAL lock_timeout`/`statement_timeout` so a
+  locked `users` table (e.g. a stalled `pg_dump` left "idle in transaction")
+  makes the migration **fail fast** instead of hanging backend startup.
+
+---
+
+## [1.40.0] — 2026-07-01 — Companies & organizational hierarchy (multi-tenant foundation, phase 1)
+
+### Added
+- **Companies (tenants).** A **Super Admin** can create and manage multiple
+  companies, each separated from the others. New permission **`companies:manage`**
+  (Super Admin only).
+- **Organizational hierarchy.** Each company owns an **arbitrary-depth tree** —
+  departments → sections → units → … (any levels). Managed on a new
+  **Administration → Organization** page: pick a company, then add/rename/delete
+  nodes in the tree. New permission **`org:manage`** (granted to super_admin and
+  admin). Deleting a node cascades to everything beneath it.
+- **Users are attached to a company** (and optionally an org unit). Migration
+  `012` adds `companies`, `org_units`, and `users.company_id` / `users.org_unit_id`,
+  seeds a **Default** company, and moves all existing users into it so nothing
+  breaks. The user payload now includes `company_id` / `org_unit_id`.
+- Backend API under `/api/v1/org` (companies CRUD, org-unit tree CRUD, and user
+  assignment). Non-super-admins are scoped to **their own company** on every
+  endpoint; the Super Admin is global.
+
+### Notes
+- This is **phase 1 (structure + scoping)**. Full data isolation of existing
+  resources (hosts, credentials, folders, notes, sessions) per company is the
+  next phase — those remain shared until then.
+- Verified end-to-end against PostgreSQL 16 (migrations up/down, repo CRUD,
+  tree cascade, user assignment).
+
+---
+
+## [1.39.4] — 2026-06-30 — Fix "Request body is too large" when saving branding
+
+### Fixed
+- Saving **Branding** with several images set (logo + favicon + login
+  background + terminal watermark) could fail with **"Request body is too
+  large"**. Images are now **downscaled and compressed in the browser** before
+  upload — PNG for the logo/favicon/watermark (keeps transparency), JPEG for the
+  login photo, SVG passed through untouched — so payloads stay small.
+- Raised the server's branding body limit and per-field caps as a safety net
+  (whole-request cap kept under the nginx limit so the clearer error wins).
+
+---
+
+## [1.39.3] — 2026-06-30 — Fix terminal Retry not reconnecting
+
+### Fixed
+- The terminal **Retry** button could appear to do nothing. Refreshing the
+  token and forcing a reconnect briefly opened two WebSockets, and the old
+  socket's late `close`/`error` events knocked the freshly-connected session
+  back into the "Connection failed" state. Socket callbacks are now scoped to
+  the current socket, so a superseded connection can't clobber the new one.
+- If the refresh token has also expired, Retry no longer hangs on
+  "connecting" — it shows **"Your session has expired. Please sign in again."**
+- A close while still connecting now surfaces an error instead of leaving the
+  overlay stuck.
+
+---
+
 ## [1.39.2] — 2026-06-30 — Slightly more visible terminal watermark
 
 ### Changed

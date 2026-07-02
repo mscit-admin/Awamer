@@ -26,6 +26,8 @@ export interface User {
   lastLoginAt: Date | null;
   lastLoginIp: string | null;
   mfaEnabled: boolean;
+  companyId: string | null;
+  orgUnitId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

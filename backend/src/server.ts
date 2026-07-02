@@ -39,6 +39,10 @@ import { makeHostRoutes, makeHistoryRoutes } from "./routes/sessionRoutes.js";
 import { makeAuditRoutes } from "./routes/audit.js";
 import { makeNetworkRoutes } from "./routes/network.js";
 import { makeBrandingRoutes } from "./routes/branding.js";
+import { makeOrganizationRoutes } from "./routes/organization.js";
+import { CompanyRepository, OrgUnitRepository } from "./repos/orgRepos.js";
+import { makeAiRoutes } from "./routes/ai.js";
+import { AiProviderRepository } from "./repos/aiRepo.js";
 import { makeCommandHistoryRoutes } from "./routes/commandHistory.js";
 import { makeBackupRoutes } from "./routes/backup.js";
 import { AppSettingsRepository } from "./repos/appSettings.js";
@@ -82,6 +86,11 @@ async function main() {
   const commands = new CommandHistoryRepository(pool);
   const notes = new NotesRepository(pool);
   const appSettings = new AppSettingsRepository(pool);
+  // Multi-tenant org structure.
+  const companies = new CompanyRepository(pool);
+  const orgUnits = new OrgUnitRepository(pool);
+  // AI providers (org + personal), keys encrypted at rest.
+  const aiProviders = new AiProviderRepository(pool, secretBox);
   // Phase 5 — server-managed SSH local tunnels (in-memory).
   const tunnels = new TunnelManager({ hosts, credentials, log });
   // Backup / restore of a user's own session data.
@@ -89,6 +98,9 @@ async function main() {
   // Custom roles — load the DB-backed RBAC resolver before serving traffic.
   const roles = new RoleRepository(pool);
   const roleService = new RoleService(roles);
+  // Reconcile locked built-in roles with the code catalog first, so the latest
+  // permissions are always granted to them without a per-permission migration.
+  await roleService.syncBuiltins();
   await roleService.reload();
 
   // Use cases
@@ -138,7 +150,7 @@ async function main() {
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });
 
   await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
-  await app.register(makeAdminRoutes({ users, register: registerUC, roleService, jwt }), { prefix: "/api/v1/admin" });
+  await app.register(makeAdminRoutes({ users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, jwt }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeSessionSettingsRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/admin/session-settings" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt }), { prefix: "/api/v1/roles" });
@@ -149,9 +161,11 @@ async function main() {
   await app.register(makeCredentialRoutes({ credentials, audit, jwt }), { prefix: "/api/v1/credentials" });
   await app.register(makeHostRoutes({ hosts, audit, jwt }), { prefix: "/api/v1/hosts" });
   await app.register(makeHistoryRoutes({ history, hosts, audit, jwt }), { prefix: "/api/v1/history" });
-  await app.register(makeAuditRoutes({ audit, jwt }), { prefix: "/api/v1/audit" });
+  await app.register(makeAuditRoutes({ audit, users, jwt }), { prefix: "/api/v1/audit" });
   await app.register(makeNetworkRoutes({ jwt }), { prefix: "/api/v1/network" });
   await app.register(makeBrandingRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/branding" });
+  await app.register(makeOrganizationRoutes({ companies, units: orgUnits, users, audit, jwt }), { prefix: "/api/v1/org" });
+  await app.register(makeAiRoutes({ ai: aiProviders, users, jwt }), { prefix: "/api/v1/ai" });
   await app.register(makeCommandHistoryRoutes({ commands, jwt }), { prefix: "/api/v1/command-history" });
   await app.register(makeNotesRoutes({ notes, jwt }), { prefix: "/api/v1/notes" });
   await app.register(makeBackupRoutes({ backup, jwt }), { prefix: "/api/v1/backup" });

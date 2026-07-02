@@ -50,8 +50,11 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
     });
 
     // ---------- User directory (minimal, for share pickers) -------------
-    app.get("/users/directory", async (_req, reply) => {
-      const { users } = await deps.users.list(500, 0);
+    // Scoped to the caller's company so you can only share with people in your
+    // own organization (tenant isolation).
+    app.get("/users/directory", async (req, reply) => {
+      const me = await deps.users.getById(req.auth!.sub);
+      const { users } = await deps.users.list(500, 0, me.companyId);
       return reply.send({
         data: users.map((u) => ({ id: u.id, username: u.username, full_name: u.fullName })),
       });

@@ -2,8 +2,9 @@ import { useNavigate } from "react-router-dom";
 import { X, Plus, Server } from "lucide-react";
 
 import { useTerminalTabs } from "../store/terminalTabsStore";
+import { useSplit } from "../store/splitStore";
 import { TerminalPane } from "./TerminalPane";
-import { WebTerminalPane } from "./WebTerminalPane";
+import { SplitLayout } from "./SplitLayout";
 import { isTauri } from "@/shared/lib/tauri";
 
 /**
@@ -31,6 +32,7 @@ export function TerminalWorkspace() {
   const activeTabId = useTerminalTabs(s => s.activeTabId);
   const setActive = useTerminalTabs(s => s.setActive);
   const closeTab = useTerminalTabs(s => s.closeTab);
+  const removeSplit = useSplit(s => s.removeTab);
 
   if (tabs.length === 0) {
     return <EmptyState />;
@@ -56,6 +58,7 @@ export function TerminalWorkspace() {
             <span
               onClick={(e) => {
                 e.stopPropagation();
+                removeSplit(tab.tabId);
                 closeTab(tab.tabId);
               }}
               className="opacity-0 group-hover:opacity-100 hover:bg-bg p-0.5 rounded shrink-0"
@@ -75,7 +78,7 @@ export function TerminalWorkspace() {
             className="absolute inset-0"
             style={{ display: tab.tabId === activeTabId ? "block" : "none" }}
           >
-            {isTauri ? <TerminalPane tab={tab} /> : <WebTerminalPane tab={tab} />}
+            {isTauri ? <TerminalPane tab={tab} /> : <SplitLayout tab={tab} />}
           </div>
         ))}
       </div>

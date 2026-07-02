@@ -159,6 +159,7 @@ const VALID_ACTIONS = new Set([
   "host_create", "host_update", "host_delete",
   "folder_create", "folder_update", "folder_delete",
   "tag_create", "tag_update", "tag_delete",
+  "company_create", "company_delete", "user_assign_org",
 ]);
 
 function mapAction(action: string, success: boolean): string {
@@ -194,7 +195,7 @@ export class AuditRepository {
     }
   }
 
-  async list(opts: { limit?: number; offset?: number; action?: string; success?: boolean; userId?: string } = {}): Promise<{ entries: AuditLogEntry[]; total: number }> {
+  async list(opts: { limit?: number; offset?: number; action?: string; success?: boolean; userId?: string; companyId?: string } = {}): Promise<{ entries: AuditLogEntry[]; total: number }> {
     const limit = Math.max(1, Math.min(200, opts.limit ?? 50));
     const offset = Math.max(0, opts.offset ?? 0);
 
@@ -203,6 +204,8 @@ export class AuditRepository {
     if (opts.action) { params.push(opts.action); where.push(`a.action = $${params.length}`); }
     if (opts.success !== undefined) { params.push(opts.success); where.push(`a.success = $${params.length}`); }
     if (opts.userId) { params.push(opts.userId); where.push(`a.user_id = $${params.length}`); }
+    // Tenant scope: only events by users of this company (isolation).
+    if (opts.companyId) { params.push(opts.companyId); where.push(`u.company_id = $${params.length}`); }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const countParams = [...params];
@@ -211,7 +214,7 @@ export class AuditRepository {
     const op = `$${listParams.length}`;
 
     const countQ = this.pool.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM audit_logs a ${whereSql}`,
+      `SELECT COUNT(*)::text AS count FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id ${whereSql}`,
       countParams,
     );
     const listQ = this.pool.query<AuditLogRow>(

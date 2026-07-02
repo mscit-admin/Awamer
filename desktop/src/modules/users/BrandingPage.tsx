@@ -8,8 +8,44 @@ import { brandingApi } from "./brandingApi";
 import { useBranding } from "@/shared/branding";
 import { ApiError } from "@/shared/lib/api";
 
-const MAX_BYTES = 500 * 1024; // ~500 KB for logo/favicon
-const MAX_LOGIN_BYTES = 2.5 * 1024 * 1024; // larger budget for the login background
+// We accept generous source files and downscale/compress them in the browser
+// before upload, so the saved payload stays small (fixes "request body too
+// large" when several images are set at once).
+const MAX_SOURCE_BYTES = 20 * 1024 * 1024; // reject only absurdly huge files
+
+/**
+ * Load a file, downscale it to fit `maxDim`, and re-encode. PNG keeps
+ * transparency (logo / favicon / watermark); JPEG is far smaller for photos
+ * (login background). SVG is returned untouched (it's tiny and vector).
+ */
+function compressImage(file: File, maxDim: number, mime: "image/png" | "image/jpeg", quality = 0.85): Promise<string> {
+  if (file.type === "image/svg+xml") {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = () => reject(new Error("could not read image"));
+      r.readAsDataURL(file);
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height || 1));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { reject(new Error("canvas unavailable")); return; }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL(mime, quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("could not read image")); };
+    img.src = url;
+  });
+}
 
 export function BrandingPage() {
   const apply = useBranding((s) => s.apply);
@@ -34,38 +70,30 @@ export function BrandingPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  function readImage(file: File | undefined, set: (v: string) => void, max = MAX_BYTES) {
+  async function pickImage(
+    e: React.ChangeEvent<HTMLInputElement>,
+    set: (v: string) => void,
+    maxDim: number,
+    mime: "image/png" | "image/jpeg",
+  ) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) { setError("Please choose an image file."); return; }
-    if (file.size > max) { setError(`Image too large (max ${Math.round(max / 1024)} KB).`); return; }
-    const reader = new FileReader();
-    reader.onload = () => { set(reader.result as string); setError(null); };
-    reader.readAsDataURL(file);
+    if (file.size > MAX_SOURCE_BYTES) { setError(`Image too large (max ${Math.round(MAX_SOURCE_BYTES / 1024 / 1024)} MB).`); return; }
+    try {
+      set(await compressImage(file, maxDim, mime));
+      setError(null);
+    } catch {
+      setError("Could not read that image. Try a PNG or JPG.");
+    }
   }
 
-  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    readImage(file, setLogo);
-  }
-
-  function onPickFavicon(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    readImage(file, setFavicon);
-  }
-
-  function onPickLogin(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    readImage(file, setLoginImage, MAX_LOGIN_BYTES);
-  }
-
-  function onPickWatermark(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    readImage(file, setTerminalWatermark, MAX_LOGIN_BYTES);
-  }
+  // Logo / favicon / watermark keep transparency (PNG); the login photo uses JPEG.
+  const onPickFile = (e: React.ChangeEvent<HTMLInputElement>) => void pickImage(e, setLogo, 512, "image/png");
+  const onPickFavicon = (e: React.ChangeEvent<HTMLInputElement>) => void pickImage(e, setFavicon, 128, "image/png");
+  const onPickLogin = (e: React.ChangeEvent<HTMLInputElement>) => void pickImage(e, setLoginImage, 1920, "image/jpeg");
+  const onPickWatermark = (e: React.ChangeEvent<HTMLInputElement>) => void pickImage(e, setTerminalWatermark, 640, "image/png");
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -130,7 +158,7 @@ export function BrandingPage() {
               </div>
               <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickFile} />
             </div>
-            <p className="text-2xs text-fg-muted mt-2">PNG/SVG/JPG, up to {Math.round(MAX_BYTES / 1024)} KB. Square images look best.</p>
+            <p className="text-2xs text-fg-muted mt-2">PNG/SVG/JPG. Large images are optimized automatically. Square images look best.</p>
           </div>
 
           <div>
@@ -172,7 +200,7 @@ export function BrandingPage() {
               )}
               <input ref={loginRef} type="file" accept="image/*" hidden onChange={onPickLogin} />
             </div>
-            <p className="text-2xs text-fg-muted mt-2">Shown behind the sign-in card (landscape, up to {Math.round(MAX_LOGIN_BYTES / 1024 / 1024 * 10) / 10} MB).</p>
+            <p className="text-2xs text-fg-muted mt-2">Shown behind the sign-in card (landscape). Large images are optimized automatically.</p>
           </div>
 
           <div>
@@ -195,7 +223,7 @@ export function BrandingPage() {
             </div>
             <p className="text-2xs text-fg-muted mt-2">
               Faint image shown in the centre of the terminal background. If empty, the logo is used; if there's no
-              logo either, the username is shown. Up to {Math.round(MAX_LOGIN_BYTES / 1024 / 1024 * 10) / 10} MB.
+              logo either, the username is shown. Large images are optimized automatically.
             </p>
           </div>
 

@@ -23,6 +23,8 @@ import {
   Moon,
   Palette,
   Loader2,
+  Building2,
+  Bot,
 } from "lucide-react";
 import { useState, useEffect, lazy, Suspense } from "react";
 import { Logo, useAppName } from "@/shared/branding";
@@ -64,6 +66,7 @@ const PRIMARY_NAV: NavItem[] = [
 ];
 
 const SECONDARY_NAV: NavItem[] = [
+  { to: "/ai-providers", label: "AI Providers", icon: <Bot className="size-4" />, available: true, perm: "ai:use" },
   { to: "/backup", label: "Backup & Restore", icon: <DatabaseBackup className="size-4" />, available: true, perm: "backup:manage" },
   { to: "/settings", label: "Settings", icon: <Settings className="size-4" />, available: true },
   { to: "/settings/security/mfa", label: "Security", icon: <Shield className="size-4" />, available: true },
@@ -71,6 +74,7 @@ const SECONDARY_NAV: NavItem[] = [
 
 // Shown only to admin / super_admin.
 const ADMIN_NAV: NavItem[] = [
+  { to: "/organization", label: "Organization", icon: <Building2 className="size-4" />, available: true, perm: "org:manage" },
   { to: "/users", label: "Users", icon: <Users className="size-4" />, available: true, perm: "users:manage" },
   { to: "/roles", label: "Roles & Permissions", icon: <Shield className="size-4" />, available: true, perm: "users:manage" },
 ];

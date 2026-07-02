@@ -10,6 +10,8 @@ export interface RegisterInput {
   password: string;
   fullName?: string | null;
   role?: string;
+  companyId?: string | null;
+  orgUnitId?: string | null;
 }
 
 export class RegisterUseCase {
@@ -33,6 +35,8 @@ export class RegisterUseCase {
       passwordHash,
       fullName: input.fullName?.trim() ?? null,
       role,
+      companyId: input.companyId ?? null,
+      orgUnitId: input.orgUnitId ?? null,
     });
     await this.audit.log({
       userId: user.id, action: "user_create", success: true,
