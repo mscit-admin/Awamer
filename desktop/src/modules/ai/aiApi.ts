@@ -13,6 +13,8 @@ export interface AiProvider {
   is_default: boolean;
   is_active: boolean;
   has_key: boolean;
+  allow_roles: string[];
+  allow_users: string[];
 }
 
 export interface CreateProviderInput {
@@ -23,6 +25,8 @@ export interface CreateProviderInput {
   api_key: string;
   base_url?: string | null;
   is_default?: boolean;
+  allow_roles?: string[];
+  allow_users?: string[];
 }
 
 export const aiApi = {
@@ -35,7 +39,7 @@ export const aiApi = {
   create(input: CreateProviderInput) {
     return request<{ provider: AiProvider }>("/api/v1/ai/providers", { method: "POST", body: input }).then((r) => r.provider);
   },
-  update(id: string, patch: Partial<{ label: string; model: string; api_key: string; base_url: string | null; is_active: boolean; is_default: boolean }>) {
+  update(id: string, patch: Partial<{ label: string; model: string; api_key: string; base_url: string | null; is_active: boolean; is_default: boolean; allow_roles: string[]; allow_users: string[] }>) {
     return request<{ provider: AiProvider }>(`/api/v1/ai/providers/${id}`, { method: "PUT", body: patch }).then((r) => r.provider);
   },
   remove(id: string) {

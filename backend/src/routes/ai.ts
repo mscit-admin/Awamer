@@ -32,6 +32,7 @@ const err = (reply: FastifyReply, code: number, k: string, m: string) => reply.c
 const view = (p: AiProvider) => ({
   id: p.id, scope: p.scope, provider: p.provider, label: p.label, model: p.model,
   base_url: p.baseUrl, is_default: p.isDefault, is_active: p.isActive, has_key: p.hasKey,
+  allow_roles: p.allowRoles, allow_users: p.allowUsers,
 });
 
 // System prompts per assist mode.
@@ -58,6 +59,7 @@ export function makeAiRoutes(deps: Deps): FastifyPluginAsync {
       return {
         userId: me.id,
         companyId: me.companyId,
+        role: req.auth!.role,
         canManage: can(req.auth!.role, "ai:manage"),
         canPersonal: can(req.auth!.role, "ai:use_personal"),
         canUse: can(req.auth!.role, "ai:use"),
@@ -76,7 +78,7 @@ export function makeAiRoutes(deps: Deps): FastifyPluginAsync {
     app.get("/available", async (req, reply) => {
       const s = await scope(req);
       if (!s.canUse) return reply.send({ providers: [] });
-      const providers = await deps.ai.available(s.companyId, s.userId, s.canPersonal);
+      const providers = await deps.ai.available(s.companyId, s.userId, s.role, s.canPersonal);
       return reply.send({ providers: providers.map(view) });
     });
 
@@ -88,6 +90,8 @@ export function makeAiRoutes(deps: Deps): FastifyPluginAsync {
       api_key: z.string().min(1).max(400),
       base_url: z.string().url().max(300).nullable().optional(),
       is_default: z.boolean().optional(),
+      allow_roles: z.array(z.string().max(48)).max(30).optional(),
+      allow_users: z.array(z.string().uuid()).max(500).optional(),
     });
 
     app.post("/providers", async (req, reply) => {
@@ -110,6 +114,9 @@ export function makeAiRoutes(deps: Deps): FastifyPluginAsync {
         baseUrl: p.data.base_url ?? null,
         apiKey: p.data.api_key,
         isDefault: p.data.is_default ?? false,
+        // Allowlists only apply to org providers.
+        allowRoles: p.data.scope === "org" ? (p.data.allow_roles ?? []) : [],
+        allowUsers: p.data.scope === "org" ? (p.data.allow_users ?? []) : [],
       });
       return reply.code(201).send({ provider: view(created) });
     });
@@ -134,15 +141,21 @@ export function makeAiRoutes(deps: Deps): FastifyPluginAsync {
       base_url: z.string().url().max(300).nullable().optional(),
       is_active: z.boolean().optional(),
       is_default: z.boolean().optional(),
+      allow_roles: z.array(z.string().max(48)).max(30).optional(),
+      allow_users: z.array(z.string().uuid()).max(500).optional(),
     });
 
     app.put("/providers/:id", async (req, reply) => {
-      if (!(await ownGuard(req, reply))) return;
+      const prov = await ownGuard(req, reply);
+      if (!prov) return;
       const p = updateSchema.safeParse(req.body);
       if (!p.success) return err(reply, 400, "validation_failed", p.error.message);
       const updated = await deps.ai.update((req.params as { id: string }).id, {
         label: p.data.label, model: p.data.model, apiKey: p.data.api_key,
         baseUrl: p.data.base_url, isActive: p.data.is_active, isDefault: p.data.is_default,
+        // Allowlists apply to org providers only.
+        allowRoles: prov.scope === "org" ? p.data.allow_roles : undefined,
+        allowUsers: prov.scope === "org" ? p.data.allow_users : undefined,
       });
       return reply.send({ provider: updated ? view(updated) : null });
     });
@@ -166,7 +179,7 @@ export function makeAiRoutes(deps: Deps): FastifyPluginAsync {
       if (!p.success) return err(reply, 400, "validation_failed", p.error.message);
       const s = await scope(req);
       // The provider must be in the caller's available set (tenant + permission scoped).
-      const usable = await deps.ai.available(s.companyId, s.userId, s.canPersonal);
+      const usable = await deps.ai.available(s.companyId, s.userId, s.role, s.canPersonal);
       const chosen = usable.find((x) => x.id === p.data.provider_id);
       if (!chosen) return err(reply, 403, "forbidden", "that AI provider is not available to you");
       const apiKey = await deps.ai.getApiKey(chosen.id);

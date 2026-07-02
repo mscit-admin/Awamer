@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.47.0] — 2026-07-02 — Per-provider access control for org AI
+
+### Added
+- Each **organization AI provider** can now be limited to **specific roles
+  and/or specific users** — allow some, deny others. Administration → AI
+  Providers → the **Access** button on an org provider opens a dialog:
+  **Everyone in the company** (default) or **Only selected roles / users**
+  (role chips + a searchable user list). The summary chip shows *Everyone* or
+  *Only N roles + M users*.
+- Enforced server-side: a provider only appears in a user's picker (and is only
+  usable in chat) if it's unrestricted, or their **role** or **user id** is on
+  its allowlist. Personal providers are unaffected. Migration `014` adds
+  `allow_roles` / `allow_users`. Verified against PostgreSQL 16 (role-match,
+  user-match, and unrestricted all scoped correctly).
+
+---
+
 ## [1.46.3] — 2026-07-02 — Inline AI provider selector: "AI @name:"
 
 ### Added
