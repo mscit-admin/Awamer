@@ -11,7 +11,7 @@
  *   recv: binary = output, text JSON = {type:"status"|"error",...}
  */
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { AlertCircle, Loader2, Lock, Power, History, Check, StickyNote, ClipboardPaste, Maximize2, Minimize2, LayoutGrid, SplitSquareHorizontal, SplitSquareVertical, ExternalLink, X } from "lucide-react";
+import { AlertCircle, Loader2, Lock, Power, History, Check, StickyNote, ClipboardPaste, Maximize2, Minimize2, LayoutGrid, SplitSquareHorizontal, SplitSquareVertical, ExternalLink, X, Bot } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -25,6 +25,7 @@ import { useTerminalPaste } from "../store/terminalPastePref";
 import { commandHistoryApi } from "../api/commandHistoryApi";
 import { CommandHistoryPanel } from "./CommandHistoryPanel";
 import { NotesPanel } from "@/modules/notes/NotesPanel";
+import { AiAssistPanel } from "@/modules/ai/AiAssistPanel";
 import { useCan } from "@/shared/lib/permissions";
 import { useBranding } from "@/shared/branding";
 
@@ -178,6 +179,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const saveHistory = useCommandHistoryPref((s) => s.saveHistory);
   const setSaveHistory = useCommandHistoryPref((s) => s.setSaveHistory);
   const canHistory = useCan("command_history:read");
+  const canAi = useCan("ai:use");
   const bottomGapPx = useTerminalUi((s) => s.bottomGapPx);
   const quickPasteButton = useTerminalPaste((s) => s.quickButton);
   const editPasteButton = useTerminalPaste((s) => s.editButton);
@@ -216,6 +218,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteDraft, setPasteDraft] = useState("");
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [showAi, setShowAi] = useState(false);
   const toolsRef = useRef<HTMLDivElement | null>(null);
 
   const [phase, setPhase] = useState<"connecting" | "connected" | "error" | "need_password">("connecting");
@@ -566,6 +569,10 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
                 )}
                 <ToolItem icon={<StickyNote className="size-3.5" />} label="Notes"
                   onClick={() => { setShowNotes(true); setToolsOpen(false); }} />
+                {canAi && (
+                  <ToolItem icon={<Bot className="size-3.5" />} label="Ask AI"
+                    onClick={() => { setShowAi(true); setToolsOpen(false); }} />
+                )}
                 <ToolItem icon={<ClipboardPaste className="size-3.5" />} label="Paste…"
                   onClick={() => { void openPasteDialog(); setToolsOpen(false); }} />
                 <ToolItem icon={isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
@@ -607,6 +614,14 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
 
       {showNotes && (
         <NotesPanel hostId={tab.hostId} hostLabel={tab.label} onClose={() => setShowNotes(false)} />
+      )}
+
+      {showAi && (
+        <AiAssistPanel
+          hostLabel={tab.label}
+          onInsert={(cmd) => { insertCommand(cmd); setShowAi(false); }}
+          onClose={() => setShowAi(false)}
+        />
       )}
 
       {pasteOpen && (

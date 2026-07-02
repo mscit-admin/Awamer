@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.46.0] — 2026-07-02 — AI assistant + AI provider management (phase 1)
+
+### Added
+- **AI providers** (Administration/Settings → **AI Providers**). Configure AI
+  subscriptions at two scopes:
+  - **Organization** providers (permission `ai:manage`, company-scoped) shared
+    with the company's users.
+  - **Personal** providers (permission `ai:use_personal`) with your own API key.
+  Supports **Anthropic, OpenAI, Google, Azure, and custom OpenAI-compatible**
+  endpoints; pick a **default** per scope. API keys are **encrypted at rest**
+  (SecretBox) and never returned to the client — the server proxies all calls.
+- **In-terminal AI assistant** (Tools → **Ask AI**, permission `ai:use`):
+  - **Natural language → command** (with a one-line explanation),
+  - **Explain** a command, **Analyze error** output,
+  - **destructive-command warning** (⚠ DANGER) surfaced prominently,
+  - suggested commands are **inserted, not executed** — you press Enter.
+  A provider **picker** lets you choose org vs personal per request; if your
+  role can't use personal AI, only the organization's providers appear.
+- New permissions `ai:use`, `ai:manage`, `ai:use_personal` (migration `013`;
+  granted to the built-ins and auto-reconciled on startup).
+- Verified against PostgreSQL 16 (key encryption at rest, tenant + permission
+  scoping of available providers, migration up/down).
+
+---
+
 ## [1.45.3] — 2026-07-01 — Fix companies always showing "off"
 
 ### Fixed

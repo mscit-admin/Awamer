@@ -24,6 +24,9 @@ export const PERMISSIONS = [
   "audit:read",         // view audit logs
   "companies:manage",   // super-admin: create/manage companies (tenants)
   "org:manage",         // manage the organizational hierarchy within a company
+  "ai:use",             // use AI assistance in the terminal
+  "ai:manage",          // configure the organization's AI providers
+  "ai:use_personal",    // add / use personal AI provider subscriptions
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -40,6 +43,9 @@ export const PERMISSION_META: Record<Permission, { label: string; description: s
   "audit:read":         { label: "View audit log", description: "Read the audit log" },
   "companies:manage":   { label: "Manage companies", description: "Create and manage companies (tenants) — Super Admin only" },
   "org:manage":         { label: "Manage organization", description: "Manage the organizational hierarchy (departments, sections, units) within a company" },
+  "ai:use":             { label: "Use AI assistant", description: "Use AI assistance (suggest, explain, analyze) in the terminal" },
+  "ai:manage":          { label: "Manage org AI providers", description: "Configure the organization's shared AI provider subscriptions" },
+  "ai:use_personal":    { label: "Use personal AI", description: "Add and use personal AI provider subscriptions with your own API keys" },
 };
 
 const ALL: Permission[] = [...PERMISSIONS];
@@ -52,7 +58,7 @@ export const BUILTIN_ROLES: { key: string; name: string; description: string; pe
   { key: "super_admin", name: "Super admin", description: "Full access to everything.", permissions: ALL },
   { key: "admin",       name: "Admin",       description: "Full access within their company.", permissions: ADMIN_ALL },
   { key: "user",        name: "User",        description: "Self-service over own resources; no user administration.",
-    permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage", "command_history:read"] },
+    permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage", "command_history:read", "ai:use", "ai:use_personal"] },
   { key: "readonly",    name: "Read-only",   description: "Browse the inventory; cannot modify, connect, or reveal secrets.", permissions: [] },
   { key: "auditor",     name: "Auditor",     description: "Read-only plus access to audit logs.", permissions: ["audit:read"] },
 ];

@@ -41,6 +41,8 @@ import { makeNetworkRoutes } from "./routes/network.js";
 import { makeBrandingRoutes } from "./routes/branding.js";
 import { makeOrganizationRoutes } from "./routes/organization.js";
 import { CompanyRepository, OrgUnitRepository } from "./repos/orgRepos.js";
+import { makeAiRoutes } from "./routes/ai.js";
+import { AiProviderRepository } from "./repos/aiRepo.js";
 import { makeCommandHistoryRoutes } from "./routes/commandHistory.js";
 import { makeBackupRoutes } from "./routes/backup.js";
 import { AppSettingsRepository } from "./repos/appSettings.js";
@@ -87,6 +89,8 @@ async function main() {
   // Multi-tenant org structure.
   const companies = new CompanyRepository(pool);
   const orgUnits = new OrgUnitRepository(pool);
+  // AI providers (org + personal), keys encrypted at rest.
+  const aiProviders = new AiProviderRepository(pool, secretBox);
   // Phase 5 — server-managed SSH local tunnels (in-memory).
   const tunnels = new TunnelManager({ hosts, credentials, log });
   // Backup / restore of a user's own session data.
@@ -161,6 +165,7 @@ async function main() {
   await app.register(makeNetworkRoutes({ jwt }), { prefix: "/api/v1/network" });
   await app.register(makeBrandingRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/branding" });
   await app.register(makeOrganizationRoutes({ companies, units: orgUnits, users, audit, jwt }), { prefix: "/api/v1/org" });
+  await app.register(makeAiRoutes({ ai: aiProviders, users, jwt }), { prefix: "/api/v1/ai" });
   await app.register(makeCommandHistoryRoutes({ commands, jwt }), { prefix: "/api/v1/command-history" });
   await app.register(makeNotesRoutes({ notes, jwt }), { prefix: "/api/v1/notes" });
   await app.register(makeBackupRoutes({ backup, jwt }), { prefix: "/api/v1/backup" });

@@ -26,6 +26,7 @@ const SettingsPage = lz(() => import("@/modules/settings/SettingsPage"), "Settin
 const UsersPage = lz(() => import("@/modules/users/UsersPage"), "UsersPage");
 const RolesPage = lz(() => import("@/modules/users/RolesPage"), "RolesPage");
 const OrganizationPage = lz(() => import("@/modules/org/OrganizationPage"), "OrganizationPage");
+const AiProvidersPage = lz(() => import("@/modules/ai/AiProvidersPage"), "AiProvidersPage");
 const AuditPage = lz(() => import("@/modules/users/AuditPage"), "AuditPage");
 const BrandingPage = lz(() => import("@/modules/users/BrandingPage"), "BrandingPage");
 const SmtpPage = lz(() => import("@/modules/users/SmtpPage"), "SmtpPage");
@@ -115,6 +116,7 @@ export default function App() {
           <Route path="/users" element={<UsersPage />} />
           <Route path="/roles" element={<RolesPage />} />
           <Route path="/organization" element={<OrganizationPage />} />
+          <Route path="/ai-providers" element={<AiProvidersPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/branding" element={<BrandingPage />} />
           <Route path="/smtp" element={<SmtpPage />} />

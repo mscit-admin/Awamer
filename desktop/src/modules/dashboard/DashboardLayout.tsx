@@ -24,6 +24,7 @@ import {
   Palette,
   Loader2,
   Building2,
+  Bot,
 } from "lucide-react";
 import { useState, useEffect, lazy, Suspense } from "react";
 import { Logo, useAppName } from "@/shared/branding";
@@ -65,6 +66,7 @@ const PRIMARY_NAV: NavItem[] = [
 ];
 
 const SECONDARY_NAV: NavItem[] = [
+  { to: "/ai-providers", label: "AI Providers", icon: <Bot className="size-4" />, available: true, perm: "ai:use" },
   { to: "/backup", label: "Backup & Restore", icon: <DatabaseBackup className="size-4" />, available: true, perm: "backup:manage" },
   { to: "/settings", label: "Settings", icon: <Settings className="size-4" />, available: true },
   { to: "/settings/security/mfa", label: "Security", icon: <Shield className="size-4" />, available: true },
