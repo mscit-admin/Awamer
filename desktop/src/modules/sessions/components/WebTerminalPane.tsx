@@ -229,6 +229,9 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const [toolsOpen, setToolsOpen] = useState(false);
   const [showAi, setShowAi] = useState(false);
   const [aiQuestion, setAiQuestion] = useState<string | null>(null);
+  const [showAiHint, setShowAiHint] = useState(false);
+  const aiHintOffRef = useRef(false);
+  useEffect(() => { try { aiHintOffRef.current = localStorage.getItem("netsphere.ai-hint-off") === "1"; } catch { /* ignore */ } }, []);
   const toolsRef = useRef<HTMLDivElement | null>(null);
   // Stable opener used by the inline "AI:" interceptor (avoids re-subscribing onData).
   useEffect(() => { aiTriggerRef.current = (q: string) => { setAiQuestion(q); setShowAi(true); }; }, []);
@@ -405,6 +408,11 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
             setConnectedAt((t) => t ?? Date.now());
             updateTab(tab.tabId, { phase: "connected" });
             ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+            // First-run AI hint: show how to use the assistant on each new terminal.
+            if (canAiRef.current && !aiHintOffRef.current) {
+              setShowAiHint(true);
+              setTimeout(() => setShowAiHint(false), 15000);
+            }
           } else if (msg.type === "stats" && msg.data) {
             setStats(msg.data as ServerStats);
           } else if (msg.type === "error") {
@@ -568,6 +576,30 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
         </div>
       )}
       <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2 pb-2" />
+
+      {showAiHint && phase === "connected" && canAi && (
+        <div className="absolute top-9 left-1/2 -translate-x-1/2 z-30 w-[min(92%,34rem)] rounded-lg border border-accent/30 bg-bg/95 backdrop-blur shadow-xl px-4 py-3 text-xs animate-fade-in">
+          <div className="flex items-start gap-2">
+            <Bot className="size-4 text-accent shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-fg mb-1">AI assistant is available here</div>
+              <div className="text-fg-muted mb-2">Type <span className="font-mono text-accent">AI:</span> then what you want and press Enter. Try one:</div>
+              <div className="flex flex-wrap gap-1.5">
+                {["show the 10 largest files", "restart nginx", "why is my disk full", "open ports and who is listening"].map((ex) => (
+                  <button key={ex} onClick={() => { setAiQuestion(ex); setShowAi(true); setShowAiHint(false); }}
+                    className="px-2 py-1 rounded bg-bg-elevated border border-border font-mono text-2xs text-fg-muted hover:border-accent/40 hover:text-accent transition-colors">
+                    AI: {ex}
+                  </button>
+                ))}
+              </div>
+              <div className="text-2xs text-fg-muted mt-2">Or open <span className="font-medium">Tools → Ask AI</span>. Suggested commands are inserted, never run.</div>
+              <button onClick={() => { try { localStorage.setItem("netsphere.ai-hint-off", "1"); } catch { /* ignore */ } aiHintOffRef.current = true; setShowAiHint(false); }}
+                className="mt-2 text-2xs text-fg-subtle hover:text-fg-muted underline">Don't show this again</button>
+            </div>
+            <button onClick={() => setShowAiHint(false)} title="Dismiss" className="text-fg-muted hover:text-fg shrink-0"><X className="size-3.5" /></button>
+          </div>
+        </div>
+      )}
 
       {(phase === "connected" || phase === "error") && (
         // Floating tools handle: tucked at the top-centre, faint until you hover

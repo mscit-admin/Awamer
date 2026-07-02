@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.46.2] — 2026-07-02 — First-run AI hint in new terminals
+
+### Added
+- When a terminal connects, users who can use AI now see a short **hint banner**
+  showing how to use the assistant — with clickable examples ("AI: show the 10
+  largest files", "AI: restart nginx", …) that run instantly, plus a pointer to
+  Tools → Ask AI. It auto-hides after ~15s, has a dismiss (×), and a **"Don't
+  show this again"** option (saved in the browser).
+
+---
+
 ## [1.46.1] — 2026-07-02 — Inline "AI:" trigger in the terminal
 
 ### Added
