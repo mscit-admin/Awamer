@@ -1,16 +1,28 @@
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   type FolderRepository,
   type TagRepository,
   type CredentialRepository,
 } from "../repos/sessionRepos.js";
-import { CREDENTIAL_TYPES, type Folder, toCredentialPublic } from "../domain/session.js";
+import type { CredentialTotpRepository, CredentialAttachmentRepository } from "../repos/vaultRepos.js";
+import { CREDENTIAL_TYPES, type Folder, toCredentialPublic, serializeAttachmentMeta } from "../domain/session.js";
+import { parseTotpInput } from "../domain/totp.js";
 import { DomainError } from "../domain/index.js";
 import type { AuditRepository } from "../repos/otherRepos.js";
 import { makeAuthMiddleware, requireWrite } from "../middleware/auth.js";
 import { can } from "../domain/permissions.js";
 import type { JwtService } from "../jwt/index.js";
+
+/** Max attachment size (plaintext). Mirrored in the multipart plugin limits. */
+export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+
+/** Strip path separators / control chars from an uploaded filename. */
+function sanitizeFilename(name: string): string {
+  const base = name.replace(/[\\/]/g, "_").replace(/[\u0000-\u001f]/g, "").trim();
+  return (base || "attachment").slice(0, 255);
+}
 
 // =====================================================================
 // Folder routes
@@ -223,6 +235,8 @@ export function makeTagRoutes(deps: TagDeps): FastifyPluginAsync {
 
 interface CredDeps {
   credentials: CredentialRepository;
+  totp: CredentialTotpRepository;
+  attachments: CredentialAttachmentRepository;
   audit: AuditRepository;
   jwt: JwtService;
 }
@@ -366,6 +380,165 @@ export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
       try {
         await deps.credentials.delete(req.auth!.sub, id);
         await deps.audit.log({ userId: req.auth!.sub, action: "credential_delete", success: true, resourceType: "credential", resourceId: id });
+        return reply.code(204).send();
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
+
+    // =================================================================
+    // TOTP sub-resource (vault Phase 2). The rolling code is computed on
+    // the client; the server only stores/reveals the seed.
+    // =================================================================
+
+    function serializeTotp(cfg: { algorithm: string; digits: number; period: number; updatedAt: Date }) {
+      return { enabled: true, algorithm: cfg.algorithm, digits: cfg.digits, period: cfg.period, updated_at: cfg.updatedAt };
+    }
+
+    /** GET /:id/totp — non-secret config; ?reveal=true adds the base32 seed. */
+    app.get("/:id/totp", async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const reveal = (req.query as { reveal?: string }).reveal === "true";
+      if (reveal && !can(req.auth!.role, "credentials:reveal")) {
+        return reply.code(403).send({ error: { code: "forbidden", message: "your role cannot reveal secrets" } });
+      }
+      try {
+        if (reveal) {
+          const full = await deps.totp.reveal(req.auth!.sub, id);
+          await deps.audit.log({ userId: req.auth!.sub, action: "credential_totp_read", success: true, resourceType: "credential", resourceId: id });
+          return reply.send({ ...serializeTotp(full), secret: full.secret });
+        }
+        const cfg = await deps.totp.getConfig(req.auth!.sub, id);
+        return reply.send(cfg ? serializeTotp(cfg) : { enabled: false });
+      } catch (e) {
+        if (e instanceof DomainError) {
+          return reply.code(e.code === "credential_not_found" ? 404 : e.code === "totp_not_found" ? 404 : 400)
+            .send({ error: { code: e.code, message: e.message } });
+        }
+        throw e;
+      }
+    });
+
+    const totpSchema = z.object({
+      secret: z.string().max(512).optional(),
+      otpauth_uri: z.string().max(2048).optional(),
+      algorithm: z.string().max(10).optional(),
+      digits: z.number().int().optional(),
+      period: z.number().int().optional(),
+    });
+
+    /** PUT /:id/totp — set/replace the OTP seed. */
+    app.put("/:id/totp", async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const parsed = totpSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
+      try {
+        const p = parseTotpInput({
+          secret: parsed.data.secret,
+          otpauthUri: parsed.data.otpauth_uri,
+          algorithm: parsed.data.algorithm,
+          digits: parsed.data.digits,
+          period: parsed.data.period,
+        });
+        const cfg = await deps.totp.set(req.auth!.sub, id, p);
+        await deps.audit.log({ userId: req.auth!.sub, action: "credential_totp_set", success: true, resourceType: "credential", resourceId: id });
+        return reply.send(serializeTotp(cfg));
+      } catch (e) {
+        if (e instanceof DomainError) {
+          return reply.code(e.code === "credential_not_found" ? 404 : e.code === "invalid_totp_secret" ? 400 : 400)
+            .send({ error: { code: e.code, message: e.message } });
+        }
+        throw e;
+      }
+    });
+
+    app.delete("/:id/totp", async (req, reply) => {
+      const { id } = req.params as { id: string };
+      try {
+        await deps.totp.delete(req.auth!.sub, id);
+        await deps.audit.log({ userId: req.auth!.sub, action: "credential_totp_delete", success: true, resourceType: "credential", resourceId: id });
+        return reply.code(204).send();
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
+
+    // =================================================================
+    // Attachment sub-resource (vault Phase 3). Encrypted blobs in Postgres.
+    // =================================================================
+
+    app.get("/:id/attachments", async (req, reply) => {
+      const { id } = req.params as { id: string };
+      try {
+        const list = await deps.attachments.list(req.auth!.sub, id);
+        return reply.send({ data: list.map(serializeAttachmentMeta) });
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
+
+    /** POST /:id/attachments — multipart upload (single file field "file"). */
+    app.post("/:id/attachments", async (req, reply) => {
+      const { id } = req.params as { id: string };
+      if (!req.isMultipart()) {
+        return reply.code(400).send({ error: { code: "not_multipart", message: "expected multipart/form-data" } });
+      }
+      const data = await req.file();
+      if (!data) return reply.code(400).send({ error: { code: "no_file", message: "no file in request" } });
+      let bytes: Buffer;
+      try {
+        bytes = await data.toBuffer();
+      } catch {
+        return reply.code(413).send({ error: { code: "attachment_too_large", message: `attachment exceeds ${MAX_ATTACHMENT_BYTES} bytes` } });
+      }
+      // Guard again in case the plugin limit is higher than ours.
+      if (data.file.truncated || bytes.length > MAX_ATTACHMENT_BYTES) {
+        return reply.code(413).send({ error: { code: "attachment_too_large", message: `attachment exceeds ${MAX_ATTACHMENT_BYTES} bytes` } });
+      }
+      if (bytes.length === 0) return reply.code(400).send({ error: { code: "empty_file", message: "attachment is empty" } });
+      try {
+        const sha256 = createHash("sha256").update(bytes).digest("hex");
+        const meta = await deps.attachments.add(req.auth!.sub, id, {
+          filename: sanitizeFilename(data.filename || "attachment"),
+          mimeType: data.mimetype || "application/octet-stream",
+          bytes, sha256,
+        });
+        await deps.audit.log({ userId: req.auth!.sub, action: "credential_attachment_add", success: true, resourceType: "credential", resourceId: id, details: { attachment_id: meta.id, filename: meta.filename, size: meta.sizeBytes } });
+        return reply.code(201).send(serializeAttachmentMeta(meta));
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
+
+    /** GET /:id/attachments/:aid — download decrypted bytes (requires reveal). */
+    app.get("/:id/attachments/:aid", async (req, reply) => {
+      const { id, aid } = req.params as { id: string; aid: string };
+      if (!can(req.auth!.role, "credentials:reveal")) {
+        return reply.code(403).send({ error: { code: "forbidden", message: "your role cannot download attachments" } });
+      }
+      try {
+        const { meta, bytes } = await deps.attachments.getWithBytes(req.auth!.sub, id, aid);
+        await deps.audit.log({ userId: req.auth!.sub, action: "credential_attachment_read", success: true, resourceType: "credential", resourceId: id, details: { attachment_id: meta.id, filename: meta.filename } });
+        return reply
+          .header("Content-Type", meta.mimeType)
+          .header("Content-Length", String(bytes.length))
+          .header("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(meta.filename)}`)
+          .send(bytes);
+      } catch (e) {
+        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        throw e;
+      }
+    });
+
+    app.delete("/:id/attachments/:aid", async (req, reply) => {
+      const { id, aid } = req.params as { id: string; aid: string };
+      try {
+        await deps.attachments.delete(req.auth!.sub, id, aid);
+        await deps.audit.log({ userId: req.auth!.sub, action: "credential_attachment_delete", success: true, resourceType: "credential", resourceId: id, details: { attachment_id: aid } });
         return reply.code(204).send();
       } catch (e) {
         if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });

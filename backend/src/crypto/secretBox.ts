@@ -109,7 +109,18 @@ export interface SecretBox {
   open(stored: unknown): Record<string, unknown>;
   /** Wrap a value for storage; `{}` stays `{}` to avoid encrypting nothing. */
   seal(plain: Record<string, unknown>): SecretEnvelope | Record<string, unknown>;
+  /**
+   * Encrypt raw bytes into a self-framed binary envelope for `bytea` storage
+   * (file attachments). Layout: [version:1][iv:12][tag:16][ciphertext:…].
+   * Same data key as the JSON envelope — no base64 bloat.
+   */
+  sealBytes(plain: Buffer): Buffer;
+  /** Decrypt a binary envelope produced by `sealBytes`. */
+  openBytes(stored: Buffer): Buffer;
 }
+
+/** Binary envelope framing for `sealBytes`/`openBytes`. */
+const BIN_VERSION = 1;
 
 export function createSecretBox(key: Buffer): SecretBox {
   if (key.length !== KEY_BYTES) {
@@ -155,6 +166,24 @@ export function createSecretBox(key: Buffer): SecretBox {
       // avoids a useless envelope. Any non-empty payload is encrypted.
       if (!plain || Object.keys(plain).length === 0) return {};
       return encrypt(plain);
+    },
+    sealBytes(plain: Buffer): Buffer {
+      const iv = randomBytes(IV_BYTES);
+      const cipher = createCipheriv(ALGO, key, iv);
+      const ct = Buffer.concat([cipher.update(plain), cipher.final()]);
+      const tag = cipher.getAuthTag();
+      return Buffer.concat([Buffer.from([BIN_VERSION]), iv, tag, ct]);
+    },
+    openBytes(stored: Buffer): Buffer {
+      if (stored.length < 1 + IV_BYTES + 16) throw new Error("secretBox: truncated binary envelope");
+      const version = stored[0];
+      if (version !== BIN_VERSION) throw new Error(`secretBox: unknown binary envelope version ${version}`);
+      const iv = stored.subarray(1, 1 + IV_BYTES);
+      const tag = stored.subarray(1 + IV_BYTES, 1 + IV_BYTES + 16);
+      const ct = stored.subarray(1 + IV_BYTES + 16);
+      const decipher = createDecipheriv(ALGO, key, iv);
+      decipher.setAuthTag(tag);
+      return Buffer.concat([decipher.update(ct), decipher.final()]);
     },
   };
 }

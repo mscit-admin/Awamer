@@ -225,7 +225,8 @@ Open `http://localhost:1420`. Login works; the catch is that token persistence a
 | **Telnet (browser terminal)** | ✅ (1.27.0) |
 | **Encrypted credential secrets at rest (AES-256-GCM)** | ✅ Phase 10 |
 | **Credential vault: folders, favorites, expiry, custom fields, password generator** | ✅ Phase 11 (1.49.0) |
-| Credential vault: per-credential TOTP, file attachments, sealed (zero-knowledge) mode + vault unlock, team sharing | ❌ Phase 11.x |
+| **Credential vault: per-credential TOTP + encrypted file attachments** | ✅ Phase 11 (1.50.0) |
+| Credential vault: sealed (zero-knowledge) mode + vault unlock, team sharing | ❌ Phase 11.x |
 | Vault unlock / KMS-backed master key | ❌ Phase 10.x |
 
 The dashboard tiles are placeholders; the working flows are **Hosts**,

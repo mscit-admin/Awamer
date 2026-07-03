@@ -1,17 +1,28 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   KeyRound, Plus, Trash2, Edit3, Eye, EyeOff, ShieldCheck, X, Import,
   Star, Folder as FolderIcon, Clock, RefreshCw, Copy, Check,
+  Timer, Paperclip, Download, Upload,
 } from "lucide-react";
 import {
   credentialsApi, foldersApi,
   type CredentialPublic, type CredentialType, type CredentialFieldInput, type Folder,
+  type CredentialTotpConfig, type CredentialAttachmentMeta, type TotpAlgorithm,
 } from "../api/sessionsApi";
 import {
   generatePassword, estimateEntropyBits, DEFAULT_PASSWORD_OPTIONS, type PasswordOptions,
 } from "../lib/passwordGenerator";
+import { computeTotp } from "../lib/totp";
 import { useCan } from "@/shared/lib/permissions";
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
 const CREDENTIAL_TYPES: { value: CredentialType; label: string; description: string }[] = [
   { value: "password",    label: "Password",    description: "Username + password (SSH, RDP)" },
@@ -187,6 +198,8 @@ export function CredentialsPage() {
                   {c.username && <>· <span className="font-mono">{c.username}</span></>}
                   {folderName(c.folderId) && <>· <span className="inline-flex items-center gap-1"><FolderIcon className="size-3" />{folderName(c.folderId)}</span></>}
                   {c.fields.length > 0 && <>· {c.fields.length} field{c.fields.length === 1 ? "" : "s"}</>}
+                  {c.hasTotp && <>· <span className="inline-flex items-center gap-1 text-sky-400"><Timer className="size-3" />OTP</span></>}
+                  {c.attachmentCount > 0 && <>· <span className="inline-flex items-center gap-1"><Paperclip className="size-3" />{c.attachmentCount}</span></>}
                   {c.expiresAt && <>· <span className="inline-flex items-center gap-1"><Clock className="size-3" />{new Date(c.expiresAt).toLocaleDateString()}</span></>}
                   {!c.hasSecret && <span className="text-amber-400">no secret set</span>}
                 </div>
@@ -565,6 +578,20 @@ function CredentialForm({
             )}
           </div>
 
+          {/* OTP + attachments live on a saved credential (they need its id). */}
+          {existing ? (
+            <>
+              <TotpSection credentialId={existing.id} canReveal={canReveal} />
+              <AttachmentsSection credentialId={existing.id} canReveal={canReveal} />
+            </>
+          ) : (
+            <div className="text-2xs text-fg-muted border border-border rounded p-2">
+              <span className="inline-flex items-center gap-1"><Timer className="size-3" /> One-time passwords</span> and{" "}
+              <span className="inline-flex items-center gap-1"><Paperclip className="size-3" /> file attachments</span>{" "}
+              become available after you create this credential.
+            </div>
+          )}
+
           <label className="block">
             <div className="text-xs text-fg-muted mb-1">Description</div>
             <textarea
@@ -582,6 +609,226 @@ function CredentialForm({
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// TOTP (one-time password) section — code computed client-side
+// =====================================================================
+
+function TotpSection({ credentialId, canReveal }: { credentialId: string; canReveal: boolean }) {
+  const [cfg, setCfg] = useState<CredentialTotpConfig | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  const [live, setLive] = useState<{ code: string; secondsRemaining: number; period: number } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState("");
+  const [digits, setDigits] = useState(6);
+  const [period, setPeriod] = useState(30);
+  const [algorithm, setAlgorithm] = useState<TotpAlgorithm>("SHA1");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => { void load(); /* eslint-disable-next-line */ }, [credentialId]);
+  async function load() {
+    try {
+      const c = await credentialsApi.getTotp(credentialId);
+      setCfg(c);
+      if (c.enabled && canReveal) {
+        const full = await credentialsApi.revealTotp(credentialId);
+        setSecret(full.secret ?? null);
+      }
+    } catch (e) { setErr(e instanceof Error ? e.message : "Failed to load OTP"); }
+  }
+
+  // Live rolling-code loop (only when we hold the revealed secret).
+  useEffect(() => {
+    if (!secret || !cfg?.enabled) { setLive(null); return; }
+    let active = true;
+    const tick = async () => {
+      try {
+        const r = await computeTotp(secret, { algorithm: cfg.algorithm, digits: cfg.digits, period: cfg.period });
+        if (active) setLive(r);
+      } catch { /* bad secret — ignore */ }
+    };
+    void tick();
+    const iv = setInterval(tick, 1000);
+    return () => { active = false; clearInterval(iv); };
+  }, [secret, cfg]);
+
+  async function save() {
+    setBusy(true); setErr(null);
+    try {
+      const val = input.trim();
+      const isUri = val.toLowerCase().startsWith("otpauth://");
+      const body = isUri ? { otpauth_uri: val } : { secret: val, digits, period, algorithm };
+      const c = await credentialsApi.setTotp(credentialId, body);
+      setCfg(c); setEditing(false); setInput("");
+      if (canReveal) {
+        const full = await credentialsApi.revealTotp(credentialId);
+        setSecret(full.secret ?? null);
+      }
+    } catch (e) { setErr(e instanceof Error ? e.message : "Failed to save OTP"); }
+    finally { setBusy(false); }
+  }
+
+  async function remove() {
+    if (!confirm("Remove the one-time password from this credential?")) return;
+    try {
+      await credentialsApi.deleteTotp(credentialId);
+      setCfg({ enabled: false }); setSecret(null); setLive(null); setEditing(false);
+    } catch (e) { setErr(e instanceof Error ? e.message : "Failed to remove OTP"); }
+  }
+
+  const showForm = editing || !cfg?.enabled;
+  const isUriInput = input.trim().toLowerCase().startsWith("otpauth://");
+
+  return (
+    <div className="border border-border rounded p-3">
+      <div className="text-xs text-fg-muted mb-2 flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 font-medium text-fg"><Timer className="size-3.5" /> One-time password (OTP)</span>
+        {cfg?.enabled && !editing && (
+          <span className="flex items-center gap-1">
+            <button type="button" onClick={() => setEditing(true)} className="btn-ghost text-2xs">Replace</button>
+            <button type="button" onClick={remove} className="btn-ghost text-2xs hover:text-red-500">Remove</button>
+          </span>
+        )}
+      </div>
+      {err && <div className="text-2xs text-red-500 mb-2">{err}</div>}
+
+      {/* Live code */}
+      {cfg?.enabled && !editing && (
+        live ? (
+          <div className="flex items-center gap-3">
+            <code className="text-lg font-mono tracking-widest">
+              {live.code.length === 6 ? `${live.code.slice(0, 3)} ${live.code.slice(3)}` : live.code}
+            </code>
+            <button type="button" onClick={() => { void navigator.clipboard?.writeText(live.code); setCopied(true); setTimeout(() => setCopied(false), 1200); }} className="btn-icon" title="Copy code">
+              {copied ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5" />}
+            </button>
+            <div className="flex-1">
+              <div className="h-1 bg-bg-elevated rounded overflow-hidden">
+                <div className="h-full bg-sky-400 transition-all" style={{ width: `${(live.secondsRemaining / live.period) * 100}%` }} />
+              </div>
+            </div>
+            <span className="text-2xs text-fg-muted tabular-nums w-6 text-right">{live.secondsRemaining}s</span>
+          </div>
+        ) : (
+          <div className="text-2xs text-fg-muted">
+            OTP configured{!canReveal && " — the reveal permission is required to view codes"}.
+          </div>
+        )
+      )}
+
+      {/* Setup / replace form */}
+      {showForm && (
+        <div className="space-y-2">
+          <input
+            value={input} onChange={(e) => setInput(e.target.value)}
+            placeholder="Paste secret (base32) or otpauth:// URI"
+            className="input h-9 font-mono text-2xs"
+          />
+          {!isUriInput && (
+            <div className="grid grid-cols-3 gap-2">
+              <label className="text-2xs text-fg-muted">Digits
+                <select value={digits} onChange={(e) => setDigits(Number(e.target.value))} className="input h-8 mt-0.5">
+                  <option value={6}>6</option><option value={7}>7</option><option value={8}>8</option>
+                </select>
+              </label>
+              <label className="text-2xs text-fg-muted">Period
+                <select value={period} onChange={(e) => setPeriod(Number(e.target.value))} className="input h-8 mt-0.5">
+                  <option value={30}>30s</option><option value={60}>60s</option>
+                </select>
+              </label>
+              <label className="text-2xs text-fg-muted">Algorithm
+                <select value={algorithm} onChange={(e) => setAlgorithm(e.target.value as TotpAlgorithm)} className="input h-8 mt-0.5">
+                  <option value="SHA1">SHA1</option><option value="SHA256">SHA256</option><option value="SHA512">SHA512</option>
+                </select>
+              </label>
+            </div>
+          )}
+          {isUriInput && <div className="text-2xs text-fg-muted">Settings are read from the otpauth URI.</div>}
+          <div className="flex justify-end gap-2">
+            {editing && <button type="button" onClick={() => { setEditing(false); setInput(""); }} className="btn-ghost text-xs">Cancel</button>}
+            <button type="button" onClick={save} disabled={busy || !input.trim()} className="btn-primary text-xs">
+              {busy ? "Saving…" : "Save OTP"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// Attachments section — encrypted files stored server-side
+// =====================================================================
+
+function AttachmentsSection({ credentialId, canReveal }: { credentialId: string; canReveal: boolean }) {
+  const [items, setItems] = useState<CredentialAttachmentMeta[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { void load(); /* eslint-disable-next-line */ }, [credentialId]);
+  async function load() {
+    try { const r = await credentialsApi.listAttachments(credentialId); setItems(r.data); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Failed to load attachments"); }
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > MAX_ATTACHMENT_BYTES) { setErr(`"${f.name}" is ${formatBytes(f.size)} — the limit is 5 MB.`); if (fileRef.current) fileRef.current.value = ""; return; }
+    setBusy(true); setErr(null);
+    try { await credentialsApi.uploadAttachment(credentialId, f); await load(); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Upload failed"); }
+    finally { setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+  }
+
+  async function download(a: CredentialAttachmentMeta) {
+    try {
+      const blob = await credentialsApi.downloadAttachment(credentialId, a.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url; link.download = a.filename;
+      document.body.appendChild(link); link.click(); link.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { setErr(e instanceof Error ? e.message : "Download failed"); }
+  }
+
+  async function remove(a: CredentialAttachmentMeta) {
+    if (!confirm(`Delete attachment "${a.filename}"?`)) return;
+    try { await credentialsApi.deleteAttachment(credentialId, a.id); setItems((x) => x.filter((y) => y.id !== a.id)); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Delete failed"); }
+  }
+
+  return (
+    <div className="border border-border rounded p-3">
+      <div className="text-xs text-fg-muted mb-2 flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 font-medium text-fg"><Paperclip className="size-3.5" /> Attachments</span>
+        <label className="btn-ghost text-2xs cursor-pointer">
+          <Upload className="size-3" /> {busy ? "Uploading…" : "Upload"}
+          <input ref={fileRef} type="file" className="hidden" onChange={onFile} disabled={busy} />
+        </label>
+      </div>
+      {err && <div className="text-2xs text-red-500 mb-2">{err}</div>}
+      {items.length === 0 ? (
+        <div className="text-2xs text-fg-muted">None. Attach keys, certs, or recovery-code files (≤ 5 MB, encrypted at rest).</div>
+      ) : (
+        <div className="space-y-1">
+          {items.map((a) => (
+            <div key={a.id} className="flex items-center gap-2 text-xs">
+              <Paperclip className="size-3.5 text-fg-muted shrink-0" />
+              <span className="flex-1 truncate font-mono">{a.filename}</span>
+              <span className="text-2xs text-fg-muted tabular-nums">{formatBytes(a.size_bytes)}</span>
+              {canReveal && <button type="button" onClick={() => download(a)} className="btn-icon" title="Download"><Download className="size-3.5" /></button>}
+              <button type="button" onClick={() => remove(a)} className="btn-icon hover:text-red-500" title="Delete"><Trash2 className="size-3.5" /></button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
