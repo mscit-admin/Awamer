@@ -99,8 +99,47 @@ export interface Credential {
   expiresAt: Date | null;
   /** Custom fields; populated by the repository alongside the row. */
   fields: CredentialField[];
+  /** Vault (Phase 2/3) presence flags, populated by the repository. */
+  hasTotp: boolean;
+  attachmentCount: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+// ---- TOTP + attachments (vault Phase 2/3) ---------------------------
+
+export const TOTP_ALGORITHMS = ["SHA1", "SHA256", "SHA512"] as const;
+export type TotpAlgorithm = typeof TOTP_ALGORITHMS[number];
+export const isTotpAlgorithm = (s: string): s is TotpAlgorithm =>
+  (TOTP_ALGORITHMS as readonly string[]).includes(s);
+
+/** Non-secret TOTP configuration returned to the client. */
+export interface CredentialTotpConfig {
+  algorithm: TotpAlgorithm;
+  digits: number;
+  period: number;
+  updatedAt: Date;
+}
+
+/** Attachment metadata (never includes the blob bytes). */
+export interface CredentialAttachmentMeta {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  createdAt: Date;
+}
+
+export function serializeAttachmentMeta(a: CredentialAttachmentMeta) {
+  return {
+    id: a.id,
+    filename: a.filename,
+    mime_type: a.mimeType,
+    size_bytes: a.sizeBytes,
+    sha256: a.sha256,
+    created_at: a.createdAt,
+  };
 }
 
 /** Public projection of a custom field — secret values withheld unless revealing. */
@@ -143,6 +182,8 @@ export function toCredentialPublic(c: Credential, reveal = false): CredentialPub
     folderId: c.folderId,
     favorite: c.favorite,
     expiresAt: c.expiresAt,
+    hasTotp: c.hasTotp,
+    attachmentCount: c.attachmentCount,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     hasSecret: Object.keys(c.secretData).length > 0,
@@ -214,6 +255,10 @@ export const PhaseTwoErrors = {
   TagNameTaken: () => new DomainError("tag_name_taken", "a tag with this name already exists"),
   CredentialNotFound: () => new DomainError("credential_not_found", "credential not found"),
   CredentialNameTaken: () => new DomainError("credential_name_taken", "a credential with this name already exists"),
+  TotpNotFound: () => new DomainError("totp_not_found", "no OTP is configured on this credential"),
+  InvalidTotpSecret: () => new DomainError("invalid_totp_secret", "the OTP secret is not valid base32"),
+  AttachmentNotFound: () => new DomainError("attachment_not_found", "attachment not found"),
+  AttachmentTooLarge: () => new DomainError("attachment_too_large", "attachment exceeds the maximum size"),
   HistoryNotFound: () => new DomainError("history_not_found", "history entry not found"),
   InvalidProtocol: () => new DomainError("invalid_protocol", "unsupported protocol"),
 } as const;

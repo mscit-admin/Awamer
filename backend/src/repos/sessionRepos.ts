@@ -245,7 +245,10 @@ function rowToField(r: FieldRow, box: SecretBox): CredentialField {
   };
 }
 
-function rowToCredential(r: CredRow, box: SecretBox, fields: CredentialField[]): Credential {
+function rowToCredential(
+  r: CredRow, box: SecretBox, fields: CredentialField[],
+  extra: { hasTotp?: boolean; attachmentCount?: number } = {},
+): Credential {
   return {
     id: r.id, userId: r.user_id, name: r.name,
     credentialType: r.credential_type as CredentialType,
@@ -258,6 +261,8 @@ function rowToCredential(r: CredRow, box: SecretBox, fields: CredentialField[]):
     favorite: r.favorite,
     expiresAt: r.expires_at,
     fields,
+    hasTotp: extra.hasTotp ?? false,
+    attachmentCount: extra.attachmentCount ?? 0,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -292,8 +297,16 @@ export class CredentialRepository {
       `SELECT ${CRED_COLS} FROM credentials WHERE ${where.join(" AND ")} ORDER BY favorite DESC, name`,
       params,
     );
-    const fieldMap = await this.fieldsForCredentials(rows.map((r) => r.id));
-    return rows.map((r) => rowToCredential(r, this.box, fieldMap.get(r.id) ?? []));
+    const ids = rows.map((r) => r.id);
+    const [fieldMap, totpSet, attachCounts] = await Promise.all([
+      this.fieldsForCredentials(ids),
+      this.totpForCredentials(ids),
+      this.attachmentCountsForCredentials(ids),
+    ]);
+    return rows.map((r) => rowToCredential(r, this.box, fieldMap.get(r.id) ?? [], {
+      hasTotp: totpSet.has(r.id),
+      attachmentCount: attachCounts.get(r.id) ?? 0,
+    }));
   }
 
   async getById(userId: string, id: string): Promise<Credential> {
@@ -302,8 +315,15 @@ export class CredentialRepository {
       [id, userId],
     );
     if (!rows[0]) throw PhaseTwoErrors.CredentialNotFound();
-    const fields = await this.fieldsOf(rows[0].id);
-    return rowToCredential(rows[0], this.box, fields);
+    const [fields, totpSet, attachCounts] = await Promise.all([
+      this.fieldsOf(rows[0].id),
+      this.totpForCredentials([rows[0].id]),
+      this.attachmentCountsForCredentials([rows[0].id]),
+    ]);
+    return rowToCredential(rows[0], this.box, fields, {
+      hasTotp: totpSet.has(rows[0].id),
+      attachmentCount: attachCounts.get(rows[0].id) ?? 0,
+    });
   }
 
   async create(input: {
@@ -431,6 +451,29 @@ export class CredentialRepository {
     );
     for (const id of ids) map.set(id, []);
     for (const r of rows) map.get(r.credential_id)?.push(rowToField(r, this.box));
+    return map;
+  }
+
+  /** Which of these credentials have a TOTP configured. */
+  private async totpForCredentials(ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    const { rows } = await this.pool.query<{ credential_id: string }>(
+      `SELECT credential_id FROM credential_totp WHERE credential_id = ANY($1::uuid[])`,
+      [ids],
+    );
+    return new Set(rows.map((r) => r.credential_id));
+  }
+
+  /** Attachment counts keyed by credential id. */
+  private async attachmentCountsForCredentials(ids: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (ids.length === 0) return map;
+    const { rows } = await this.pool.query<{ credential_id: string; c: string }>(
+      `SELECT credential_id, COUNT(*)::text AS c FROM credential_attachments
+       WHERE credential_id = ANY($1::uuid[]) GROUP BY credential_id`,
+      [ids],
+    );
+    for (const r of rows) map.set(r.credential_id, Number(r.c));
     return map;
   }
 }

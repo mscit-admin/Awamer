@@ -2,7 +2,7 @@
  * Phase 2 — Session Management API client.
  * Thin wrappers over the backend's /api/v1/{hosts,folders,tags,credentials,history} endpoints.
  */
-import { request } from "@/shared/lib/api";
+import { request, uploadMultipart, fetchBlob } from "@/shared/lib/api";
 
 // =====================================================================
 // Shared types (mirror the backend's snake_case wire format exactly)
@@ -71,10 +71,33 @@ export interface CredentialPublic {
   favorite: boolean;
   expiresAt: string | null;
   fields: CredentialFieldPublic[];
+  hasTotp: boolean;
+  attachmentCount: number;
   createdAt: string;
   updatedAt: string;
   /** Only present on GET /credentials/:id?reveal=true */
   secret_data?: Record<string, unknown>;
+}
+
+export type TotpAlgorithm = "SHA1" | "SHA256" | "SHA512";
+
+export interface CredentialTotpConfig {
+  enabled: boolean;
+  algorithm?: TotpAlgorithm;
+  digits?: number;
+  period?: number;
+  updated_at?: string;
+  /** Only present on GET /:id/totp?reveal=true */
+  secret?: string;
+}
+
+export interface CredentialAttachmentMeta {
+  id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  sha256: string;
+  created_at: string;
 }
 
 export interface Host {
@@ -197,6 +220,36 @@ export const credentialsApi = {
   },
   delete(id: string) {
     return request<void>(`/api/v1/credentials/${id}`, { method: "DELETE" });
+  },
+
+  // ---- TOTP (vault Phase 2) ----------------------------------------
+  getTotp(id: string) {
+    return request<CredentialTotpConfig>(`/api/v1/credentials/${id}/totp`);
+  },
+  revealTotp(id: string) {
+    return request<CredentialTotpConfig>(`/api/v1/credentials/${id}/totp?reveal=true`);
+  },
+  setTotp(id: string, body: { secret?: string; otpauth_uri?: string; algorithm?: TotpAlgorithm; digits?: number; period?: number }) {
+    return request<CredentialTotpConfig>(`/api/v1/credentials/${id}/totp`, { method: "PUT", body });
+  },
+  deleteTotp(id: string) {
+    return request<void>(`/api/v1/credentials/${id}/totp`, { method: "DELETE" });
+  },
+
+  // ---- Attachments (vault Phase 3) ---------------------------------
+  listAttachments(id: string) {
+    return request<{ data: CredentialAttachmentMeta[] }>(`/api/v1/credentials/${id}/attachments`);
+  },
+  uploadAttachment(id: string, file: File) {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return uploadMultipart<CredentialAttachmentMeta>(`/api/v1/credentials/${id}/attachments`, form);
+  },
+  downloadAttachment(id: string, attachmentId: string) {
+    return fetchBlob(`/api/v1/credentials/${id}/attachments/${attachmentId}`);
+  },
+  deleteAttachment(id: string, attachmentId: string) {
+    return request<void>(`/api/v1/credentials/${id}/attachments/${attachmentId}`, { method: "DELETE" });
   },
 };
 

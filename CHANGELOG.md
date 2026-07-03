@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.50.0] — 2026-07-03 — Credential vault, phase 2/3 (OTP + file attachments)
+
+### Added
+- **Per-credential OTP (TOTP).** A credential can now carry a one-time-password
+  seed (KeePass-style). Set it by pasting a base32 secret or a full
+  `otpauth://` URI (what a QR encodes); SHA1/SHA256/SHA512, 6–8 digits and a
+  15–60s period are supported. The **rolling code is computed on the client**
+  (Web Crypto, verified against the RFC 6238 test vectors) so we never
+  round-trip — or audit-log — the server every second. The seed is encrypted
+  at rest and only revealed behind `credentials:reveal` (audit-logged). The
+  list shows an **OTP** badge.
+- **Encrypted file attachments.** Attach files (keys, certs, recovery-code
+  PDFs) to a credential, up to **5 MB each**. Bytes are stored as an
+  **AES-256-GCM binary envelope in Postgres `bytea`** — never plaintext — with
+  a SHA-256 recorded for integrity. Upload is `multipart/form-data`; download
+  requires `credentials:reveal` and is audit-logged. The list shows a paperclip
+  count.
+
+### API
+- `GET/PUT/DELETE /api/v1/credentials/:id/totp` — read config, set/replace
+  (`{ secret | otpauth_uri, algorithm?, digits?, period? }`), or remove.
+  `GET …/totp?reveal=true` additionally returns the base32 seed.
+- `GET/POST/DELETE /api/v1/credentials/:id/attachments[/:aid]` — list, upload
+  (multipart), download (reveal-gated), delete.
+- Credential list/detail now include `has_totp` and `attachment_count`.
+
+### Migration
+- `016_credential_totp_attachments` — adds `credential_totp` (1:1, seed
+  encrypted at rest) and `credential_attachments` (encrypted `bytea` blobs);
+  both cascade-delete with their credential. No new permission: managing these
+  reuses `resources:write`, and revealing seeds / downloading files reuses
+  `credentials:reveal`.
+
+### Internal
+- `secretBox` gained `sealBytes`/`openBytes` for binary (file) encryption using
+  the same data key as the JSON envelope. Registered `@fastify/multipart` with
+  a 5 MB single-file limit.
+
+> Roadmap for later phases: sealed zero-knowledge mode + vault unlock, and team
+> sharing.
+
 ## [1.49.0] — 2026-07-03 — Credential vault, phase 1 (organization + custom fields)
 
 ### Added

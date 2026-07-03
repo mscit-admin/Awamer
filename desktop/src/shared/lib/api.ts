@@ -110,3 +110,50 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
+
+/** Attach the bearer token to a set of headers, refreshing once on demand. */
+function authHeaders(base: Record<string, string> = {}): Record<string, string> {
+  const headers = { ...base };
+  const token = tokenProvider();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+async function parseError(response: Response): Promise<ApiError> {
+  let payload: unknown;
+  let message = `HTTP ${response.status}`;
+  try {
+    payload = await response.json();
+    const p = payload as { error?: { message?: unknown; code?: unknown }; message?: unknown };
+    if (p?.error && typeof p.error === "object") message = String(p.error.message ?? p.error.code ?? message);
+    else if (typeof p?.message === "string") message = p.message;
+  } catch { /* keep generic */ }
+  return new ApiError(response.status, message, payload);
+}
+
+/** Upload multipart/form-data (e.g. a file). The browser sets the boundary. */
+export async function uploadMultipart<T>(path: string, form: FormData): Promise<T> {
+  const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
+  const doFetch = () => fetch(url, { method: "POST", headers: authHeaders({ Accept: "application/json" }), body: form });
+  let response = await doFetch();
+  if (response.status === 401 && onUnauthorized) {
+    const newToken = await onUnauthorized();
+    if (newToken) response = await doFetch();
+  }
+  if (!response.ok) throw await parseError(response);
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+/** GET a binary response as a Blob (e.g. an attachment download). */
+export async function fetchBlob(path: string): Promise<Blob> {
+  const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
+  const doFetch = () => fetch(url, { method: "GET", headers: authHeaders() });
+  let response = await doFetch();
+  if (response.status === 401 && onUnauthorized) {
+    const newToken = await onUnauthorized();
+    if (newToken) response = await doFetch();
+  }
+  if (!response.ok) throw await parseError(response);
+  return await response.blob();
+}

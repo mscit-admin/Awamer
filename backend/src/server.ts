@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
+import multipart from "@fastify/multipart";
 import { v4 as uuid } from "uuid";
 
 import { loadConfig } from "./config/index.js";
@@ -18,6 +19,7 @@ import {
   FolderRepository, TagRepository, CredentialRepository,
   HostRepository, ConnectionHistoryRepository,
 } from "./repos/sessionRepos.js";
+import { CredentialTotpRepository, CredentialAttachmentRepository } from "./repos/vaultRepos.js";
 
 import { LoginUseCase } from "./usecases/login.js";
 import { RefreshUseCase } from "./usecases/refresh.js";
@@ -81,6 +83,8 @@ async function main() {
   const folders = new FolderRepository(pool);
   const tags = new TagRepository(pool);
   const credentials = new CredentialRepository(pool, secretBox);
+  const credentialTotp = new CredentialTotpRepository(pool, secretBox);
+  const credentialAttachments = new CredentialAttachmentRepository(pool, secretBox);
   const hosts = new HostRepository(pool);
   const history = new ConnectionHistoryRepository(pool);
   const commands = new CommandHistoryRepository(pool);
@@ -126,6 +130,10 @@ async function main() {
   });
 
   await app.register(websocket);
+  // Credential attachment uploads (vault Phase 3). 5 MB/file, single file.
+  await app.register(multipart, {
+    limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 4 },
+  });
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, {
     origin: cfg.corsOrigins,
@@ -158,7 +166,7 @@ async function main() {
   // Phase 2 — Session Management routes
   await app.register(makeFolderRoutes({ folders, audit, jwt }), { prefix: "/api/v1/folders" });
   await app.register(makeTagRoutes({ tags, audit, jwt }), { prefix: "/api/v1/tags" });
-  await app.register(makeCredentialRoutes({ credentials, audit, jwt }), { prefix: "/api/v1/credentials" });
+  await app.register(makeCredentialRoutes({ credentials, totp: credentialTotp, attachments: credentialAttachments, audit, jwt }), { prefix: "/api/v1/credentials" });
   await app.register(makeHostRoutes({ hosts, audit, jwt }), { prefix: "/api/v1/hosts" });
   await app.register(makeHistoryRoutes({ history, hosts, audit, jwt }), { prefix: "/api/v1/history" });
   await app.register(makeAuditRoutes({ audit, users, jwt }), { prefix: "/api/v1/audit" });

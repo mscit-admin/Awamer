@@ -69,6 +69,35 @@ test("createSecretBox rejects a wrong-length key", () => {
   assert.throws(() => createSecretBox(randomBytes(16)));
 });
 
+test("sealBytes → openBytes round-trips binary data", () => {
+  const box = createSecretBox(key);
+  const plain = randomBytes(4096);
+  const sealed = box.sealBytes(plain);
+  assert.ok(Buffer.isBuffer(sealed));
+  assert.ok(!sealed.equals(plain)); // actually encrypted
+  assert.ok(sealed.length > plain.length); // version + iv + tag framing
+  assert.deepEqual(box.openBytes(sealed), plain);
+});
+
+test("sealBytes ciphertext does not contain the plaintext", () => {
+  const box = createSecretBox(key);
+  const marker = Buffer.from("SENSITIVE-BYTES-MARKER");
+  const sealed = box.sealBytes(marker);
+  assert.ok(!sealed.toString("latin1").includes("SENSITIVE-BYTES-MARKER"));
+});
+
+test("openBytes rejects a tampered binary envelope (GCM auth)", () => {
+  const box = createSecretBox(key);
+  const sealed = box.sealBytes(Buffer.from("hello"));
+  sealed[sealed.length - 1] ^= 0xff; // flip a ciphertext byte
+  assert.throws(() => box.openBytes(sealed));
+});
+
+test("openBytes rejects a truncated envelope", () => {
+  const box = createSecretBox(key);
+  assert.throws(() => box.openBytes(Buffer.alloc(4)));
+});
+
 function fakeCfg(over: Partial<Config["env"]> & { isProd?: boolean }): Config {
   const { isProd, ...env } = over;
   return {
