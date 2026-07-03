@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  KeyRound, Plus, Trash2, Edit3, Eye, EyeOff, ShieldCheck, X, Import,
+  KeyRound, Plus, Trash2, Eye, EyeOff, ShieldCheck, X, Import,
   Star, Folder as FolderIcon, Clock, RefreshCw, Copy, Check,
   Timer, Paperclip, Download, Upload,
 } from "lucide-react";
@@ -10,6 +10,7 @@ import {
   type CredentialPublic, type CredentialType, type CredentialFieldInput, type Folder,
   type CredentialTotpConfig, type CredentialAttachmentMeta, type TotpAlgorithm,
 } from "../api/sessionsApi";
+import { CredentialActions } from "./CredentialActions";
 import {
   generatePassword, estimateEntropyBits, DEFAULT_PASSWORD_OPTIONS, type PasswordOptions,
 } from "../lib/passwordGenerator";
@@ -45,8 +46,11 @@ function expiresSoon(iso: string | null): boolean {
   return ms > 0 && ms < 14 * 24 * 3600 * 1000;
 }
 
+let toastSeq = 0;
+
 export function CredentialsPage() {
   const canWrite = useCan("resources:write");
+  const canReveal = useCan("credentials:reveal");
   const [credentials, setCredentials] = useState<CredentialPublic[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [editing, setEditing] = useState<CredentialPublic | "new" | null>(null);
@@ -55,6 +59,13 @@ export function CredentialsPage() {
   const [query, setQuery] = useState("");
   const [folderFilter, setFolderFilter] = useState<string>("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
+
+  function notify(text: string) {
+    const id = ++toastSeq;
+    setToasts((t) => [...t, { id, text }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2500);
+  }
 
   useEffect(() => { void load(); }, []);
 
@@ -204,10 +215,15 @@ export function CredentialsPage() {
                   {!c.hasSecret && <span className="text-amber-400">no secret set</span>}
                 </div>
               </div>
-              {canWrite && <button onClick={() => setEditing(c)} className="btn-icon"><Edit3 className="size-4" /></button>}
-              {canWrite && <button onClick={() => handleDelete(c)} className="btn-icon hover:text-red-500">
-                <Trash2 className="size-4" />
-              </button>}
+              {canWrite && (
+                <CredentialActions
+                  c={c}
+                  canReveal={canReveal}
+                  onEdit={() => setEditing(c)}
+                  onDelete={() => handleDelete(c)}
+                  notify={notify}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -221,6 +237,15 @@ export function CredentialsPage() {
           onSaved={() => { setEditing(null); void load(); }}
         />
       )}
+
+      {/* Toasts (copy feedback) */}
+      <div className="fixed bottom-4 right-4 z-[70] flex flex-col gap-2 items-end">
+        {toasts.map((t) => (
+          <div key={t.id} className="bg-bg-surface border border-border rounded-lg shadow-xl px-3 py-2 text-sm animate-fade-in flex items-center gap-2">
+            <Check className="size-3.5 text-emerald-400" /> {t.text}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
