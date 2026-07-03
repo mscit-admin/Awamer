@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.50.1] — 2026-07-03 — KeePass-style OTP actions on a credential
+
+### Added
+- **Per-credential action menu** (the ⋯ button on each credential row),
+  mirroring KeePass's right-click OTP menu:
+  - **Copy username / Copy password** — one-click copy (password fetch is
+    reveal-gated + audit-logged as before).
+  - **Copy TOTP** — computes the current code (client-side) and copies it.
+  - **Copy password & TOTP** — copies the password now, then auto-copies the
+    fresh TOTP ~12s later so you can paste the password first.
+  - **Show TOTP** — a read-only panel with the large live code + countdown +
+    copy (no need to open the editor).
+  - **Show QR code** — renders the entry's `otpauth://` URI as a QR so the OTP
+    can be scanned into a phone authenticator (Google Authenticator, Aegis, …).
+  - **Set up / Manage OTP**, **Edit**, **Delete**.
+- Copy actions surface a brief confirmation toast.
+
+### Internal
+- Added `qrcode.react` for client-side QR rendering. OTP actions appear only
+  when the credential has an OTP and the user holds `credentials:reveal`; codes
+  are still computed in the browser (no new server round-trips).
+
 ## [1.50.0] — 2026-07-03 — Credential vault, phase 2/3 (OTP + file attachments)
 
 ### Added

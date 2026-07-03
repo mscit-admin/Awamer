@@ -89,7 +89,8 @@ test("sealBytes ciphertext does not contain the plaintext", () => {
 test("openBytes rejects a tampered binary envelope (GCM auth)", () => {
   const box = createSecretBox(key);
   const sealed = box.sealBytes(Buffer.from("hello"));
-  sealed[sealed.length - 1] ^= 0xff; // flip a ciphertext byte
+  const last = sealed.length - 1;
+  sealed[last] = (sealed[last] ?? 0) ^ 0xff; // flip a ciphertext byte
   assert.throws(() => box.openBytes(sealed));
 });
 
