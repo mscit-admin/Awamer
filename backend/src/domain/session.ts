@@ -64,8 +64,22 @@ export interface Tag {
 }
 
 // =====================================================================
-// Credential
+// Credential + custom fields (vault, Phase 1)
 // =====================================================================
+
+/**
+ * A KeePass-style advanced field on a credential. `value` is decrypted at the
+ * persistence boundary (same AES-256-GCM envelope as `secretData`). When
+ * `isSecret` is true the value is masked in the UI and withheld from the
+ * public (non-reveal) projection.
+ */
+export interface CredentialField {
+  id: string;
+  label: string;
+  value: string;
+  isSecret: boolean;
+  sortOrder: number;
+}
 
 export interface Credential {
   id: string;
@@ -79,16 +93,46 @@ export interface Credential {
    */
   secretData: Record<string, unknown>;
   description: string | null;
+  /** Vault (Phase 1): folder placement, favorite flag, expiry. */
+  folderId: string | null;
+  favorite: boolean;
+  expiresAt: Date | null;
+  /** Custom fields; populated by the repository alongside the row. */
+  fields: CredentialField[];
   createdAt: Date;
   updatedAt: Date;
 }
 
+/** Public projection of a custom field — secret values withheld unless revealing. */
+export interface CredentialFieldPublic {
+  id: string;
+  label: string;
+  isSecret: boolean;
+  sortOrder: number;
+  hasValue: boolean;
+  /** Present for non-secret fields always, and for secret fields only on reveal. */
+  value?: string;
+}
+
+export function toCredentialFieldPublic(f: CredentialField, reveal: boolean): CredentialFieldPublic {
+  const out: CredentialFieldPublic = {
+    id: f.id,
+    label: f.label,
+    isSecret: f.isSecret,
+    sortOrder: f.sortOrder,
+    hasValue: f.value.length > 0,
+  };
+  if (reveal || !f.isSecret) out.value = f.value;
+  return out;
+}
+
 /** Public projection — secret_data stripped. Use for list views and refs. */
-export type CredentialPublic = Omit<Credential, "secretData"> & {
+export type CredentialPublic = Omit<Credential, "secretData" | "fields"> & {
   hasSecret: boolean;
+  fields: CredentialFieldPublic[];
 };
 
-export function toCredentialPublic(c: Credential): CredentialPublic {
+export function toCredentialPublic(c: Credential, reveal = false): CredentialPublic {
   return {
     id: c.id,
     userId: c.userId,
@@ -96,9 +140,13 @@ export function toCredentialPublic(c: Credential): CredentialPublic {
     credentialType: c.credentialType,
     username: c.username,
     description: c.description,
+    folderId: c.folderId,
+    favorite: c.favorite,
+    expiresAt: c.expiresAt,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     hasSecret: Object.keys(c.secretData).length > 0,
+    fields: c.fields.map((f) => toCredentialFieldPublic(f, reveal)),
   };
 }
 

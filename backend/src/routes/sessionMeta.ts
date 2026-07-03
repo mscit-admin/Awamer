@@ -229,17 +229,39 @@ interface CredDeps {
 
 const credentialTypeEnum = z.enum(CREDENTIAL_TYPES as unknown as [string, ...string[]]);
 
+// KeePass-style custom fields (vault Phase 1). Values are encrypted at rest.
+const fieldSchema = z.object({
+  label: z.string().min(1).max(120),
+  value: z.string().max(20000),
+  is_secret: z.boolean().optional(),
+  sort_order: z.number().int().optional(),
+});
+const fieldsSchema = z.array(fieldSchema).max(50);
+
+function mapFields(fields: z.infer<typeof fieldsSchema>) {
+  return fields.map((f, i) => ({
+    label: f.label,
+    value: f.value,
+    isSecret: f.is_secret ?? true,
+    sortOrder: f.sort_order ?? i,
+  }));
+}
+
 export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
     app.addHook("preHandler", requireWrite());
 
     app.get("/", async (req, reply) => {
-      const list = await deps.credentials.listForUser(req.auth!.sub);
-      return reply.send({ data: list.map(toCredentialPublic) });
+      const q = req.query as { folder_id?: string; favorites_only?: string };
+      const list = await deps.credentials.listForUser(req.auth!.sub, {
+        folderId: q.folder_id === "root" ? "root" : q.folder_id,
+        favoritesOnly: q.favorites_only === "true",
+      });
+      return reply.send({ data: list.map((c) => toCredentialPublic(c)) });
     });
 
-    /** GET /:id?reveal=true returns secret_data; without, just metadata. */
+    /** GET /:id?reveal=true returns secret_data + secret field values; without, just metadata. */
     app.get("/:id", async (req, reply) => {
       const { id } = req.params as { id: string };
       const reveal = (req.query as { reveal?: string }).reveal === "true";
@@ -251,7 +273,7 @@ export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
         if (reveal) {
           await deps.audit.log({ userId: req.auth!.sub, action: "credential_read", success: true, resourceType: "credential", resourceId: c.id });
           return reply.send({
-            ...toCredentialPublic(c),
+            ...toCredentialPublic(c, true),
             secret_data: c.secretData,
           });
         }
@@ -268,6 +290,10 @@ export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
       username: z.string().max(120).nullable().optional(),
       secret_data: z.record(z.unknown()).optional(),
       description: z.string().max(500).nullable().optional(),
+      folder_id: z.string().uuid().nullable().optional(),
+      favorite: z.boolean().optional(),
+      expires_at: z.string().datetime().nullable().optional(),
+      fields: fieldsSchema.optional(),
     });
 
     app.post("/", async (req, reply) => {
@@ -281,6 +307,10 @@ export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
           username: parsed.data.username ?? null,
           secretData: parsed.data.secret_data ?? {},
           description: parsed.data.description ?? null,
+          folderId: parsed.data.folder_id ?? null,
+          favorite: parsed.data.favorite,
+          expiresAt: parsed.data.expires_at ? new Date(parsed.data.expires_at) : null,
+          fields: parsed.data.fields ? mapFields(parsed.data.fields) : undefined,
         });
         await deps.audit.log({ userId: req.auth!.sub, action: "credential_create", success: true, resourceType: "credential", resourceId: c.id });
         return reply.code(201).send(toCredentialPublic(c));
@@ -297,6 +327,10 @@ export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
       username: z.string().max(120).nullable().optional(),
       secret_data: z.record(z.unknown()).optional(),
       description: z.string().max(500).nullable().optional(),
+      folder_id: z.string().uuid().nullable().optional(),
+      favorite: z.boolean().optional(),
+      expires_at: z.string().datetime().nullable().optional(),
+      fields: fieldsSchema.optional(),
     });
 
     app.patch("/:id", async (req, reply) => {
@@ -304,11 +338,17 @@ export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
       const parsed = updateSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       try {
+        const b = parsed.data;
         const c = await deps.credentials.update(req.auth!.sub, id, {
-          name: parsed.data.name,
-          username: parsed.data.username,
-          secretData: parsed.data.secret_data,
-          description: parsed.data.description,
+          name: b.name,
+          username: b.username,
+          secretData: b.secret_data,
+          description: b.description,
+          folderId: b.folder_id,
+          favorite: b.favorite,
+          expiresAt: b.expires_at === undefined ? undefined : (b.expires_at === null ? null : new Date(b.expires_at)),
+          // undefined => keep existing fields; any array (incl. empty) => full replace.
+          fields: b.fields === undefined ? undefined : mapFields(b.fields),
         });
         await deps.audit.log({ userId: req.auth!.sub, action: "credential_update", success: true, resourceType: "credential", resourceId: c.id });
         return reply.send(toCredentialPublic(c));

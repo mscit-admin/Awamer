@@ -8,7 +8,7 @@
 import type { Pool, PoolClient } from "../db/index.js";
 import type { SecretBox } from "../crypto/secretBox.js";
 import {
-  type Folder, type Tag, type Credential, type Host, type ConnectionHistoryEntry,
+  type Folder, type Tag, type Credential, type CredentialField, type Host, type ConnectionHistoryEntry,
   type HostProtocol, type CredentialType, type ConnectionStatus,
   PhaseTwoErrors,
 } from "../domain/session.js";
@@ -219,12 +219,33 @@ interface CredRow {
   credential_type: string; username: string | null;
   secret_data: Record<string, unknown>;
   description: string | null;
+  folder_id: string | null;
+  favorite: boolean;
+  expires_at: Date | null;
   created_at: Date; updated_at: Date;
 }
 
-const CRED_COLS = `id, user_id, name, credential_type, username, secret_data, description, created_at, updated_at`;
+const CRED_COLS = `id, user_id, name, credential_type, username, secret_data, description,
+                   folder_id, favorite, expires_at, created_at, updated_at`;
 
-function rowToCredential(r: CredRow, box: SecretBox): Credential {
+interface FieldRow {
+  id: string; credential_id: string; label: string;
+  value_enc: Record<string, unknown>; is_secret: boolean; sort_order: number;
+}
+
+const FIELD_COLS = `id, credential_id, label, value_enc, is_secret, sort_order`;
+
+function rowToField(r: FieldRow, box: SecretBox): CredentialField {
+  // value_enc wraps { v: <string> } in the standard secret envelope.
+  const opened = box.open(r.value_enc ?? {}) as { v?: unknown };
+  return {
+    id: r.id, label: r.label,
+    value: typeof opened.v === "string" ? opened.v : "",
+    isSecret: r.is_secret, sortOrder: r.sort_order,
+  };
+}
+
+function rowToCredential(r: CredRow, box: SecretBox, fields: CredentialField[]): Credential {
   return {
     id: r.id, userId: r.user_id, name: r.name,
     credentialType: r.credential_type as CredentialType,
@@ -233,19 +254,46 @@ function rowToCredential(r: CredRow, box: SecretBox): Credential {
     // Legacy plaintext rows pass through unchanged.
     secretData: box.open(r.secret_data ?? {}),
     description: r.description,
+    folderId: r.folder_id,
+    favorite: r.favorite,
+    expiresAt: r.expires_at,
+    fields,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
+}
+
+export interface CredentialFieldInput {
+  label: string;
+  value: string;
+  isSecret?: boolean;
+  sortOrder?: number;
+}
+
+export interface CredentialListFilters {
+  folderId?: string | "root" | null;
+  favoritesOnly?: boolean;
 }
 
 export class CredentialRepository {
   constructor(private readonly pool: Pool, private readonly box: SecretBox) {}
 
-  async listForUser(userId: string): Promise<Credential[]> {
+  async listForUser(userId: string, filters: CredentialListFilters = {}): Promise<Credential[]> {
+    const where = ["user_id = $1"];
+    const params: unknown[] = [userId];
+    if (filters.folderId === "root") {
+      where.push("folder_id IS NULL");
+    } else if (filters.folderId) {
+      params.push(filters.folderId);
+      where.push(`folder_id = $${params.length}`);
+    }
+    if (filters.favoritesOnly) where.push("favorite = TRUE");
+
     const { rows } = await this.pool.query<CredRow>(
-      `SELECT ${CRED_COLS} FROM credentials WHERE user_id = $1 ORDER BY name`,
-      [userId],
+      `SELECT ${CRED_COLS} FROM credentials WHERE ${where.join(" AND ")} ORDER BY favorite DESC, name`,
+      params,
     );
-    return rows.map((r) => rowToCredential(r, this.box));
+    const fieldMap = await this.fieldsForCredentials(rows.map((r) => r.id));
+    return rows.map((r) => rowToCredential(r, this.box, fieldMap.get(r.id) ?? []));
   }
 
   async getById(userId: string, id: string): Promise<Credential> {
@@ -254,27 +302,52 @@ export class CredentialRepository {
       [id, userId],
     );
     if (!rows[0]) throw PhaseTwoErrors.CredentialNotFound();
-    return rowToCredential(rows[0], this.box);
+    const fields = await this.fieldsOf(rows[0].id);
+    return rowToCredential(rows[0], this.box, fields);
   }
 
-  async create(input: { userId: string; name: string; credentialType: CredentialType; username?: string | null; secretData?: Record<string, unknown>; description?: string | null }): Promise<Credential> {
+  async create(input: {
+    userId: string; name: string; credentialType: CredentialType;
+    username?: string | null; secretData?: Record<string, unknown>; description?: string | null;
+    folderId?: string | null; favorite?: boolean; expiresAt?: Date | null;
+    fields?: CredentialFieldInput[];
+  }): Promise<Credential> {
+    const client = await this.pool.connect();
     try {
-      const { rows } = await this.pool.query<CredRow>(
-        `INSERT INTO credentials (user_id, name, credential_type, username, secret_data, description)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+      await client.query("BEGIN");
+      const { rows } = await client.query<CredRow>(
+        `INSERT INTO credentials
+           (user_id, name, credential_type, username, secret_data, description, folder_id, favorite, expires_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, COALESCE($8, FALSE), $9)
          RETURNING ${CRED_COLS}`,
         [input.userId, input.name, input.credentialType, input.username ?? null,
-         JSON.stringify(this.box.seal(input.secretData ?? {})), input.description ?? null],
+         JSON.stringify(this.box.seal(input.secretData ?? {})), input.description ?? null,
+         input.folderId ?? null, input.favorite ?? null, input.expiresAt ?? null],
       );
-      return rowToCredential(rows[0]!, this.box);
+      const cred = rows[0]!;
+      if (input.fields && input.fields.length > 0) {
+        await this.insertFields(client, cred.id, input.fields);
+      }
+      await client.query("COMMIT");
+      const fields = await this.fieldsOf(cred.id);
+      return rowToCredential(cred, this.box, fields);
     } catch (e) {
+      await client.query("ROLLBACK");
       throw wrapUniqueViolation(e, PhaseTwoErrors.CredentialNameTaken);
+    } finally {
+      client.release();
     }
   }
 
-  async update(userId: string, id: string, patch: { name?: string; username?: string | null; secretData?: Record<string, unknown>; description?: string | null }): Promise<Credential> {
+  async update(userId: string, id: string, patch: {
+    name?: string; username?: string | null; secretData?: Record<string, unknown>; description?: string | null;
+    folderId?: string | null; favorite?: boolean; expiresAt?: Date | null;
+    fields?: CredentialFieldInput[];
+  }): Promise<Credential> {
+    const client = await this.pool.connect();
     try {
-      const { rows } = await this.pool.query<CredRow>(
+      await client.query("BEGIN");
+      const { rows } = await client.query<CredRow>(
         `UPDATE credentials SET
            name        = COALESCE($3, name),
            username    = CASE WHEN $4::text = '__nochange__' THEN username
@@ -285,6 +358,13 @@ export class CredentialRepository {
            description = CASE WHEN $6::text = '__nochange__' THEN description
                               WHEN $6::text = '__null__' THEN NULL
                               ELSE $6 END,
+           folder_id   = CASE WHEN $7::text = '__nochange__' THEN folder_id
+                              WHEN $7::text = '__null__' THEN NULL
+                              ELSE $7::uuid END,
+           favorite    = COALESCE($8, favorite),
+           expires_at  = CASE WHEN $9::text = '__nochange__' THEN expires_at
+                              WHEN $9::text = '__null__' THEN NULL
+                              ELSE $9::timestamptz END,
            updated_at  = NOW()
          WHERE id = $1 AND user_id = $2
          RETURNING ${CRED_COLS}`,
@@ -294,19 +374,64 @@ export class CredentialRepository {
           patch.username === undefined ? "__nochange__" : (patch.username === null ? "__null__" : patch.username),
           patch.secretData === undefined ? "__nochange__" : JSON.stringify(this.box.seal(patch.secretData)),
           patch.description === undefined ? "__nochange__" : (patch.description === null ? "__null__" : patch.description),
+          patch.folderId === undefined ? "__nochange__" : (patch.folderId === null ? "__null__" : patch.folderId),
+          patch.favorite ?? null,
+          patch.expiresAt === undefined ? "__nochange__" : (patch.expiresAt === null ? "__null__" : patch.expiresAt.toISOString()),
         ],
       );
       if (!rows[0]) throw PhaseTwoErrors.CredentialNotFound();
-      return rowToCredential(rows[0], this.box);
+      // fields undefined => keep as-is; provided (even empty) => full replace.
+      if (patch.fields !== undefined) {
+        await client.query(`DELETE FROM credential_fields WHERE credential_id = $1`, [id]);
+        if (patch.fields.length > 0) await this.insertFields(client, id, patch.fields);
+      }
+      await client.query("COMMIT");
+      const fields = await this.fieldsOf(id);
+      return rowToCredential(rows[0], this.box, fields);
     } catch (e) {
+      await client.query("ROLLBACK");
       if (e instanceof Error && e.message.includes("credential_not_found")) throw e;
       throw wrapUniqueViolation(e, PhaseTwoErrors.CredentialNameTaken);
+    } finally {
+      client.release();
     }
   }
 
   async delete(userId: string, id: string): Promise<void> {
     const r = await this.pool.query(`DELETE FROM credentials WHERE id = $1 AND user_id = $2`, [id, userId]);
     if (r.rowCount === 0) throw PhaseTwoErrors.CredentialNotFound();
+  }
+
+  // ---- custom fields -------------------------------------------------
+
+  private async insertFields(client: PoolClient, credentialId: string, fields: CredentialFieldInput[]): Promise<void> {
+    for (const [i, f] of fields.entries()) {
+      await client.query(
+        `INSERT INTO credential_fields (credential_id, label, value_enc, is_secret, sort_order)
+         VALUES ($1, $2, $3::jsonb, $4, $5)`,
+        [credentialId, f.label, JSON.stringify(this.box.seal({ v: f.value })), f.isSecret ?? true, f.sortOrder ?? i],
+      );
+    }
+  }
+
+  private async fieldsOf(credentialId: string): Promise<CredentialField[]> {
+    const { rows } = await this.pool.query<FieldRow>(
+      `SELECT ${FIELD_COLS} FROM credential_fields WHERE credential_id = $1 ORDER BY sort_order, label`,
+      [credentialId],
+    );
+    return rows.map((r) => rowToField(r, this.box));
+  }
+
+  private async fieldsForCredentials(ids: string[]): Promise<Map<string, CredentialField[]>> {
+    const map = new Map<string, CredentialField[]>();
+    if (ids.length === 0) return map;
+    const { rows } = await this.pool.query<FieldRow>(
+      `SELECT ${FIELD_COLS} FROM credential_fields WHERE credential_id = ANY($1::uuid[]) ORDER BY sort_order, label`,
+      [ids],
+    );
+    for (const id of ids) map.set(id, []);
+    for (const r of rows) map.get(r.credential_id)?.push(rowToField(r, this.box));
+    return map;
   }
 }
 

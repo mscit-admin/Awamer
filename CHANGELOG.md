@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.49.0] — 2026-07-03 — Credential vault, phase 1 (organization + custom fields)
+
+### Added
+- **Credential folders.** Credentials can now be placed in the existing folder
+  tree (reusing the `folders` table via a new `credentials.folder_id` FK, set
+  null on folder delete). The Credentials page gained a folder filter, a search
+  box, and a favorites filter.
+- **Favorites & expiry.** Credentials can be starred (`credentials.favorite`)
+  and given an optional expiry date (`credentials.expires_at`). The list surfaces
+  an "expired" / "expiring soon" badge and sorts favorites first.
+- **Custom fields (KeePass-style advanced fields).** Arbitrary labelled fields
+  can hang off a credential (new `credential_fields` table). Each value is
+  encrypted at rest with the same AES-256-GCM envelope as `secret_data`
+  (`value_enc`). Fields marked *secret* are masked in the UI and withheld from
+  the non-reveal projection; *plain* fields (URLs, account IDs) are visible.
+  Field values are only decrypted back to the client on
+  `GET /credentials/:id?reveal=true`, which already requires `credentials:reveal`
+  and is audit-logged.
+- **Password generator.** A client-side CSPRNG generator (rejection sampling
+  over a configurable alphabet, look-alike exclusion, entropy estimate) is
+  available on the password field and on secret custom fields. Nothing is sent
+  to the server until saved.
+
+### API
+- `POST`/`PATCH /api/v1/credentials` accept `folder_id`, `favorite`,
+  `expires_at`, and a `fields[]` array (`{ label, value, is_secret?, sort_order? }`).
+  On update, omitting `fields` keeps existing fields; sending any array (incl.
+  empty) is a full replace.
+- `GET /api/v1/credentials` accepts `folder_id` (or `root`) and `favorites_only`
+  filters; list/detail responses now include `folder_id`, `favorite`,
+  `expires_at`, and a masked `fields[]` projection.
+
+### Migration
+- `015_credential_vault` — adds `credentials.{folder_id,favorite,expires_at}`
+  and the `credential_fields` table (values encrypted at rest, cascade-deleted
+  with their credential). No new permission: organization/fields reuse
+  `resources:write` for writes and `credentials:reveal` for viewing values.
+
+> Roadmap for later phases (not in this change): per-credential TOTP, encrypted
+> file attachments, sealed zero-knowledge mode + vault unlock, and team sharing.
+
 ## [1.48.1] — 2026-07-02 — Security & stability hardening (audit follow-up)
 
 ### Fixed / Security
