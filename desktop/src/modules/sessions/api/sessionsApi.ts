@@ -42,6 +42,24 @@ export interface Tag {
   created_at?: string;
 }
 
+export interface CredentialFieldPublic {
+  id: string;
+  label: string;
+  isSecret: boolean;
+  sortOrder: number;
+  hasValue: boolean;
+  /** Present for non-secret fields always, and for secret fields only on reveal. */
+  value?: string;
+}
+
+/** Custom-field payload sent when creating/updating a credential. */
+export interface CredentialFieldInput {
+  label: string;
+  value: string;
+  is_secret?: boolean;
+  sort_order?: number;
+}
+
 export interface CredentialPublic {
   id: string;
   name: string;
@@ -49,6 +67,10 @@ export interface CredentialPublic {
   username: string | null;
   description: string | null;
   hasSecret: boolean;
+  folderId: string | null;
+  favorite: boolean;
+  expiresAt: string | null;
+  fields: CredentialFieldPublic[];
   createdAt: string;
   updatedAt: string;
   /** Only present on GET /credentials/:id?reveal=true */
@@ -154,6 +176,10 @@ export const credentialsApi = {
     username?: string | null;
     secret_data?: Record<string, unknown>;
     description?: string | null;
+    folder_id?: string | null;
+    favorite?: boolean;
+    expires_at?: string | null;
+    fields?: CredentialFieldInput[];
   }) {
     return request<CredentialPublic>("/api/v1/credentials", { method: "POST", body: input });
   },
@@ -162,6 +188,10 @@ export const credentialsApi = {
     username?: string | null;
     secret_data?: Record<string, unknown>;
     description?: string | null;
+    folder_id?: string | null;
+    favorite?: boolean;
+    expires_at?: string | null;
+    fields?: CredentialFieldInput[];
   }) {
     return request<CredentialPublic>(`/api/v1/credentials/${id}`, { method: "PATCH", body: patch });
   },
