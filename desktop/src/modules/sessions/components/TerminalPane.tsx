@@ -11,6 +11,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { isTauri, DESKTOP_ONLY_MESSAGE } from "@/shared/lib/tauri";
 import { hostsApi, credentialsApi, type Host } from "../api/sessionsApi";
+import { vpnClient } from "../api/vpnApi";
 import {
   useTerminalTabs,
   type TerminalTab,
@@ -194,6 +195,15 @@ export function TerminalPane({ tab }: { tab: TerminalTab }) {
     setBusy(true);
     updateTab(tab.tabId, { phase: "connecting", errorMessage: null, errorCode: null });
     try {
+      // If this asset (or an ancestor folder) is behind a VPN, bring the
+      // tunnel up first so the SSH connect can reach it.
+      try {
+        await vpnClient.ensureForHost(tab.hostId);
+      } catch (ve) {
+        setError(tab.tabId, "vpn_required", ve instanceof Error ? ve.message : "VPN connection failed");
+        setBusy(false);
+        return;
+      }
       const result = await invoke<{ session_id: string; history_id: number | null }>("ssh_connect", {
         args: {
           api_base_url: API_BASE_URL,

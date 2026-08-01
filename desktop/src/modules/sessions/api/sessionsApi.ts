@@ -27,6 +27,7 @@ export interface Folder {
   color: string | null;
   icon: string | null;
   sort_order: number;
+  vpn_profile_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -111,6 +112,7 @@ export interface Host {
   description: string | null;
   is_favorite: boolean;
   is_shared: boolean;
+  vpn_profile_id: string | null;
   owner_id?: string;
   options: Record<string, unknown>;
   last_used_at: string | null;
@@ -152,10 +154,10 @@ export const foldersApi = {
   list() {
     return request<{ data: Folder[]; tree: FolderTreeNode[] }>("/api/v1/folders");
   },
-  create(input: Partial<Pick<Folder, "name" | "parent_id" | "color" | "icon" | "sort_order">> & { name: string }) {
+  create(input: Partial<Pick<Folder, "name" | "parent_id" | "color" | "icon" | "sort_order" | "vpn_profile_id">> & { name: string }) {
     return request<Folder>("/api/v1/folders", { method: "POST", body: input });
   },
-  update(id: string, patch: Partial<Pick<Folder, "name" | "parent_id" | "color" | "icon" | "sort_order">>) {
+  update(id: string, patch: Partial<Pick<Folder, "name" | "parent_id" | "color" | "icon" | "sort_order" | "vpn_profile_id">>) {
     return request<Folder>(`/api/v1/folders/${id}`, { method: "PATCH", body: patch });
   },
   delete(id: string) {
@@ -293,6 +295,7 @@ export const hostsApi = {
     description?: string | null;
     options?: Record<string, unknown>;
     is_shared?: boolean;
+    vpn_profile_id?: string | null;
     tag_ids?: string[];
   }) {
     return request<Host>("/api/v1/hosts", { method: "POST", body: input });
@@ -308,6 +311,7 @@ export const hostsApi = {
     options?: Record<string, unknown>;
     is_favorite?: boolean;
     is_shared?: boolean;
+    vpn_profile_id?: string | null;
     tag_ids?: string[];
   }) {
     return request<Host>(`/api/v1/hosts/${id}`, { method: "PATCH", body: patch });

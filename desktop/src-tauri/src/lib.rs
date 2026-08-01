@@ -55,6 +55,10 @@ pub fn run() {
             commands::sftp::sftp_chmod,
             commands::sftp::sftp_chown,
             commands::sftp::sftp_download_dir,
+            commands::vpn::vpn_connect,
+            commands::vpn::vpn_disconnect,
+            commands::vpn::vpn_status,
+            commands::vpn::vpn_list,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

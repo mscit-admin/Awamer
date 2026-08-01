@@ -62,6 +62,9 @@ import { makeTelnetGateway } from "./telnet/gateway.js";
 import { TunnelManager } from "./ssh/tunnelManager.js";
 import { makeTunnelRoutes } from "./routes/tunnels.js";
 import { makeWsTunnelGateway } from "./ssh/wsTunnelGateway.js";
+import { VpnProfileRepository } from "./repos/vpnRepo.js";
+import { VpnManager } from "./vpn/vpnManager.js";
+import { makeVpnRoutes } from "./routes/vpn.js";
 
 async function main() {
   const cfg = loadConfig();
@@ -97,6 +100,9 @@ async function main() {
   const aiProviders = new AiProviderRepository(pool, secretBox);
   // Phase 5 — server-managed SSH local tunnels (in-memory).
   const tunnels = new TunnelManager({ hosts, credentials, log });
+  // OpenVPN client profiles (encrypted) + backend-runtime tunnel manager.
+  const vpnProfiles = new VpnProfileRepository(pool, secretBox);
+  const vpnManager = new VpnManager(log);
   // Backup / restore of a user's own session data.
   const backup = new BackupRepository(pool, secretBox);
   // Custom roles — load the DB-backed RBAC resolver before serving traffic.
@@ -190,11 +196,14 @@ async function main() {
   // per-user WebSocket TCP tunnel.
   await app.register(makeTunnelRoutes({ tunnels, jwt }), { prefix: "/api/v1/tunnels" });
   await app.register(makeWsTunnelGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/tunnel" });
+  // OpenVPN client profiles + backend-runtime connections.
+  await app.register(makeVpnRoutes({ vpn: vpnProfiles, manager: vpnManager, audit, jwt }), { prefix: "/api/v1/vpn" });
 
   const closeOn = (sig: NodeJS.Signals) => async () => {
     log.info({ sig }, "shutdown signal received");
     try {
       tunnels.stopAll();
+      vpnManager.stopAll();
       await app.close();
       await pool.end();
       log.info("clean shutdown complete");

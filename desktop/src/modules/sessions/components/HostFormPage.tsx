@@ -6,6 +6,7 @@ import {
   type Folder, type Tag, type CredentialPublic,
   type HostProtocol,
 } from "../api/sessionsApi";
+import { vpnApi, type VpnProfile } from "../api/vpnApi";
 import { authApi } from "@/modules/auth/api/authApi";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 
@@ -29,6 +30,8 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
   const [protocol, setProtocol] = useState<HostProtocol>(prefill?.protocol ?? "ssh");
   const [folderId, setFolderId] = useState<string>("");
   const [credentialId, setCredentialId] = useState<string>("");
+  const [vpnProfileId, setVpnProfileId] = useState<string>("");
+  const [vpnProfiles, setVpnProfiles] = useState<VpnProfile[]>([]);
   const [description, setDescription] = useState("");
   const [isShared, setIsShared] = useState(false);
   const [shareUserIds, setShareUserIds] = useState<string[]>([]);
@@ -54,6 +57,8 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
       setTags(t.data);
       setCredentials(c.data);
       setDirectory(dir.data.filter((u) => u.id !== myId));
+      // VPN profiles need vpn:manage — tolerate a 403 for users without it.
+      try { setVpnProfiles((await vpnApi.list()).data); } catch { /* no vpn access */ }
 
       if (isEdit && params.id) {
         try {
@@ -64,6 +69,7 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
           setProtocol(host.protocol);
           setFolderId(host.folder_id ?? "");
           setCredentialId(host.credential_id ?? "");
+          setVpnProfileId(host.vpn_profile_id ?? "");
           setDescription(host.description ?? "");
           setIsShared(host.is_shared);
           setTagIds(host.tags.map((tg) => tg.id));
@@ -112,6 +118,7 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
         protocol,
         folder_id: folderId || null,
         credential_id: credentialId || null,
+        vpn_profile_id: vpnProfileId || null,
         description: description.trim() || null,
         is_shared: isShared,
         tag_ids: tagIds,
@@ -235,6 +242,20 @@ export function HostFormPage({ mode }: { mode: "create" | "edit" }) {
             ))}
           </select>
         </Field>
+
+        {vpnProfiles.length > 0 && (
+          <Field label="VPN">
+            <select value={vpnProfileId} onChange={(e) => setVpnProfileId(e.target.value)} className="input">
+              <option value="">— Inherit from folder —</option>
+              {vpnProfiles.map((v) => (
+                <option key={v.id} value={v.id}>{v.name} ({v.runtime})</option>
+              ))}
+            </select>
+            <p className="text-2xs text-fg-muted mt-1">
+              A VPN profile is established before connecting to this asset. Leave on “inherit” to use the folder’s VPN.
+            </p>
+          </Field>
+        )}
 
         <Field label="Description">
           <textarea

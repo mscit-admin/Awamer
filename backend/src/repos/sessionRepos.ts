@@ -30,15 +30,17 @@ function wrapUniqueViolation(e: unknown, makeErr: () => Error): Error {
 interface FolderRow {
   id: string; user_id: string; parent_id: string | null;
   name: string; color: string | null; icon: string | null;
-  sort_order: number; created_at: Date; updated_at: Date;
+  sort_order: number; vpn_profile_id: string | null;
+  created_at: Date; updated_at: Date;
 }
 
-const FOLDER_COLS = `id, user_id, parent_id, name, color, icon, sort_order, created_at, updated_at`;
+const FOLDER_COLS = `id, user_id, parent_id, name, color, icon, sort_order, vpn_profile_id, created_at, updated_at`;
 
 function rowToFolder(r: FolderRow): Folder {
   return {
     id: r.id, userId: r.user_id, parentId: r.parent_id,
     name: r.name, color: r.color, icon: r.icon, sortOrder: r.sort_order,
+    vpnProfileId: r.vpn_profile_id,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -63,13 +65,13 @@ export class FolderRepository {
     return rowToFolder(rows[0]);
   }
 
-  async create(input: { userId: string; parentId: string | null; name: string; color?: string | null; icon?: string | null; sortOrder?: number }): Promise<Folder> {
+  async create(input: { userId: string; parentId: string | null; name: string; color?: string | null; icon?: string | null; sortOrder?: number; vpnProfileId?: string | null }): Promise<Folder> {
     try {
       const { rows } = await this.pool.query<FolderRow>(
-        `INSERT INTO folders (user_id, parent_id, name, color, icon, sort_order)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0))
+        `INSERT INTO folders (user_id, parent_id, name, color, icon, sort_order, vpn_profile_id)
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), $7)
          RETURNING ${FOLDER_COLS}`,
-        [input.userId, input.parentId, input.name, input.color ?? null, input.icon ?? null, input.sortOrder ?? null],
+        [input.userId, input.parentId, input.name, input.color ?? null, input.icon ?? null, input.sortOrder ?? null, input.vpnProfileId ?? null],
       );
       return rowToFolder(rows[0]!);
     } catch (e) {
@@ -77,7 +79,7 @@ export class FolderRepository {
     }
   }
 
-  async update(userId: string, id: string, patch: Partial<Pick<Folder, "name" | "color" | "icon" | "sortOrder" | "parentId">>): Promise<Folder> {
+  async update(userId: string, id: string, patch: Partial<Pick<Folder, "name" | "color" | "icon" | "sortOrder" | "parentId" | "vpnProfileId">>): Promise<Folder> {
     // Cycle detection for parent_id changes.
     if (patch.parentId !== undefined && patch.parentId !== null) {
       if (patch.parentId === id) throw PhaseTwoErrors.FolderCycle();
@@ -95,6 +97,9 @@ export class FolderRepository {
            parent_id  = CASE WHEN $7::text = '__nochange__' THEN parent_id
                              WHEN $7::text = '__null__' THEN NULL
                              ELSE $7::uuid END,
+           vpn_profile_id = CASE WHEN $8::text = '__nochange__' THEN vpn_profile_id
+                                 WHEN $8::text = '__null__' THEN NULL
+                                 ELSE $8::uuid END,
            updated_at = NOW()
          WHERE id = $1 AND user_id = $2
          RETURNING ${FOLDER_COLS}`,
@@ -105,6 +110,7 @@ export class FolderRepository {
           patch.icon === undefined ? "__nochange__" : (patch.icon === null ? "__null__" : patch.icon),
           patch.sortOrder ?? null,
           patch.parentId === undefined ? "__nochange__" : (patch.parentId === null ? "__null__" : patch.parentId),
+          patch.vpnProfileId === undefined ? "__nochange__" : (patch.vpnProfileId === null ? "__null__" : patch.vpnProfileId),
         ],
       );
       if (!rows[0]) throw PhaseTwoErrors.FolderNotFound();
@@ -486,13 +492,14 @@ interface HostRow {
   id: string; user_id: string; folder_id: string | null; credential_id: string | null;
   name: string; hostname: string; port: number; protocol: string;
   description: string | null; is_favorite: boolean; is_shared: boolean;
+  vpn_profile_id: string | null;
   options: Record<string, unknown>;
   last_used_at: Date | null; use_count: number;
   created_at: Date; updated_at: Date;
 }
 
 const HOST_COLS = `id, user_id, folder_id, credential_id, name, hostname, port, protocol,
-                   description, is_favorite, is_shared, options, last_used_at, use_count, created_at, updated_at`;
+                   description, is_favorite, is_shared, vpn_profile_id, options, last_used_at, use_count, created_at, updated_at`;
 
 function rowToHost(r: HostRow): Host {
   return {
@@ -500,6 +507,7 @@ function rowToHost(r: HostRow): Host {
     name: r.name, hostname: r.hostname, port: r.port,
     protocol: r.protocol as HostProtocol,
     description: r.description, isFavorite: r.is_favorite, isShared: r.is_shared,
+    vpnProfileId: r.vpn_profile_id,
     options: r.options ?? {},
     lastUsedAt: r.last_used_at, useCount: r.use_count,
     createdAt: r.created_at, updatedAt: r.updated_at,
@@ -605,11 +613,12 @@ export class HostRepository {
     description?: string | null;
     options?: Record<string, unknown>;
     isShared?: boolean;
+    vpnProfileId?: string | null;
   }): Promise<Host> {
     try {
       const { rows } = await this.pool.query<HostRow>(
-        `INSERT INTO hosts (user_id, name, hostname, port, protocol, folder_id, credential_id, description, options, is_shared)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+        `INSERT INTO hosts (user_id, name, hostname, port, protocol, folder_id, credential_id, description, options, is_shared, vpn_profile_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
          RETURNING ${HOST_COLS}`,
         [
           input.userId, input.name, input.hostname, input.port, input.protocol,
@@ -617,6 +626,7 @@ export class HostRepository {
           input.description ?? null,
           JSON.stringify(input.options ?? {}),
           input.isShared ?? false,
+          input.vpnProfileId ?? null,
         ],
       );
       return rowToHost(rows[0]!);
@@ -632,6 +642,7 @@ export class HostRepository {
     options?: Record<string, unknown>;
     isFavorite?: boolean;
     isShared?: boolean;
+    vpnProfileId?: string | null;
   }): Promise<Host> {
     try {
       const { rows } = await this.pool.query<HostRow>(
@@ -653,6 +664,9 @@ export class HostRepository {
                               ELSE $10::jsonb END,
            is_favorite = COALESCE($11, is_favorite),
            is_shared   = COALESCE($12, is_shared),
+           vpn_profile_id = CASE WHEN $13::text = '__nochange__' THEN vpn_profile_id
+                                 WHEN $13::text = '__null__' THEN NULL
+                                 ELSE $13::uuid END,
            updated_at  = NOW()
          WHERE id = $1 AND user_id = $2
          RETURNING ${HOST_COLS}`,
@@ -666,6 +680,7 @@ export class HostRepository {
           patch.options === undefined ? "__nochange__" : JSON.stringify(patch.options),
           patch.isFavorite ?? null,
           patch.isShared ?? null,
+          patch.vpnProfileId === undefined ? "__nochange__" : (patch.vpnProfileId === null ? "__null__" : patch.vpnProfileId),
         ],
       );
       if (!rows[0]) throw PhaseTwoErrors.HostNotFound();

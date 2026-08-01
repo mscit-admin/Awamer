@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.51.0] — 2026-08-01 — OpenVPN client profiles (reach assets behind a VPN)
+
+### Added
+- **VPN — OpenVPN client profiles.** Awamer can now reach assets that live
+  behind an OpenVPN tunnel. A new **VPN** page (`/vpn`) manages profiles created
+  by **uploading a `.ovpn` file** or **entering settings manually** (remote
+  host/port/proto, inline CA/cert/key/tls-auth, optional username/password).
+  Profiles are stored in the backend, **encrypted at rest** with the same
+  AES-256-GCM `SecretBox` as credential secrets — never plaintext.
+- **Per-profile runtime.** Each profile chooses where its tunnel runs:
+  - **Desktop (native)** — the desktop app spawns the local `openvpn` client
+    (needs `openvpn` installed + elevated privileges on the machine). Multiple
+    tunnels to different zones can be up at once.
+  - **Backend** — the server runs `openvpn` and manages the connection.
+- **Folder & asset association + inheritance.** A VPN profile can be attached to
+  a **folder** (applies to every asset under it) and/or directly to a **host**.
+  A host's *effective* profile is its own, else the nearest ancestor folder's,
+  walking up the folder tree.
+- **Auto-connect before a session.** When you open a native SSH session to an
+  asset whose effective profile has *auto-connect* on, Awamer establishes (or
+  reuses) the tunnel first, then connects.
+- **RBAC:** new **`vpn:manage`** permission (create/use VPN profiles, attach them
+  to assets/folders). Granted to **super_admin**, **admin**, and the built-in
+  **user** role by default; add it to custom roles from the Roles page.
+
+### Internal
+- Migration `017_vpn_profiles`: `vpn_profiles` table (runtime, source, remote,
+  auth mode, encrypted secret bundle) + `vpn_profile_id` on `folders`/`hosts`
+  (`ON DELETE SET NULL`). New `VpnProfileRepository`, backend `VpnManager`
+  (server-runtime openvpn process manager), and `/api/v1/vpn/*` routes (profile
+  CRUD, audited config reveal, host→profile resolve, backend connections).
+- Desktop: native `vpn_connect` / `vpn_disconnect` / `vpn_status` / `vpn_list`
+  Tauri commands (Rust) tracking multiple concurrent `openvpn` processes.
+- Fixed a pre-existing merge corruption in `src-tauri/src/commands/sftp.rs`
+  (duplicated `sftp_chmod` / interleaved `sftp_chown` body) that prevented the
+  desktop crate from compiling.
+
 ## [1.50.1] — 2026-07-03 — KeePass-style OTP actions on a credential
 
 ### Added

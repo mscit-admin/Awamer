@@ -43,6 +43,8 @@ export interface Folder {
   color: string | null;
   icon: string | null;
   sortOrder: number;
+  /** Optional VPN profile applied to every asset under this folder (017). */
+  vpnProfileId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -208,6 +210,8 @@ export interface Host {
   isFavorite: boolean;
   /** When true, visible & connectable by all users; editable only by owner. */
   isShared: boolean;
+  /** Optional VPN profile that must be up to reach this asset (017). */
+  vpnProfileId: string | null;
   options: Record<string, unknown>;
   lastUsedAt: Date | null;
   useCount: number;
