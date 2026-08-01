@@ -27,6 +27,7 @@ export const PERMISSIONS = [
   "ai:use",             // use AI assistance in the terminal
   "ai:manage",          // configure the organization's AI providers
   "ai:use_personal",    // add / use personal AI provider subscriptions
+  "vpn:manage",         // create / use OpenVPN client profiles to reach assets
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -46,6 +47,7 @@ export const PERMISSION_META: Record<Permission, { label: string; description: s
   "ai:use":             { label: "Use AI assistant", description: "Use AI assistance (suggest, explain, analyze) in the terminal" },
   "ai:manage":          { label: "Manage org AI providers", description: "Configure the organization's shared AI provider subscriptions" },
   "ai:use_personal":    { label: "Use personal AI", description: "Add and use personal AI provider subscriptions with your own API keys" },
+  "vpn:manage":         { label: "Manage VPN", description: "Create and use OpenVPN client profiles, and attach them to assets and folders, to reach assets behind a VPN" },
 };
 
 const ALL: Permission[] = [...PERMISSIONS];
@@ -58,7 +60,7 @@ export const BUILTIN_ROLES: { key: string; name: string; description: string; pe
   { key: "super_admin", name: "Super admin", description: "Full access to everything.", permissions: ALL },
   { key: "admin",       name: "Admin",       description: "Full access within their company.", permissions: ADMIN_ALL },
   { key: "user",        name: "User",        description: "Self-service over own resources; no user administration.",
-    permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage", "command_history:read", "ai:use", "ai:use_personal"] },
+    permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage", "command_history:read", "ai:use", "ai:use_personal", "vpn:manage"] },
   { key: "readonly",    name: "Read-only",   description: "Browse the inventory; cannot modify, connect, or reveal secrets.", permissions: [] },
   { key: "auditor",     name: "Auditor",     description: "Read-only plus access to audit logs.", permissions: ["audit:read"] },
 ];

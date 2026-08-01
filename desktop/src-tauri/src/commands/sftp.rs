@@ -620,13 +620,6 @@ pub async fn sftp_upload(
 // `/etc/passwd`, both of which we'd rather not do silently. The UI
 // shows the current numeric ids and lets the user override them.
 
-/// Change the POSIX mode bits on `path`. `mode` is masked to 0o7777.
-#[tauri::command]
-pub async fn sftp_chmod(
-    session_id: String,
-    path: String,
-    mode: u32,
-) -> Result<(), AppError> {
 // =====================================================================
 // 1.7.0 — chmod + recursive folder download
 // =====================================================================
@@ -676,6 +669,20 @@ pub async fn sftp_chown(
     if uid.is_none() && gid.is_none() {
         return Ok(());
     }
+    let map = SESSIONS.lock().await;
+    let session = map.get(&session_id).ok_or_else(|| {
+        AppError::new("sftp_session_not_found", format!("no SFTP session {session_id}"))
+    })?;
+    let mut attrs = russh_sftp::protocol::FileAttributes::default();
+    attrs.uid = uid;
+    attrs.gid = gid;
+    session.sftp.set_metadata(&path, attrs).await
+        .map_err(|e| AppError::new("sftp_chown_failed",
+            format!("chown {path} -> uid={uid:?} gid={gid:?}: {e}")))?;
+    tracing::info!(session_id = %session_id, %path, ?uid, ?gid, "sftp chown");
+    Ok(())
+}
+
 /// A single file discovered while walking a remote directory tree, with
 /// its path relative to the download root so we can recreate the layout
 /// locally.
@@ -751,14 +758,6 @@ pub async fn sftp_download_dir(
     let session = map.get(&session_id).ok_or_else(|| {
         AppError::new("sftp_session_not_found", format!("no SFTP session {session_id}"))
     })?;
-    let mut attrs = russh_sftp::protocol::FileAttributes::default();
-    attrs.uid = uid;
-    attrs.gid = gid;
-    session.sftp.set_metadata(&path, attrs).await
-        .map_err(|e| AppError::new("sftp_chown_failed",
-            format!("chown {path} -> uid={uid:?} gid={gid:?}: {e}")))?;
-    tracing::info!(session_id = %session_id, %path, ?uid, ?gid, "sftp chown");
-    Ok(())
 
     // Pre-walk: discover every file and the grand total of bytes.
     let mut files: Vec<PlannedFile> = Vec::new();

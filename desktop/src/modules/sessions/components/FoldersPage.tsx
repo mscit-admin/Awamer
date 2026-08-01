@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { Folder as FolderIcon, Plus, Trash2, Edit3, X, Check, ChevronRight } from "lucide-react";
 import { foldersApi, type Folder, type FolderTreeNode } from "../api/sessionsApi";
+import { vpnApi, type VpnProfile } from "../api/vpnApi";
 import { useCan } from "@/shared/lib/permissions";
 
 export function FoldersPage() {
@@ -155,8 +156,15 @@ function FolderFormInline({
   const [name, setName] = useState(existing?.name ?? "");
   const [parentId, setParentId] = useState(existing?.parent_id ?? "");
   const [color, setColor] = useState(existing?.color ?? "");
+  const [vpnProfileId, setVpnProfileId] = useState(existing?.vpn_profile_id ?? "");
+  const [vpnProfiles, setVpnProfiles] = useState<VpnProfile[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // VPN profiles need vpn:manage — tolerate a 403 for users without it.
+    void vpnApi.list().then((r) => setVpnProfiles(r.data)).catch(() => { /* no vpn access */ });
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -168,12 +176,14 @@ function FolderFormInline({
           name: name.trim(),
           parent_id: parentId || null,
           color: color || null,
+          vpn_profile_id: vpnProfileId || null,
         });
       } else {
         await foldersApi.create({
           name: name.trim(),
           parent_id: parentId || null,
           color: color || null,
+          vpn_profile_id: vpnProfileId || null,
         });
       }
       onSaved();
@@ -226,6 +236,16 @@ function FolderFormInline({
           />
         ))}
       </div>
+      {vpnProfiles.length > 0 && (
+        <div className="flex gap-1.5 items-center text-xs text-fg-muted">
+          <span>VPN:</span>
+          <select value={vpnProfileId} onChange={(e) => setVpnProfileId(e.target.value)} className="input max-w-[240px] py-0.5 text-xs">
+            <option value="">— None —</option>
+            {vpnProfiles.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.runtime})</option>)}
+          </select>
+          <span className="text-2xs">applies to all assets under this folder</span>
+        </div>
+      )}
     </form>
   );
 }

@@ -42,6 +42,7 @@ function serializeFolder(f: Folder) {
     color: f.color,
     icon: f.icon,
     sort_order: f.sortOrder,
+    vpn_profile_id: f.vpnProfileId,
     created_at: f.createdAt,
     updated_at: f.updatedAt,
   };
@@ -78,6 +79,7 @@ export function makeFolderRoutes(deps: FolderDeps): FastifyPluginAsync {
       color: z.string().max(20).nullable().optional(),
       icon: z.string().max(40).nullable().optional(),
       sort_order: z.number().int().optional(),
+      vpn_profile_id: z.string().uuid().nullable().optional(),
     });
 
     app.post("/", async (req, reply) => {
@@ -91,6 +93,7 @@ export function makeFolderRoutes(deps: FolderDeps): FastifyPluginAsync {
           color: parsed.data.color ?? null,
           icon: parsed.data.icon ?? null,
           sortOrder: parsed.data.sort_order,
+          vpnProfileId: parsed.data.vpn_profile_id ?? null,
         });
         await deps.audit.log({ userId: req.auth!.sub, action: "folder_create", success: true, resourceType: "folder", resourceId: folder.id });
         return reply.code(201).send(serializeFolder(folder));
@@ -108,6 +111,7 @@ export function makeFolderRoutes(deps: FolderDeps): FastifyPluginAsync {
       color: z.string().max(20).nullable().optional(),
       icon: z.string().max(40).nullable().optional(),
       sort_order: z.number().int().optional(),
+      vpn_profile_id: z.string().uuid().nullable().optional(),
     });
 
     app.patch("/:id", async (req, reply) => {
@@ -123,6 +127,7 @@ export function makeFolderRoutes(deps: FolderDeps): FastifyPluginAsync {
           color: parsed.data.color,
           icon: parsed.data.icon,
           sortOrder: parsed.data.sort_order,
+          vpnProfileId: parsed.data.vpn_profile_id,
         });
         await deps.audit.log({ userId: req.auth!.sub, action: "folder_update", success: true, resourceType: "folder", resourceId: folder.id });
         return reply.send(serializeFolder(folder));

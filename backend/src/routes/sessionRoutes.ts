@@ -28,6 +28,7 @@ function serializeHost(h: Host, tags: Tag[] = []) {
     description: h.description,
     is_favorite: h.isFavorite,
     is_shared: h.isShared,
+    vpn_profile_id: h.vpnProfileId,
     owner_id: h.userId,
     options: h.options,
     last_used_at: h.lastUsedAt,
@@ -103,6 +104,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
       description: z.string().max(1000).nullable().optional(),
       options: z.record(z.unknown()).optional(),
       is_shared: z.boolean().optional(),
+      vpn_profile_id: z.string().uuid().nullable().optional(),
       tag_ids: z.array(z.string().uuid()).optional(),
     });
 
@@ -124,6 +126,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
           description: parsed.data.description ?? null,
           options: parsed.data.options ?? {},
           isShared: parsed.data.is_shared ?? false,
+          vpnProfileId: parsed.data.vpn_profile_id ?? null,
         });
         let tags: Tag[] = [];
         if (parsed.data.tag_ids?.length) {
@@ -164,6 +167,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
       options: z.record(z.unknown()).optional(),
       is_favorite: z.boolean().optional(),
       is_shared: z.boolean().optional(),
+      vpn_profile_id: z.string().uuid().nullable().optional(),
       tag_ids: z.array(z.string().uuid()).optional(),
     });
 
@@ -184,6 +188,7 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
           options: parsed.data.options,
           isFavorite: parsed.data.is_favorite,
           isShared: parsed.data.is_shared,
+          vpnProfileId: parsed.data.vpn_profile_id,
         });
         let tags: Tag[];
         if (parsed.data.tag_ids !== undefined) {
