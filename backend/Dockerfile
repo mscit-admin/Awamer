@@ -23,13 +23,16 @@ FROM node:20-alpine
 
 # wget+tini for runtime; iputils/traceroute power the Network diagnostics tools.
 # openvpn powers backend-runtime VPN profiles. The container runs as the
-# non-root `app` user, so grant CAP_NET_ADMIN to the openvpn binary itself
-# (file capability, like ping's cap_net_raw) — that lets `app` create the tun
-# device and set routes without running the whole service as root. The
+# non-root `app` user, so grant CAP_NET_ADMIN (file capability, like ping's
+# cap_net_raw) to both the openvpn binary AND the `ip` binary it shells out to
+# for interface/route setup — file capabilities are per-executable, so openvpn's
+# cap does not carry into the `ip` child, which is why `ip link set` fails
+# otherwise. iproute2 provides a full `ip` (BusyBox's is not reliable here). The
 # capability must also be in the container's bounding set: see `cap_add:
 # NET_ADMIN` + the /dev/net/tun device mount in docker-compose.production.yml.
-RUN apk add --no-cache wget tini iputils traceroute openvpn libcap \
- && setcap cap_net_admin+ep "$(command -v openvpn)"
+RUN apk add --no-cache wget tini iputils traceroute openvpn iproute2 libcap \
+ && setcap cap_net_admin+ep "$(command -v openvpn)" \
+ && setcap cap_net_admin+ep "$(command -v ip)"
 
 WORKDIR /app
 
