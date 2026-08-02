@@ -47,6 +47,17 @@ interface ConnRuntime {
 const MAX_CONN_PER_USER = 10;
 const READY_MARKER = "Initialization Sequence Completed";
 
+/**
+ * Distil the most useful line(s) from openvpn's output for an error message —
+ * prefer explicit ERROR/FATAL/warning lines, else fall back to the last line.
+ */
+function tailSummary(tail: string[]): string {
+  if (tail.length === 0) return "";
+  const meaningful = tail.filter((l) => /error|fatal|cannot|failed|denied|unable|auth|tls|no such/i.test(l));
+  const picks = (meaningful.length ? meaningful : tail.slice(-1)).slice(-3);
+  return `: ${picks.join(" | ")}`;
+}
+
 function toPublic(c: ConnRuntime): PublicVpnConnection {
   return {
     id: c.id,
@@ -126,22 +137,33 @@ export class VpnManager {
       const proc = spawn("openvpn", args, { stdio: ["ignore", "pipe", "pipe"] });
       runtime.proc = proc;
 
+      // Keep the last few openvpn log lines so a failure explains itself
+      // (bad config, missing certs, tun permission, auth) instead of just an
+      // exit code. Lines are also logged so `docker logs` shows the detail.
+      const tail: string[] = [];
+
       await new Promise<void>((resolve, reject) => {
         let settled = false;
         const timeout = setTimeout(() => {
           if (settled) return;
           settled = true;
-          reject(new Error("openvpn did not connect within 30s"));
+          reject(new Error(`openvpn did not connect within 30s${tailSummary(tail)}`));
         }, 30_000);
 
         const onLine = (buf: Buffer) => {
-          const text = buf.toString();
-          if (text.includes(READY_MARKER) && !settled) {
-            settled = true;
-            clearTimeout(timeout);
-            runtime.state = "connected";
-            runtime.connectedAt = new Date().toISOString();
-            resolve();
+          for (const raw of buf.toString().split(/\r?\n/)) {
+            const line = raw.trim();
+            if (!line) continue;
+            tail.push(line);
+            if (tail.length > 25) tail.shift();
+            this.log.info({ conn: id, profile: profile.id }, `openvpn: ${line}`);
+            if (line.includes(READY_MARKER) && !settled) {
+              settled = true;
+              clearTimeout(timeout);
+              runtime.state = "connected";
+              runtime.connectedAt = new Date().toISOString();
+              resolve();
+            }
           }
         };
         proc.stdout?.on("data", onLine);
@@ -157,7 +179,7 @@ export class VpnManager {
           if (!settled) {
             settled = true;
             clearTimeout(timeout);
-            reject(new Error(`openvpn exited (code ${code ?? "?"}) before connecting`));
+            reject(new Error(`openvpn exited (code ${code ?? "?"}) before connecting${tailSummary(tail)}`));
           } else if (runtime.state === "connected") {
             runtime.state = "closed";
           }

@@ -108,6 +108,14 @@ services:
       - "127.0.0.1:8081:8081"
     networks:
       - internal
+    # Backend-runtime OpenVPN profiles need to create a tun device and manage
+    # routes. NET_ADMIN + the tun device let the (non-root) openvpn binary,
+    # which carries cap_net_admin+ep from the image, bring tunnels up. Harmless
+    # if you only use desktop-runtime VPN profiles.
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/healthz"]
       interval: 15s
