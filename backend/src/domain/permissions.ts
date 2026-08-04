@@ -29,6 +29,7 @@ export const PERMISSIONS = [
   "ai:use_personal",    // add / use personal AI provider subscriptions
   "vpn:manage",         // create / edit / attach OpenVPN client profiles
   "vpn:reveal",         // read a VPN profile's decrypted config + credentials
+  "vpn_server:manage",  // run OpenVPN server instances + manage their users
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -50,6 +51,7 @@ export const PERMISSION_META: Record<Permission, { label: string; description: s
   "ai:use_personal":    { label: "Use personal AI", description: "Add and use personal AI provider subscriptions with your own API keys" },
   "vpn:manage":         { label: "Manage VPN", description: "Create, edit and attach OpenVPN client profiles to assets and folders" },
   "vpn:reveal":         { label: "Reveal VPN config", description: "Read a VPN profile's decrypted OpenVPN config and credentials (needed to launch a tunnel)" },
+  "vpn_server:manage":  { label: "Manage VPN server", description: "Run OpenVPN server instances on this host, manage their users, and issue client profiles" },
 };
 
 const ALL: Permission[] = [...PERMISSIONS];

@@ -114,16 +114,29 @@ services:
     ports:
       # Bind to LOCALHOST ONLY — nginx will reverse-proxy from public 443
       - "127.0.0.1:8081:8081"
+      # ---- Built-in OpenVPN *server* (VPN Server page) --------------
+      # When this host acts as an OpenVPN hub, external clients dial into the
+      # VPN server's listener. Docker publishes ports statically, so the VPN
+      # server's port must be published here. The default is UDP 1194; publish
+      # both protocols so either a udp or tcp server works out of the box. If
+      # you create a VPN server on a DIFFERENT port, add it here (same
+      # protocol) and re-create the container. Remove these lines if you don't
+      # run a VPN server.
+      - "1194:1194/udp"
+      - "1194:1194/tcp"
     networks:
       - internal
-    # Backend-runtime OpenVPN profiles need to create a tun device and manage
-    # routes. NET_ADMIN + the tun device let the (non-root) openvpn binary,
-    # which carries cap_net_admin+ep from the image, bring tunnels up. Harmless
-    # if you only use desktop-runtime VPN profiles.
+    # Backend-runtime OpenVPN profiles (client) AND the built-in OpenVPN server
+    # both need to create a tun device and manage routes. NET_ADMIN + the tun
+    # device let the openvpn binary (which carries cap_net_admin+ep from the
+    # image) bring tunnels up. ip_forward lets tunnel clients route to each
+    # other / the host. Harmless if you only use desktop-runtime VPN profiles.
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/healthz"]
       interval: 15s

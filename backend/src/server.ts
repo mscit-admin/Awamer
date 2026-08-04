@@ -68,6 +68,9 @@ import { makeWsTunnelGateway } from "./ssh/wsTunnelGateway.js";
 import { VpnProfileRepository } from "./repos/vpnRepo.js";
 import { VpnManager } from "./vpn/vpnManager.js";
 import { makeVpnRoutes } from "./routes/vpn.js";
+import { VpnServerRepository } from "./repos/vpnServerRepo.js";
+import { VpnServerManager } from "./vpn/vpnServerManager.js";
+import { makeVpnServerRoutes } from "./routes/vpnServer.js";
 
 /** Map a DomainError code to an HTTP status for the global error handler. */
 function statusForDomainError(code: string): number {
@@ -114,6 +117,9 @@ async function main() {
   // OpenVPN client profiles (encrypted) + backend-runtime tunnel manager.
   const vpnProfiles = new VpnProfileRepository(pool, secretBox);
   const vpnManager = new VpnManager(log);
+  // Awamer-as-OpenVPN-server: PKI-backed server instances + their users.
+  const vpnServers = new VpnServerRepository(pool, secretBox, argon2);
+  const vpnServerManager = new VpnServerManager(log);
   // Backup / restore of a user's own session data.
   const backup = new BackupRepository(pool, secretBox);
   // Custom roles — load the DB-backed RBAC resolver before serving traffic.
@@ -248,12 +254,15 @@ async function main() {
   await app.register(makeWsTunnelGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/tunnel" });
   // OpenVPN client profiles + backend-runtime connections.
   await app.register(makeVpnRoutes({ vpn: vpnProfiles, manager: vpnManager, audit, jwt }), { prefix: "/api/v1/vpn" });
+  // Built-in OpenVPN server management (PKI, users, .ovpn, start/stop).
+  await app.register(makeVpnServerRoutes({ servers: vpnServers, manager: vpnServerManager, audit, jwt }), { prefix: "/api/v1/vpn-server" });
 
   const closeOn = (sig: NodeJS.Signals) => async () => {
     log.info({ sig }, "shutdown signal received");
     try {
       tunnels.stopAll();
       vpnManager.stopAll();
+      vpnServerManager.stopAll();
       await app.close();
       await pool.end();
       log.info("clean shutdown complete");

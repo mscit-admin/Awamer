@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.52.0] — 2026-08-04 — VPN Server (Awamer as an OpenVPN hub)
+
+### Added
+- **Awamer can now act as an OpenVPN *server*.** For a machine that has internet
+  but no public IP (a NAT'd local Linux box, a roaming laptop), run an OpenVPN
+  hub on the backend host, add users, and hand each one a ready-to-install
+  `.ovpn`. The remote machine installs the profile with OpenVPN Connect (Linux /
+  Windows / macOS) and dials in; it then becomes reachable at its VPN IP
+  (`10.8.0.x`), and — with client-to-client — so do the other members.
+  - **Self-contained PKI** (`backend/src/vpn/pki.ts`): each server mints its own
+    CA + server certificate + `tls-crypt` static key on creation; every user gets
+    a CA-signed client certificate. RSA-2048 keys via native `crypto`, cert
+    issuance via `node-forge`.
+  - **Two-factor client auth:** every user authenticates with **both** a
+    certificate (*something you have*) **and** a username/password
+    (*something you know*). Passwords are Argon2-hashed; verification runs in a
+    short-lived `auth-user-pass-verify` child (`backend/src/vpn/authVerify.ts`).
+    Revoking a user blocks their next connection (enforced at verify time — no CRL
+    needed).
+  - **Server process manager** (`backend/src/vpn/vpnServerManager.ts`): start/stop
+    the `openvpn` process per server from the UI; config is assembled from the DB
+    and written to a private temp dir (`dh none`, `tls-crypt`, `topology subnet`,
+    `AES-256-GCM`). Instances are in-memory and re-started after a backend restart.
+  - **REST API** (`/api/v1/vpn-server/*`): server CRUD, start/stop, per-user CRUD,
+    revoke, credential reveal (audited), and `.ovpn` download (certs inlined).
+  - **Data model** (migration `019_vpn_server`): `vpn_servers` +
+    `vpn_server_clients`; all private keys and passwords are encrypted at rest
+    (AES-256-GCM envelope), never stored in plaintext.
+  - **Desktop UI** (`VpnServerPage.tsx`, `/vpn-server`): create/edit servers,
+    start/stop with live status, manage users inline, reveal credentials, and
+    download each user's `.ovpn`.
+- **Deploy:** `deploy/docker-compose.production.yml` now publishes UDP+TCP `1194`
+  (the default VPN port) and enables `net.ipv4.ip_forward`. Servers on a custom
+  port need that port published + a container re-create.
+
+### RBAC
+- New permission **`vpn_server:manage`** — run OpenVPN server instances, manage
+  their users, and issue client profiles. Granted to **super_admin** and **admin**
+  by default (not the `user` role); reconciled into the locked built-in roles on
+  startup. The server enforces it on every `/api/v1/vpn-server/*` route; the UI
+  hides the **VPN Server** nav entry without it.
+
+---
+
 ## [1.51.1] — 2026-08-04 — Security: harden backend-runtime OpenVPN (RCE fix)
 
 ### Security
