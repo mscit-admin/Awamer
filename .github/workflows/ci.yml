@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (typecheck · lint · test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      # Advisory until the known advisories are remediated; then drop the flag.
+      - name: npm audit (high)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
+  desktop:
+    name: Desktop (typecheck · lint · build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run build
+      - name: npm audit (high)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
+  rust:
+    name: Tauri crate (fmt · clippy · check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: System libraries (Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev build-essential pkg-config
+      - run: cargo check
+      # Advisory until the codebase is brought into fmt/clippy conformance.
+      - name: cargo fmt --check
+        run: cargo fmt --check
+        continue-on-error: true
+      - name: cargo clippy
+        run: cargo clippy -- -D warnings
+        continue-on-error: true

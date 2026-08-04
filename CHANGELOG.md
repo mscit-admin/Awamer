@@ -29,6 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     openvpn on the shared server); desktop-runtime tunnels are unaffected.
 - Added unit tests for the sanitizer and VPN config assembly (`domain/vpn.test.ts`).
 
+### Robustness
+- Global Fastify `setErrorHandler` + `setNotFoundHandler`: uncaught throws now
+  return a generic 500 instead of leaking a stack/internal detail.
+- pino log redaction (authorization headers, passwords, secrets, tokens, private
+  keys, passphrases, VPN config) so an accidental secret log emits `[redacted]`.
+
+### Internal / tooling (enterprise-readiness pass)
+- Added ESLint (both packages) + Prettier + `.editorconfig` + `rustfmt.toml`, a
+  CI workflow (`.github/workflows/ci.yml`: typecheck · lint · test · build ·
+  audit · fmt/clippy), and the previously-undefined `make test` / `make lint`.
+- Removed dead code / duplication: the double `set_metadata` in `sftp_chmod`,
+  write-only `SshSession` fields (crate is warning-clean), stale eslint-disable
+  comments.
+- Added `SECURITY.md` and `docs/ENTERPRISE_READINESS.md` (full audit + backlog).
+
 ## [1.51.0] — 2026-08-01 — OpenVPN client profiles (reach assets behind a VPN)
 
 ### Added

@@ -655,7 +655,7 @@ function TotpSection({ credentialId, canReveal }: { credentialId: string; canRev
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => { void load(); /* eslint-disable-next-line */ }, [credentialId]);
+  useEffect(() => { void load();   }, [credentialId]);
   async function load() {
     try {
       const c = await credentialsApi.getTotp(credentialId);
@@ -796,7 +796,7 @@ function AttachmentsSection({ credentialId, canReveal }: { credentialId: string;
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { void load(); /* eslint-disable-next-line */ }, [credentialId]);
+  useEffect(() => { void load();   }, [credentialId]);
   async function load() {
     try { const r = await credentialsApi.listAttachments(credentialId); setItems(r.data); }
     catch (e) { setErr(e instanceof Error ? e.message : "Failed to load attachments"); }
