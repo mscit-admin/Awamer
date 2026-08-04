@@ -23,7 +23,7 @@ Legend: ✅ fixed · 🟡 partially addressed · ⬜ backlog
 | CI pipeline | ✅ | `.github/workflows/ci.yml` added. |
 | ESLint / Prettier | ✅ | Configs added; `npm run lint` clean (0 errors). |
 | Rust warnings | ✅ | Crate is warning-clean. |
-| Dependency advisories | ⬜ | Backend 3 High, desktop 2 High — see below. |
+| Dependency advisories | 🟡 | `uuid` fixed; remaining need breaking majors — see below. |
 | Test coverage | 🟡 | VPN sanitizer covered; broad coverage still thin. |
 | Per-permission VPN reveal | ⬜ | `vpn:reveal` not yet split from `vpn:manage`. |
 | Login rate limit / lockout | ⬜ | Dead login-throttle config; permanent lockout. |
@@ -69,13 +69,26 @@ tunnels. (Requires infra testing — see the earlier deployment notes about the
 `ip`/tun interaction.)
 
 ### 2. Dependency advisories (High)
-Run and remediate in CI:
-- Backend: `fastify` (host/proto spoofing via X-Forwarded, DoS, body-validation
-  bypass), `find-my-way`, `fast-uri`, `uuid` — update Fastify to the latest patch
-  line and re-test.
-- Desktop: `kdbxweb` + `@xmldom/xmldom` (KeePass import), `react-router`.
-Add `npm audit --audit-level=high` (both) + `cargo audit`, enforce lockfiles
-(`npm ci`), and enable Dependabot/Renovate.
+**Done:** `uuid` bumped to 11.1.1 (only `v4` was used, which the advisory didn't
+even affect — audit is now clean of it).
+
+**Remaining — all require a breaking major upgrade + a test cycle, so they are
+left for a deliberate migration rather than a blind `--force`:**
+- **Backend `fastify` 4 → 5** (3 High: X-Forwarded host/proto spoofing, DoS,
+  body-validation bypass; incl. `find-my-way`/`fast-uri`). Requires coordinated
+  bumps of every `@fastify/*` plugin (cors, helmet, rate-limit, websocket,
+  multipart) and a route/hook audit for Fastify-5 API changes. **Largely
+  mitigated in this deployment** — the backend sits behind nginx which sets
+  `X-Forwarded-*`, and only speaks HTTP/1.1 (the find-my-way HTTP/2 DDoS isn't
+  exposed). Do the migration, then smoke-test server boot + all route groups.
+- **Desktop `react-router` 6 → 7** (Moderate): a data-router API migration.
+- **Desktop `kdbxweb` / `@xmldom/xmldom`** (High, KeePass import only): kdbxweb
+  pins `@xmldom/xmldom ^0.7.4` but every patched version is ≥0.8.13, so it needs
+  either an upstream kdbxweb release or an `overrides` pin **validated against a
+  real KeePass import** (the API differs across the 0.7→0.8/0.9 lines).
+
+Also add `cargo audit`, enforce lockfiles (`npm ci`), and enable
+Dependabot/Renovate so these surface continuously.
 
 ### 3. Test coverage (High)
 Thin outside the sanitizer just added. Prioritize: `RoleService` (`can()` /
