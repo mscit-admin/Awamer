@@ -24,7 +24,7 @@ Legend: ✅ fixed · 🟡 partially addressed · ⬜ backlog
 | ESLint / Prettier | ✅ | Configs added; `npm run lint` clean (0 errors). |
 | Rust warnings | ✅ | Crate is warning-clean. |
 | Dependency advisories | 🟡 | `uuid` fixed; remaining need breaking majors — see below. |
-| Test coverage | 🟡 | VPN sanitizer covered; broad coverage still thin. |
+| Test coverage | 🟡 | Security-critical paths covered (VPN sanitizer, RBAC resolver, lockout); broad coverage still a backlog item. |
 | Per-permission VPN reveal | ✅ | `vpn:reveal` splits secret reveal from `vpn:manage`. |
 | Login rate limit / lockout | ✅ | Per-IP auth throttle wired; lockout is now temporary. |
 | OpenAPI docs | ⬜ | None; routes already carry zod schemas. |
@@ -90,11 +90,13 @@ left for a deliberate migration rather than a blind `--force`:**
 Also add `cargo audit`, enforce lockfiles (`npm ci`), and enable
 Dependabot/Renovate so these surface continuously.
 
-### 3. Test coverage (High)
-Thin outside the sanitizer just added. Prioritize: `RoleService` (`can()` /
-`syncBuiltins()`), `vpnRepo`/`vpnManager`/`routes/vpn`, and the auth use-cases.
-Add coverage tooling (`c8` backend, `@vitest/coverage-v8` desktop) with a
-starting threshold, ratcheted up.
+### 3. Test coverage (High) — 🟡 IN PROGRESS
+Added: VPN config sanitizer/assembly (`domain/vpn.test.ts`), the `isAccountLocked`
+lockout logic (`domain/account.test.ts`), and the RBAC resolver `RoleService`
+(`domain/roleService.test.ts`, via an in-memory repo). Still to do: `vpnRepo` /
+`vpnManager` (need a test DB / process harness), the auth use-cases, and the
+connection gateways. Add coverage tooling (`c8` backend, `@vitest/coverage-v8`
+desktop) with a starting threshold, ratcheted up.
 
 ### 4. RBAC granularity — `vpn:reveal` (Medium) — ✅ DONE
 `GET /vpn/profiles/:id/config` (plaintext config + credentials) is now gated by a
