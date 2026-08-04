@@ -22,14 +22,16 @@ RUN npm prune --omit=dev
 FROM node:20-alpine
 
 # wget+tini for runtime; iputils/traceroute power the Network diagnostics tools.
-# openvpn powers backend-runtime VPN profiles. The container runs as the
-# non-root `app` user, so grant CAP_NET_ADMIN to the openvpn binary itself
-# (file capability, like ping's cap_net_raw) — that lets `app` create the tun
-# device and set routes without running the whole service as root. The
-# capability must also be in the container's bounding set: see `cap_add:
-# NET_ADMIN` + the /dev/net/tun device mount in docker-compose.production.yml.
-RUN apk add --no-cache wget tini iputils traceroute openvpn libcap \
- && setcap cap_net_admin+ep "$(command -v openvpn)"
+# openvpn powers backend-runtime VPN profiles. The container's main process runs
+# as the non-root `app` user, but openvpn must create a tun device and shell out
+# to `ip` to configure the interface/routes. Per-binary file capabilities are
+# unreliable here (they don't carry into the `ip` child on many kernels), so
+# make openvpn setuid-root: when `app` execs it, openvpn — and every `ip` it
+# runs — is root and has the privileges it needs. The Node service stays
+# non-root. Still needs `cap_add: NET_ADMIN` + the /dev/net/tun device from
+# docker-compose.production.yml so NET_ADMIN is in the container's bounding set.
+RUN apk add --no-cache wget tini iputils traceroute openvpn iproute2 \
+ && chmod u+s "$(command -v openvpn)"
 
 WORKDIR /app
 
