@@ -104,39 +104,76 @@ export function toVpnProfilePublic(p: VpnProfile): VpnProfilePublic {
 }
 
 /**
+ * OpenVPN config directives that run an external program or relax the script
+ * sandbox. A stored profile config is attacker-controlled data, so allowing any
+ * of these turns "launch my VPN" into arbitrary command execution on whichever
+ * host runs openvpn (the backend server for backend-runtime profiles). They are
+ * rejected outright; interface setup still works via openvpn's built-in `ip`
+ * handling with `--script-security 1`.
+ */
+const DENIED_OVPN_DIRECTIVES = new Set([
+  "up", "down", "route-up", "route-pre-down", "ipchange", "tls-verify",
+  "tls-crypt-v2-verify", "auth-user-pass-verify", "client-connect",
+  "client-disconnect", "learn-address", "plugin", "script-security",
+  "setenv-safe", "iproute", "cd", "chroot", "up-restart", "route-noexec",
+]);
+
+/**
+ * Reject a config that contains any command-executing / sandbox-relaxing
+ * directive. Runs on the fully-assembled config (comments stripped), so an
+ * injection smuggled in via a manual profile's inline PEM field — e.g. a cert
+ * that closes its `</ca>` block early and adds an `up` line — is caught too.
+ * Throws VpnErrors.UnsafeConfig on the first offending directive.
+ */
+export function assertSafeOvpnConfig(config: string): void {
+  for (const rawLine of config.split(/\r?\n/)) {
+    const line = rawLine.replace(/[#;].*$/, "").trim();
+    if (!line) continue;
+    const directive = line.split(/\s+/)[0]!.toLowerCase().replace(/^-+/, "");
+    if (DENIED_OVPN_DIRECTIVES.has(directive)) {
+      throw VpnErrors.UnsafeConfig(directive);
+    }
+  }
+}
+
+/**
  * Assemble a launchable OpenVPN config from a profile. Config-source profiles
  * return their stored .ovpn verbatim; manual profiles are synthesized from the
  * remote + inline material. Inline auth (username/password) is delivered
- * separately (an `auth-user-pass` file) rather than embedded here.
+ * separately (an `auth-user-pass` file) rather than embedded here. The result
+ * is validated by `assertSafeOvpnConfig` before being returned to any caller.
  */
 export function assembleOvpnConfig(p: VpnProfile): string {
+  let config: string;
   if (p.source === "config") {
     const cfg = (p.secret.ovpn ?? "").trim();
     // Ensure userpass profiles prompt via the management-supplied auth file.
-    if (p.authMode === "userpass" && !/^\s*auth-user-pass/m.test(cfg)) {
-      return `${cfg}\nauth-user-pass\n`;
-    }
-    return `${cfg}\n`;
+    config = p.authMode === "userpass" && !/^\s*auth-user-pass/m.test(cfg)
+      ? `${cfg}\nauth-user-pass\n`
+      : `${cfg}\n`;
+  } else {
+    // Manual: build a minimal client config.
+    const lines: string[] = ["client", "dev tun", "nobind", "resolv-retry infinite", "persist-key", "persist-tun"];
+    lines.push(`proto ${p.proto}`);
+    if (p.remoteHost) lines.push(`remote ${p.remoteHost} ${p.remotePort ?? 1194}`);
+    if (p.authMode === "userpass") lines.push("auth-user-pass");
+    const inlineBlock = (tag: string, pem: string | undefined): string[] =>
+      nonEmpty(pem) ? [`<${tag}>`, (pem as string).trim(), `</${tag}>`] : [];
+    lines.push(...inlineBlock("ca", p.secret.ca));
+    lines.push(...inlineBlock("cert", p.secret.cert));
+    lines.push(...inlineBlock("key", p.secret.key));
+    lines.push(...inlineBlock("tls-auth", p.secret.tlsAuth));
+    config = `${lines.join("\n")}\n`;
   }
-
-  // Manual: build a minimal client config.
-  const lines: string[] = ["client", "dev tun", "nobind", "resolv-retry infinite", "persist-key", "persist-tun"];
-  lines.push(`proto ${p.proto}`);
-  if (p.remoteHost) lines.push(`remote ${p.remoteHost} ${p.remotePort ?? 1194}`);
-  if (p.authMode === "userpass") lines.push("auth-user-pass");
-  const inlineBlock = (tag: string, pem: string | undefined): string[] =>
-    nonEmpty(pem) ? [`<${tag}>`, (pem as string).trim(), `</${tag}>`] : [];
-  lines.push(...inlineBlock("ca", p.secret.ca));
-  lines.push(...inlineBlock("cert", p.secret.cert));
-  lines.push(...inlineBlock("key", p.secret.key));
-  lines.push(...inlineBlock("tls-auth", p.secret.tlsAuth));
-  return `${lines.join("\n")}\n`;
+  assertSafeOvpnConfig(config);
+  return config;
 }
 
 export const VpnErrors = {
   ProfileNotFound: () => new DomainError("vpn_profile_not_found", "VPN profile not found"),
   ProfileNameTaken: () => new DomainError("vpn_profile_name_taken", "a VPN profile with this name already exists"),
   ConfigMissing: () => new DomainError("vpn_config_missing", "profile has no launchable OpenVPN configuration"),
+  UnsafeConfig: (directive: string) => new DomainError("vpn_unsafe_config", `OpenVPN config contains a disallowed directive: "${directive}"`),
   ConnectionNotFound: () => new DomainError("vpn_connection_not_found", "VPN connection not found"),
   TooManyConnections: () => new DomainError("vpn_too_many", "backend VPN connection limit reached"),
   BackendOnly: () => new DomainError("vpn_backend_only", "this endpoint manages backend-runtime VPN connections only"),

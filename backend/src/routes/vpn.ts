@@ -26,8 +26,15 @@ import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 import { DomainError } from "../domain/index.js";
 import {
   VPN_RUNTIMES, VPN_SOURCES, VPN_PROTOS, VPN_AUTH_MODES,
-  assembleOvpnConfig, toVpnProfilePublic, type VpnSecret, VpnErrors,
+  assembleOvpnConfig, assertSafeOvpnConfig, toVpnProfilePublic, type VpnSecret, VpnErrors,
+  type VpnRuntime, type VpnSource, type VpnProto, type VpnAuthMode,
 } from "../domain/vpn.js";
+
+// Admin roles may open a backend-runtime tunnel (openvpn runs on the server).
+const ADMIN_ROLES = new Set(["admin", "super_admin"]);
+// Hostname/IPv4 charset — no whitespace or newlines, so a manual profile's
+// remote can't inject extra OpenVPN config lines.
+const REMOTE_HOST_RE = /^[a-zA-Z0-9._:-]+$/;
 
 interface Deps {
   vpn: VpnProfileRepository;
@@ -36,10 +43,11 @@ interface Deps {
   jwt: JwtService;
 }
 
-const runtimeEnum = z.enum(VPN_RUNTIMES as unknown as [string, ...string[]]);
-const sourceEnum = z.enum(VPN_SOURCES as unknown as [string, ...string[]]);
-const protoEnum = z.enum(VPN_PROTOS as unknown as [string, ...string[]]);
-const authModeEnum = z.enum(VPN_AUTH_MODES as unknown as [string, ...string[]]);
+const runtimeEnum = z.enum(VPN_RUNTIMES as unknown as [VpnRuntime, ...VpnRuntime[]]);
+const sourceEnum = z.enum(VPN_SOURCES as unknown as [VpnSource, ...VpnSource[]]);
+const protoEnum = z.enum(VPN_PROTOS as unknown as [VpnProto, ...VpnProto[]]);
+const authModeEnum = z.enum(VPN_AUTH_MODES as unknown as [VpnAuthMode, ...VpnAuthMode[]]);
+const remoteHostSchema = z.string().max(253).regex(REMOTE_HOST_RE, "invalid remote host").nullable().optional();
 
 // Secret material accepted on create/update. Any field omitted on update keeps
 // its stored value; passing "" clears it.
@@ -103,7 +111,7 @@ export function makeVpnRoutes(deps: Deps): FastifyPluginAsync {
       description: z.string().max(1000).nullable().optional(),
       runtime: runtimeEnum.optional(),
       source: sourceEnum.optional(),
-      remote_host: z.string().max(253).nullable().optional(),
+      remote_host: remoteHostSchema,
       remote_port: z.number().int().min(1).max(65535).nullable().optional(),
       proto: protoEnum.optional(),
       auth_mode: authModeEnum.optional(),
@@ -116,15 +124,16 @@ export function makeVpnRoutes(deps: Deps): FastifyPluginAsync {
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       const d = parsed.data;
       try {
+        if (d.config) assertSafeOvpnConfig(d.config); // reject dangerous configs on save
         const profile = await deps.vpn.create(req.auth!.sub, {
           name: d.name,
           description: d.description ?? null,
-          runtime: d.runtime as any,
-          source: d.source as any,
+          runtime: d.runtime,
+          source: d.source,
           remoteHost: d.remote_host ?? null,
           remotePort: d.remote_port ?? null,
-          proto: d.proto as any,
-          authMode: d.auth_mode as any,
+          proto: d.proto,
+          authMode: d.auth_mode,
           autoConnect: d.auto_connect,
           secret: pickSecret(d as Record<string, unknown>) as VpnSecret,
         });
@@ -152,7 +161,7 @@ export function makeVpnRoutes(deps: Deps): FastifyPluginAsync {
       description: z.string().max(1000).nullable().optional(),
       runtime: runtimeEnum.optional(),
       source: sourceEnum.optional(),
-      remote_host: z.string().max(253).nullable().optional(),
+      remote_host: remoteHostSchema,
       remote_port: z.number().int().min(1).max(65535).nullable().optional(),
       proto: protoEnum.optional(),
       auth_mode: authModeEnum.optional(),
@@ -166,6 +175,7 @@ export function makeVpnRoutes(deps: Deps): FastifyPluginAsync {
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       const d = parsed.data;
       try {
+        if (d.config) assertSafeOvpnConfig(d.config); // reject dangerous configs on save
         // Merge partial secret edits onto the stored bundle so omitted fields
         // survive; an explicit "" clears a field.
         const partial = pickSecret(d as Record<string, unknown>);
@@ -177,12 +187,12 @@ export function makeVpnRoutes(deps: Deps): FastifyPluginAsync {
         const profile = await deps.vpn.update(req.auth!.sub, id, {
           name: d.name,
           description: d.description,
-          runtime: d.runtime as any,
-          source: d.source as any,
+          runtime: d.runtime,
+          source: d.source,
           remoteHost: d.remote_host,
           remotePort: d.remote_port,
-          proto: d.proto as any,
-          authMode: d.auth_mode as any,
+          proto: d.proto,
+          authMode: d.auth_mode,
           autoConnect: d.auto_connect,
           secret: mergedSecret,
         });
@@ -247,6 +257,12 @@ export function makeVpnRoutes(deps: Deps): FastifyPluginAsync {
 
     const connectSchema = z.object({ profile_id: z.string().uuid() });
     app.post("/connections", async (req, reply) => {
+      // A backend-runtime tunnel spawns openvpn on the shared server host, so
+      // restrict it to admins even though every vpn:manage holder can create
+      // profiles. Desktop-runtime tunnels (per user's own machine) are unaffected.
+      if (!ADMIN_ROLES.has(req.auth!.role)) {
+        return reply.code(403).send({ error: { code: "forbidden", message: "only admins may open a backend-runtime VPN tunnel" } });
+      }
       const parsed = connectSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       try {

@@ -133,6 +133,11 @@ export class VpnManager {
         args.push("--auth-user-pass", authPath);
         args.push("--auth-nocache");
       }
+      // Force the script sandbox on last so it overrides anything in the config:
+      // only openvpn's built-in helpers (ifconfig/ip/route) may run, never a
+      // user `up`/`down`/`plugin` script. Combined with assertSafeOvpnConfig
+      // this closes the "config = code execution as root" vector.
+      args.push("--script-security", "1");
 
       const proc = spawn("openvpn", args, { stdio: ["ignore", "pipe", "pipe"] });
       runtime.proc = proc;

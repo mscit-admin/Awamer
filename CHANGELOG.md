@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.51.1] — 2026-08-04 — Security: harden backend-runtime OpenVPN (RCE fix)
+
+### Security
+- **Fixed remote code execution via OpenVPN config (Critical).** A backend-runtime
+  VPN profile stores an attacker-controlled `.ovpn` config, and OpenVPN config
+  directives (`up`, `down`, `plugin`, `script-security 2`, …) execute external
+  programs. With the backend container running openvpn as root, any authenticated
+  holder of `vpn:manage` could run commands on the server. Now:
+  - `assertSafeOvpnConfig` rejects any config containing a command-executing or
+    sandbox-relaxing directive, validated on the **fully-assembled** config so an
+    injection smuggled through a manual profile's inline CA/cert/key (closing the
+    `</ca>` block early) is caught too. Enforced on save **and** at launch/reveal.
+  - openvpn is always spawned with `--script-security 1` (backend and desktop), so
+    only its built-in `ip`/`ifconfig`/`route` helpers can run — never a user script.
+  - `remote_host` on manual profiles is charset-validated (no whitespace/newlines),
+    closing config-line injection.
+  - Opening a **backend-runtime** tunnel now requires an **admin** role (it spawns
+    openvpn on the shared server); desktop-runtime tunnels are unaffected.
+- Added unit tests for the sanitizer and VPN config assembly (`domain/vpn.test.ts`).
+
 ## [1.51.0] — 2026-08-01 — OpenVPN client profiles (reach assets behind a VPN)
 
 ### Added
