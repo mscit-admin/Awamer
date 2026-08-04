@@ -138,10 +138,11 @@ async function main() {
 
   // Fastify app
   const app = Fastify({
-    logger: log,
+    // Fastify 5: a pre-created logger instance goes in `loggerInstance`
+    // (`logger` now only accepts a config object).
+    loggerInstance: log,
     trustProxy: true,
     bodyLimit: 1024 * 100,
-    disableRequestLogging: false,
   });
 
   await app.register(websocket);
@@ -171,12 +172,12 @@ async function main() {
     if (err instanceof DomainError) {
       return reply.code(statusForDomainError(err.code)).send({ error: { code: err.code, message: err.message } });
     }
-    const e = err as { statusCode?: number; validation?: unknown; code?: string };
+    const e = err as { statusCode?: number; validation?: unknown; code?: string; message?: string };
     if (e.validation) {
-      return reply.code(400).send({ error: { code: "validation_failed", message: err.message } });
+      return reply.code(400).send({ error: { code: "validation_failed", message: e.message ?? "validation failed" } });
     }
     if (typeof e.statusCode === "number" && e.statusCode >= 400 && e.statusCode < 500) {
-      return reply.code(e.statusCode).send({ error: { code: e.code ?? "error", message: err.message } });
+      return reply.code(e.statusCode).send({ error: { code: e.code ?? "error", message: e.message ?? "error" } });
     }
     req.log.error({ err }, "unhandled error");
     return reply.code(500).send({ error: { code: "internal_error", message: "internal server error" } });

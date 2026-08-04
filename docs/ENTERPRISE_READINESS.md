@@ -23,7 +23,7 @@ Legend: ✅ fixed · 🟡 partially addressed · ⬜ backlog
 | CI pipeline | ✅ | `.github/workflows/ci.yml` added. |
 | ESLint / Prettier | ✅ | Configs added; `npm run lint` clean (0 errors). |
 | Rust warnings | ✅ | Crate is warning-clean. |
-| Dependency advisories | 🟡 | `uuid` fixed; remaining need breaking majors — see below. |
+| Dependency advisories | 🟡 | Backend **0 vulns** (fastify 5 + uuid done, validated live); desktop react-router/kdbxweb majors remain. |
 | Test coverage | 🟡 | Security-critical paths covered (VPN sanitizer, RBAC resolver, lockout); broad coverage still a backlog item. |
 | Per-permission VPN reveal | ✅ | `vpn:reveal` splits secret reveal from `vpn:manage`. |
 | Login rate limit / lockout | ✅ | Per-IP auth throttle wired; lockout is now temporary. |
@@ -72,15 +72,16 @@ tunnels. (Requires infra testing — see the earlier deployment notes about the
 **Done:** `uuid` bumped to 11.1.1 (only `v4` was used, which the advisory didn't
 even affect — audit is now clean of it).
 
-**Remaining — all require a breaking major upgrade + a test cycle, so they are
-left for a deliberate migration rather than a blind `--force`:**
-- **Backend `fastify` 4 → 5** (3 High: X-Forwarded host/proto spoofing, DoS,
-  body-validation bypass; incl. `find-my-way`/`fast-uri`). Requires coordinated
-  bumps of every `@fastify/*` plugin (cors, helmet, rate-limit, websocket,
-  multipart) and a route/hook audit for Fastify-5 API changes. **Largely
-  mitigated in this deployment** — the backend sits behind nginx which sets
-  `X-Forwarded-*`, and only speaks HTTP/1.1 (the find-my-way HTTP/2 DDoS isn't
-  exposed). Do the migration, then smoke-test server boot + all route groups.
+**Done:**
+- ✅ **Backend `fastify` 4 → 5** — cleared all 3 High advisories (backend
+  `npm audit` is now clean). Coordinated bumps of every `@fastify/*` plugin
+  (cors 11, helmet 13, multipart 9, rate-limit 10, sensible 6, websocket 11) +
+  API-change fixes (`loggerInstance`, `@fastify/websocket` v11 passes the socket
+  directly, removed the deprecated `disableRequestLogging`). **Validated against
+  a real Postgres**: boots clean, and login / VPN CRUD / the config sanitizer /
+  `vpn:reveal` gate / 404 / CORS / login rate-limit all verified.
+
+**Remaining — breaking majors left for a deliberate migration + test cycle:**
 - **Desktop `react-router` 6 → 7** (Moderate): a data-router API migration.
 - **Desktop `kdbxweb` / `@xmldom/xmldom`** (High, KeePass import only): kdbxweb
   pins `@xmldom/xmldom ^0.7.4` but every patched version is ≥0.8.13, so it needs

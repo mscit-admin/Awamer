@@ -49,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - pino log redaction (authorization headers, passwords, secrets, tokens, private
   keys, passphrases, VPN config) so an accidental secret log emits `[redacted]`.
 
+### Dependencies
+- **Fastify 4 → 5** upgrade clears all 3 High backend advisories (X-Forwarded
+  host/proto spoofing, DoS, body-validation bypass; `find-my-way`/`fast-uri`) —
+  backend `npm audit` is now clean. Coordinated `@fastify/*` plugin bumps (cors
+  11, helmet 13, multipart 9, rate-limit 10, sensible 6, websocket 11) plus the
+  Fastify-5 API changes: `loggerInstance` for a pre-created pino logger,
+  `@fastify/websocket` v11 handing the socket to the handler directly, and
+  dropping the deprecated `disableRequestLogging`. Validated end-to-end against
+  PostgreSQL (boot + login + VPN + gateways + rate limit).
+- `uuid` 10 → 11.1.1 (clears its advisory).
+
 ### Internal / tooling (enterprise-readiness pass)
 - Added ESLint (both packages) + Prettier + `.editorconfig` + `rustfmt.toml`, a
   CI workflow (`.github/workflows/ci.yml`: typecheck · lint · test · build ·
