@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.53.0] — 2026-08-04 — RDP remote desktop (guacd gateway + native client)
+
+### Added
+- **RDP is now a supported protocol** for assets — two ways to connect, chosen
+  per session from the host's **Connect to host** card:
+  - **In-app (web + desktop):** a new WebSocket gateway `/api/v1/rdp/connect`
+    bridges the Guacamole client (`guacamole-common-js`) to **guacd**, Apache
+    Guacamole's proxy daemon, which speaks RDP to the host. The remote desktop
+    renders on a canvas inside Awamer (route `/hosts/:id/rdp`,
+    `RdpPage.tsx`), with mouse + keyboard forwarding and fullscreen. Credentials
+    are resolved **server-side** from the host's attached credential
+    (username/password/domain) and never sent to the client.
+  - **Native client (desktop app):** a **RDP client** button generates a
+    minimal `.rdp` file and opens it with the OS's own Remote Desktop client
+    (mstsc / Microsoft Remote Desktop / `xdg-open`) via a new Tauri
+    `rdp_launch` command. No password is embedded (the native client prompts).
+  - RDP-specific options (security mode, `ignore-cert`, and any extra guacd
+    `rdp` parameters) can be stored under `host.options.rdp` — no schema change
+    (the `rdp` protocol was already whitelisted; `hosts.options` is JSONB).
+  - Connections are recorded in connection history (`protocol = 'rdp'`).
+- **Backend:** `backend/src/rdp/guacamole.ts` (pure, unit-tested Guacamole
+  protocol codec — instruction encode/parse, version-aware `connect` builder,
+  rdp param map) + `backend/src/rdp/gateway.ts` (guacd bridge, gated by
+  `sessions:connect`). New config `GUACD_HOST` / `GUACD_PORT`.
+- **Deploy:** `deploy/docker-compose.production.yml` now runs a **guacd**
+  service (`guacamole/guacd:1.5.5`) on the internal network; the backend reaches
+  it at `guacd:4822`. nginx already proxies `/api/` WebSockets with long
+  timeouts, so no nginx change is required. guacd must be able to reach the RDP
+  target hosts on their RDP port.
+
+### Changed
+- `sessions:connect` permission description now reads “Open SSH / SFTP / VNC /
+  RDP / Telnet sessions”. RDP reuses `sessions:connect` (no new permission), the
+  same gate as the other interactive protocols.
+
+---
+
 ## [1.52.0] — 2026-08-04 — VPN Server (Awamer as an OpenVPN hub)
 
 ### Added

@@ -37,7 +37,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 /** Human-readable catalog, served to the UI so it can render the role editor. */
 export const PERMISSION_META: Record<Permission, { label: string; description: string }> = {
   "resources:write":    { label: "Manage resources", description: "Create, edit and delete hosts, credentials, folders and tags" },
-  "sessions:connect":   { label: "Open sessions", description: "Open SSH / SFTP / VNC sessions" },
+  "sessions:connect":   { label: "Open sessions", description: "Open SSH / SFTP / VNC / RDP / Telnet sessions" },
   "credentials:reveal": { label: "Reveal secrets", description: "View a credential's decrypted secret" },
   "tunnels:manage":     { label: "Manage tunnels", description: "Create and use SSH port-forwarding tunnels" },
   "backup:manage":      { label: "Backup & restore", description: "Export and restore backups of own data" },

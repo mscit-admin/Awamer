@@ -67,6 +67,22 @@ services:
       timeout: 3s
       retries: 5
 
+  # Apache Guacamole proxy daemon — translates RDP (and VNC/SSH) into the
+  # Guacamole protocol the browser/desktop client renders. Only the backend
+  # (on the internal network) talks to it; it is never exposed to the host.
+  # guacd must be able to reach the RDP target hosts on their RDP port (3389).
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: netsphere-guacd
+    restart: unless-stopped
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   auth-service:
     build:
       context: ../backend
@@ -87,6 +103,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      guacd:
+        condition: service_started
     environment:
       # ---- Database -------------------------------------------------
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -111,6 +129,9 @@ services:
       # ---- Rate limiting --------------------------------------------
       RATE_LIMIT_LOGIN_PER_MIN: ${RATE_LIMIT_LOGIN_PER_MIN:-10}
       RATE_LIMIT_API_PER_MIN: ${RATE_LIMIT_API_PER_MIN:-120}
+      # ---- RDP gateway → guacd (see the guacd service above) --------
+      GUACD_HOST: ${GUACD_HOST:-guacd}
+      GUACD_PORT: ${GUACD_PORT:-4822}
     ports:
       # Bind to LOCALHOST ONLY — nginx will reverse-proxy from public 443
       - "127.0.0.1:8081:8081"

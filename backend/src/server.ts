@@ -62,6 +62,7 @@ import { makeSshGateway } from "./ssh/gateway.js";
 import { makeSftpGateway } from "./ssh/sftpGateway.js";
 import { makeVncGateway } from "./vnc/gateway.js";
 import { makeTelnetGateway } from "./telnet/gateway.js";
+import { makeRdpGateway } from "./rdp/gateway.js";
 import { TunnelManager } from "./ssh/tunnelManager.js";
 import { makeTunnelRoutes } from "./routes/tunnels.js";
 import { makeWsTunnelGateway } from "./ssh/wsTunnelGateway.js";
@@ -248,6 +249,11 @@ async function main() {
   await app.register(makeVncGateway({ jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
   // Browser Telnet gateway (WebSocket ↔ raw TCP relay).
   await app.register(makeTelnetGateway({ jwt, hosts, history, log }), { prefix: "/api/v1/telnet" });
+  // Phase 6 — browser/desktop RDP gateway (WebSocket ↔ guacd bridge).
+  await app.register(
+    makeRdpGateway({ jwt, hosts, credentials, history, guacd: { host: cfg.env.GUACD_HOST, port: cfg.env.GUACD_PORT }, log }),
+    { prefix: "/api/v1/rdp" },
+  );
   // Phase 5 — SSH port forwarding: server-managed local tunnels (REST) and a
   // per-user WebSocket TCP tunnel.
   await app.register(makeTunnelRoutes({ tunnels, jwt }), { prefix: "/api/v1/tunnels" });

@@ -59,6 +59,7 @@ pub fn run() {
             commands::vpn::vpn_disconnect,
             commands::vpn::vpn_status,
             commands::vpn::vpn_list,
+            commands::rdp::rdp_launch,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

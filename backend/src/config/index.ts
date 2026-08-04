@@ -41,6 +41,13 @@ const envSchema = z.object({
   // surface, so enable it deliberately — e.g. in staging/dev).
   ENABLE_API_DOCS: z.string().optional().transform((v) => v === "true"),
 
+  // RDP gateway → guacd (Apache Guacamole proxy daemon). The RDP WebSocket
+  // gateway bridges the browser/desktop Guacamole client to guacd, which speaks
+  // RDP to the target host. In production guacd runs as its own container
+  // (service name "guacd"); leave the default for a localhost guacd.
+  GUACD_HOST: z.string().default("127.0.0.1"),
+  GUACD_PORT: z.coerce.number().int().positive().default(4822),
+
   // CORS
   CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:1420,tauri://localhost,https://tauri.localhost"),
 
