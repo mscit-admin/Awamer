@@ -74,6 +74,14 @@ services:
     image: netsphere/auth-service:${APP_VERSION:-1.6.0.1}
     container_name: netsphere-auth
     restart: unless-stopped
+    # Run as root so backend-runtime OpenVPN works: openvpn shells out to `ip`
+    # to configure the tun interface, and that child needs the privileges the
+    # container already carries (cap_add: NET_ADMIN + /dev/net/tun). Per-binary
+    # file capabilities / setuid did not reliably reach the `ip` child on this
+    # kernel; running the service as root is the standard, dependable posture
+    # for a container that manages VPN tunnels. Remove this line if you only use
+    # desktop-runtime VPN profiles and prefer the service to stay non-root.
+    user: "0:0"
     depends_on:
       postgres:
         condition: service_healthy
