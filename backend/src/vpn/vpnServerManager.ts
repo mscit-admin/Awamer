@@ -36,12 +36,21 @@ interface ServerProc {
 
 const READY = "Initialization Sequence Completed";
 
-// Resolve the auth-verify script next to this module (dist/vpn/authVerify.js in
-// production). openvpn runs it via `node <path>`; in a tsx dev run it's a .ts,
-// so prefer tsx there.
+// Single-quote a string for safe inclusion in a POSIX /bin/sh script.
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+// The auth-verify script sits next to this module (dist/vpn/authVerify.js in
+// production). OpenVPN execve()s the verify command directly — it does NOT
+// search PATH — so the interpreter MUST be an absolute path. `process.execPath`
+// is the running node binary (e.g. /usr/local/bin/node in the container); a bare
+// "node" fails with `execve: No such file or directory`. In a tsx dev run the
+// script is a .ts, loaded via node's --import hook (openvpn isn't used in dev,
+// but keep the command runnable).
 const HERE = dirname(fileURLToPath(import.meta.url));
 const VERIFY_SCRIPT = join(HERE, "authVerify.js");
-const VERIFY_CMD = `"${VERIFY_SCRIPT.endsWith(".ts") ? "npx tsx" : "node"} ${VERIFY_SCRIPT}"`;
+const VERIFY_EXEC = VERIFY_SCRIPT.endsWith(".ts")
+  ? `${shq(process.execPath)} --import tsx ${shq(VERIFY_SCRIPT)}`
+  : `${shq(process.execPath)} ${shq(VERIFY_SCRIPT)}`;
 
 function tailSummary(tail: string[]): string {
   if (tail.length === 0) return "";
@@ -70,13 +79,6 @@ export class VpnServerManager {
       return this.status(server.id);
     }
 
-    const config = assembleServerConfig({
-      port: server.port, proto: server.proto, subnet: server.subnet, dns: server.dns,
-      clientToClient: server.clientToClient, cipher: server.cipher,
-      caCert: server.caCert, serverCert: server.serverCert, serverKey: server.serverKey,
-      tlsCrypt: server.tlsCrypt, verifyCommand: VERIFY_CMD,
-    });
-
     const runtime: ServerProc = {
       serverId: server.id, state: "starting", error: null, startedAt: null, proc: null, dir: null,
     };
@@ -85,6 +87,25 @@ export class VpnServerManager {
     try {
       const dir = await mkdtemp(join(tmpdir(), "awamer-vpnsrv-"));
       runtime.dir = dir;
+
+      // OpenVPN builds the verify script's environment itself (it does NOT
+      // forward the daemon's env), so a tiny wrapper carries the two values the
+      // script needs and execs node by absolute path. It lives in the same
+      // private dir as the server key (0700, removed on stop).
+      const wrapperPath = join(dir, "verify.sh");
+      const wrapper =
+        "#!/bin/sh\n" +
+        `export DATABASE_URL=${shq(process.env.DATABASE_URL ?? "")}\n` +
+        `export AWAMER_VPN_SERVER_ID=${shq(server.id)}\n` +
+        `exec ${VERIFY_EXEC} "$@"\n`;
+      await writeFile(wrapperPath, wrapper, { mode: 0o700 });
+
+      const config = assembleServerConfig({
+        port: server.port, proto: server.proto, subnet: server.subnet, dns: server.dns,
+        clientToClient: server.clientToClient, cipher: server.cipher,
+        caCert: server.caCert, serverCert: server.serverCert, serverKey: server.serverKey,
+        tlsCrypt: server.tlsCrypt, verifyCommand: `"${wrapperPath}"`,
+      });
       const configPath = join(dir, "server.conf");
       await writeFile(configPath, config, { mode: 0o600 });
 
