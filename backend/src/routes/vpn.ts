@@ -23,6 +23,7 @@ import type { AuditRepository } from "../repos/otherRepos.js";
 import type { VpnProfileRepository } from "../repos/vpnRepo.js";
 import type { VpnManager } from "../vpn/vpnManager.js";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
+import { can } from "../domain/permissions.js";
 import { DomainError } from "../domain/index.js";
 import {
   VPN_RUNTIMES, VPN_SOURCES, VPN_PROTOS, VPN_AUTH_MODES,
@@ -220,6 +221,11 @@ export function makeVpnRoutes(deps: Deps): FastifyPluginAsync {
     // tunnel up. Sensitive — treated like a credential reveal and audited.
     app.get("/profiles/:id/config", async (req, reply) => {
       const { id } = req.params as { id: string };
+      // Reading the decrypted config + credentials is a separate capability from
+      // managing profiles — mirror the credential-reveal split.
+      if (!can(req.auth!.role, "vpn:reveal")) {
+        return reply.code(403).send({ error: { code: "forbidden", message: "your role cannot reveal VPN configs" } });
+      }
       try {
         const profile = await deps.vpn.getById(req.auth!.sub, id);
         const config = assembleOvpnConfig(profile).trim();

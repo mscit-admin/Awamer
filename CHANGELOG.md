@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Opening a **backend-runtime** tunnel now requires an **admin** role (it spawns
     openvpn on the shared server); desktop-runtime tunnels are unaffected.
 - Added unit tests for the sanitizer and VPN config assembly (`domain/vpn.test.ts`).
+- **New `vpn:reveal` permission** splits reading a profile's decrypted config +
+  credentials (needed to launch a tunnel) from `vpn:manage` (create/edit/attach),
+  mirroring the `credentials:reveal` model. `GET /vpn/profiles/:id/config` now
+  requires it. Granted to super_admin / admin / user by default.
 
 ### Robustness
 - Global Fastify `setErrorHandler` + `setNotFoundHandler`: uncaught throws now

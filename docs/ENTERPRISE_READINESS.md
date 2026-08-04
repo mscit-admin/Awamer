@@ -25,7 +25,7 @@ Legend: ✅ fixed · 🟡 partially addressed · ⬜ backlog
 | Rust warnings | ✅ | Crate is warning-clean. |
 | Dependency advisories | 🟡 | `uuid` fixed; remaining need breaking majors — see below. |
 | Test coverage | 🟡 | VPN sanitizer covered; broad coverage still thin. |
-| Per-permission VPN reveal | ⬜ | `vpn:reveal` not yet split from `vpn:manage`. |
+| Per-permission VPN reveal | ✅ | `vpn:reveal` splits secret reveal from `vpn:manage`. |
 | Login rate limit / lockout | ⬜ | Dead login-throttle config; permanent lockout. |
 | OpenAPI docs | ⬜ | None; routes already carry zod schemas. |
 | Version consistency | ⬜ | backend 1.8.0 vs desktop/Cargo 1.7.0. |
@@ -96,10 +96,10 @@ Thin outside the sanitizer just added. Prioritize: `RoleService` (`can()` /
 Add coverage tooling (`c8` backend, `@vitest/coverage-v8` desktop) with a
 starting threshold, ratcheted up.
 
-### 4. RBAC granularity — `vpn:reveal` (Medium)
-`GET /vpn/profiles/:id/config` returns plaintext config + credentials, gated only
-by `vpn:manage`. Mirror the credential model: add a separate `vpn:reveal`
-permission (both permission matrices per `CLAUDE.md`) and gate `/config` on it.
+### 4. RBAC granularity — `vpn:reveal` (Medium) — ✅ DONE
+`GET /vpn/profiles/:id/config` (plaintext config + credentials) is now gated by a
+separate `vpn:reveal` permission, split from `vpn:manage` and mirrored in both
+permission matrices. Granted to super_admin / admin / user by default.
 
 ### 5. Auth throttling (Medium)
 `RATE_LIMIT_LOGIN_PER_MIN` is defined but unused — register a stricter per-route
