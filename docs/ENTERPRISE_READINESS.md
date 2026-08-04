@@ -26,7 +26,7 @@ Legend: ✅ fixed · 🟡 partially addressed · ⬜ backlog
 | Dependency advisories | 🟡 | `uuid` fixed; remaining need breaking majors — see below. |
 | Test coverage | 🟡 | VPN sanitizer covered; broad coverage still thin. |
 | Per-permission VPN reveal | ✅ | `vpn:reveal` splits secret reveal from `vpn:manage`. |
-| Login rate limit / lockout | ⬜ | Dead login-throttle config; permanent lockout. |
+| Login rate limit / lockout | ✅ | Per-IP auth throttle wired; lockout is now temporary. |
 | OpenAPI docs | ⬜ | None; routes already carry zod schemas. |
 | Version consistency | ⬜ | backend 1.8.0 vs desktop/Cargo 1.7.0. |
 
@@ -101,10 +101,11 @@ starting threshold, ratcheted up.
 separate `vpn:reveal` permission, split from `vpn:manage` and mirrored in both
 permission matrices. Granted to super_admin / admin / user by default.
 
-### 5. Auth throttling (Medium)
-`RATE_LIMIT_LOGIN_PER_MIN` is defined but unused — register a stricter per-route
-limit on login/MFA/refresh. Replace the permanent account lockout with temporary
-lockout + backoff to avoid an anonymous user-lockout DoS.
+### 5. Auth throttling (Medium) — ✅ DONE
+`RATE_LIMIT_LOGIN_PER_MIN` now enforces a stricter per-IP limit on
+login/MFA/refresh, and the failed-attempt lockout is temporary (`locked_until`,
+migration 018) with a configurable `ACCOUNT_LOCKOUT_MINUTES` — no more
+permanent anonymous lockout. Admin/manual `is_locked` is unchanged.
 
 ### 6. Duplication refactors (Medium)
 - Extract the `__nochange__`/`__null__` SQL patch pattern (repeated ~21× across

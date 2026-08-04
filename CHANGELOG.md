@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mirroring the `credentials:reveal` model. `GET /vpn/profiles/:id/config` now
   requires it. Granted to super_admin / admin / user by default.
 
+### Auth hardening
+- **Dedicated login throttle**: `/auth/login`, `/auth/mfa/verify`, `/auth/refresh`
+  now enforce a stricter per-IP rate limit (`RATE_LIMIT_LOGIN_PER_MIN`, default
+  10/min) — previously that setting was defined but unused and only the global
+  120/min applied to the password-guessing surface.
+- **Temporary account lockout** (migration 018): hitting the failed-attempt
+  threshold now locks the account for `ACCOUNT_LOCKOUT_MINUTES` (default 15) and
+  it unlocks itself, instead of a permanent lock — removing the anonymous
+  "lock any account forever" DoS. Admin/manual `is_locked` is unchanged.
+
 ### Robustness
 - Global Fastify `setErrorHandler` + `setNotFoundHandler`: uncaught throws now
   return a generic 500 instead of leaking a stack/internal detail.

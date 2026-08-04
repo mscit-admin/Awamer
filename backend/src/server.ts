@@ -190,6 +190,7 @@ async function main() {
 
   await app.register(makeAuthRoutes({
     login: loginUC, refresh: refreshUC, mfa: mfaUC, users, jwt,
+    loginRateMax: cfg.env.RATE_LIMIT_LOGIN_PER_MIN,
   }), { prefix: "/api/v1/auth" });
   // Public forgot/reset password (same prefix as auth).
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });

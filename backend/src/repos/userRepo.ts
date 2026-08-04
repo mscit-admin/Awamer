@@ -10,6 +10,7 @@ interface UserRow {
   role: string;
   is_active: boolean;
   is_locked: boolean;
+  locked_until: Date | null;
   failed_attempts: number;
   last_login_at: Date | null;
   last_login_ip: string | null;
@@ -22,7 +23,7 @@ interface UserRow {
 
 const COLS = `
   id, username, email, password_hash, full_name, role,
-  is_active, is_locked, failed_attempts,
+  is_active, is_locked, locked_until, failed_attempts,
   last_login_at, last_login_ip::text AS last_login_ip,
   mfa_enabled, company_id, org_unit_id, created_at, updated_at
 `;
@@ -38,6 +39,7 @@ function rowToUser(r: UserRow): User {
     role: r.role,
     isActive: r.is_active,
     isLocked: r.is_locked,
+    lockedUntil: r.locked_until,
     failedAttempts: r.failed_attempts,
     lastLoginAt: r.last_login_at,
     lastLoginIp: r.last_login_ip,
@@ -137,7 +139,15 @@ export class UserRepository {
   }
 
   async resetFailedAttempts(id: string): Promise<void> {
-    await this.pool.query(`UPDATE users SET failed_attempts = 0 WHERE id = $1`, [id]);
+    await this.pool.query(`UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = $1`, [id]);
+  }
+
+  /** Temporary auto-lock: set (or clear, with null) the lockout expiry. */
+  async setLockedUntil(id: string, until: Date | null): Promise<void> {
+    await this.pool.query(
+      `UPDATE users SET locked_until = $2, updated_at = NOW() WHERE id = $1`,
+      [id, until],
+    );
   }
 
   async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
