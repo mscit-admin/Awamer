@@ -24,7 +24,7 @@ Legend: ✅ fixed · 🟡 partially addressed · ⬜ backlog
 | ESLint / Prettier | ✅ | Configs added; `npm run lint` clean (0 errors). |
 | Rust warnings | ✅ | Crate is warning-clean. |
 | Dependency advisories | 🟡 | Backend **0 vulns** (fastify 5 + uuid done, validated live); desktop react-router/kdbxweb majors remain. |
-| Test coverage | 🟡 | Security-critical paths covered (VPN sanitizer, RBAC resolver, lockout); broad coverage still a backlog item. |
+| Test coverage | 🟡 | Unit (sanitizer, RBAC, lockout) + **DB integration tests** (vpnRepo encryption/resolve, RoleService) running in CI against Postgres; still expanding. |
 | Per-permission VPN reveal | ✅ | `vpn:reveal` splits secret reveal from `vpn:manage`. |
 | Login rate limit / lockout | ✅ | Per-IP auth throttle wired; lockout is now temporary. |
 | OpenAPI docs | ⬜ | None; routes already carry zod schemas. |
@@ -92,12 +92,16 @@ Also add `cargo audit`, enforce lockfiles (`npm ci`), and enable
 Dependabot/Renovate so these surface continuously.
 
 ### 3. Test coverage (High) — 🟡 IN PROGRESS
-Added: VPN config sanitizer/assembly (`domain/vpn.test.ts`), the `isAccountLocked`
-lockout logic (`domain/account.test.ts`), and the RBAC resolver `RoleService`
-(`domain/roleService.test.ts`, via an in-memory repo). Still to do: `vpnRepo` /
-`vpnManager` (need a test DB / process harness), the auth use-cases, and the
-connection gateways. Add coverage tooling (`c8` backend, `@vitest/coverage-v8`
-desktop) with a starting threshold, ratcheted up.
+Added **unit** tests: VPN sanitizer/assembly (`domain/vpn.test.ts`), lockout logic
+(`domain/account.test.ts`), RBAC resolver via in-memory repo
+(`domain/roleService.test.ts`). Added **DB integration** tests (`*.itest.ts`, run
+via `npm run test:integration` against a real Postgres, wired into CI with a
+`postgres:16` service): `vpnRepo` (secrets encrypted-at-rest round-trip +
+`resolveForHost` folder-ancestry inheritance) and `RoleService` (built-in
+reconciliation + live permission resolution). Integration tests **skip** when no
+`DATABASE_URL` is set, so the unit suite stays DB-free. Still to do: the auth
+use-cases, `vpnManager` process spawning, and the connection gateways; add a
+coverage tool + threshold (`c8` / `@vitest/coverage-v8`) and ratchet it up.
 
 ### 4. RBAC granularity — `vpn:reveal` (Medium) — ✅ DONE
 `GET /vpn/profiles/:id/config` (plaintext config + credentials) is now gated by a

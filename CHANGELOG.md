@@ -64,6 +64,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added ESLint (both packages) + Prettier + `.editorconfig` + `rustfmt.toml`, a
   CI workflow (`.github/workflows/ci.yml`: typecheck · lint · test · build ·
   audit · fmt/clippy), and the previously-undefined `make test` / `make lint`.
+- Added **DB integration tests** (`*.itest.ts`, `npm run test:integration`) that
+  run against a real Postgres — `vpnRepo` (secret encryption-at-rest round-trip +
+  `resolveForHost` folder inheritance) and `RoleService` (built-in reconciliation
+  + live permission resolution). CI now spins up a `postgres:16` service, runs
+  migrations, and executes them; they skip gracefully when no `DATABASE_URL`.
 - Removed dead code / duplication: the double `set_metadata` in `sftp_chmod`,
   write-only `SshSession` fields (crate is warning-clean), stale eslint-disable
   comments.

@@ -17,7 +17,8 @@
     "migrate:down": "tsx src/migrate.ts down",
     "lint": "eslint . --ext .ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test 'src/**/*.test.ts'"
+    "test": "tsx --test 'src/**/*.test.ts'",
+    "test:integration": "tsx --test 'src/**/*.itest.ts'"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

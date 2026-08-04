@@ -12,11 +12,30 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend (typecheck · lint · test)
+    name: Backend (typecheck · lint · test · integration)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: awamer
+          POSTGRES_PASSWORD: awamer
+          POSTGRES_DB: awamer
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U awamer" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      # Test-only dummy secrets (not real credentials) so loadConfig() passes.
+      DATABASE_URL: postgres://awamer:awamer@localhost:5432/awamer
+      APP_ENV: development
+      JWT_ACCESS_SECRET: ci_access_secret_ci_access_secret_ci_access_secret_0001
+      JWT_REFRESH_SECRET: ci_refresh_secret_ci_refresh_secret_ci_refresh_secret_02
+      CREDENTIAL_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      BOOTSTRAP_ADMIN_PASSWORD: CiP@ssw0rd!x
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,6 +47,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npm run migrate:up
+      - run: npm run test:integration
       # Advisory until the known advisories are remediated; then drop the flag.
       - name: npm audit (high)
         run: npm audit --omit=dev --audit-level=high
