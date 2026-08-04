@@ -640,11 +640,8 @@ pub async fn sftp_chmod(session_id: String, path: String, mode: u32) -> Result<(
     let session = map.get(&session_id).ok_or_else(|| {
         AppError::new("sftp_session_not_found", format!("no SFTP session {session_id}"))
     })?;
-    let mut attrs = russh_sftp::protocol::FileAttributes::default();
-    attrs.permissions = Some(mode & 0o7777);
-    session.sftp.set_metadata(&path, attrs).await
-        .map_err(|e| AppError::new("sftp_chmod_failed",
-            format!("chmod {path} -> {:o}: {e}", mode & 0o7777)))?;
+    // Send only the permission field so the server performs a pure chmod (a
+    // SETSTAT applies every field present, so reusing full attrs could truncate).
     let attrs = FileAttributes {
         permissions: Some(mode & 0o7777),
         ..Default::default()

@@ -9,6 +9,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.52.0] — 2026-08-04 — VPN Server (Awamer as an OpenVPN hub)
+
+### Added
+- **Awamer can now act as an OpenVPN *server*.** For a machine that has internet
+  but no public IP (a NAT'd local Linux box, a roaming laptop), run an OpenVPN
+  hub on the backend host, add users, and hand each one a ready-to-install
+  `.ovpn`. The remote machine installs the profile with OpenVPN Connect (Linux /
+  Windows / macOS) and dials in; it then becomes reachable at its VPN IP
+  (`10.8.0.x`), and — with client-to-client — so do the other members.
+  - **Self-contained PKI** (`backend/src/vpn/pki.ts`): each server mints its own
+    CA + server certificate + `tls-crypt` static key on creation; every user gets
+    a CA-signed client certificate. RSA-2048 keys via native `crypto`, cert
+    issuance via `node-forge`.
+  - **Two-factor client auth:** every user authenticates with **both** a
+    certificate (*something you have*) **and** a username/password
+    (*something you know*). Passwords are Argon2-hashed; verification runs in a
+    short-lived `auth-user-pass-verify` child (`backend/src/vpn/authVerify.ts`).
+    Revoking a user blocks their next connection (enforced at verify time — no CRL
+    needed).
+  - **Server process manager** (`backend/src/vpn/vpnServerManager.ts`): start/stop
+    the `openvpn` process per server from the UI; config is assembled from the DB
+    and written to a private temp dir (`dh none`, `tls-crypt`, `topology subnet`,
+    `AES-256-GCM`). Instances are in-memory and re-started after a backend restart.
+  - **REST API** (`/api/v1/vpn-server/*`): server CRUD, start/stop, per-user CRUD,
+    revoke, credential reveal (audited), and `.ovpn` download (certs inlined).
+  - **Data model** (migration `019_vpn_server`): `vpn_servers` +
+    `vpn_server_clients`; all private keys and passwords are encrypted at rest
+    (AES-256-GCM envelope), never stored in plaintext.
+  - **Desktop UI** (`VpnServerPage.tsx`, `/vpn-server`): create/edit servers,
+    start/stop with live status, manage users inline, reveal credentials, and
+    download each user's `.ovpn`.
+- **Deploy:** `deploy/docker-compose.production.yml` now publishes UDP+TCP `1194`
+  (the default VPN port) and enables `net.ipv4.ip_forward`. Servers on a custom
+  port need that port published + a container re-create.
+
+### RBAC
+- New permission **`vpn_server:manage`** — run OpenVPN server instances, manage
+  their users, and issue client profiles. Granted to **super_admin** and **admin**
+  by default (not the `user` role); reconciled into the locked built-in roles on
+  startup. The server enforces it on every `/api/v1/vpn-server/*` route; the UI
+  hides the **VPN Server** nav entry without it.
+
+---
+
+## [1.51.1] — 2026-08-04 — Security: harden backend-runtime OpenVPN (RCE fix)
+
+### Security
+- **Fixed remote code execution via OpenVPN config (Critical).** A backend-runtime
+  VPN profile stores an attacker-controlled `.ovpn` config, and OpenVPN config
+  directives (`up`, `down`, `plugin`, `script-security 2`, …) execute external
+  programs. With the backend container running openvpn as root, any authenticated
+  holder of `vpn:manage` could run commands on the server. Now:
+  - `assertSafeOvpnConfig` rejects any config containing a command-executing or
+    sandbox-relaxing directive, validated on the **fully-assembled** config so an
+    injection smuggled through a manual profile's inline CA/cert/key (closing the
+    `</ca>` block early) is caught too. Enforced on save **and** at launch/reveal.
+  - openvpn is always spawned with `--script-security 1` (backend and desktop), so
+    only its built-in `ip`/`ifconfig`/`route` helpers can run — never a user script.
+  - `remote_host` on manual profiles is charset-validated (no whitespace/newlines),
+    closing config-line injection.
+  - Opening a **backend-runtime** tunnel now requires an **admin** role (it spawns
+    openvpn on the shared server); desktop-runtime tunnels are unaffected.
+- Added unit tests for the sanitizer and VPN config assembly (`domain/vpn.test.ts`).
+- **New `vpn:reveal` permission** splits reading a profile's decrypted config +
+  credentials (needed to launch a tunnel) from `vpn:manage` (create/edit/attach),
+  mirroring the `credentials:reveal` model. `GET /vpn/profiles/:id/config` now
+  requires it. Granted to super_admin / admin / user by default.
+
+### Auth hardening
+- **Dedicated login throttle**: `/auth/login`, `/auth/mfa/verify`, `/auth/refresh`
+  now enforce a stricter per-IP rate limit (`RATE_LIMIT_LOGIN_PER_MIN`, default
+  10/min) — previously that setting was defined but unused and only the global
+  120/min applied to the password-guessing surface.
+- **Temporary account lockout** (migration 018): hitting the failed-attempt
+  threshold now locks the account for `ACCOUNT_LOCKOUT_MINUTES` (default 15) and
+  it unlocks itself, instead of a permanent lock — removing the anonymous
+  "lock any account forever" DoS. Admin/manual `is_locked` is unchanged.
+
+### Robustness
+- Global Fastify `setErrorHandler` + `setNotFoundHandler`: uncaught throws now
+  return a generic 500 instead of leaking a stack/internal detail.
+- pino log redaction (authorization headers, passwords, secrets, tokens, private
+  keys, passphrases, VPN config) so an accidental secret log emits `[redacted]`.
+
+### Dependencies
+- **Fastify 4 → 5** upgrade clears all 3 High backend advisories (X-Forwarded
+  host/proto spoofing, DoS, body-validation bypass; `find-my-way`/`fast-uri`) —
+  backend `npm audit` is now clean. Coordinated `@fastify/*` plugin bumps (cors
+  11, helmet 13, multipart 9, rate-limit 10, sensible 6, websocket 11) plus the
+  Fastify-5 API changes: `loggerInstance` for a pre-created pino logger,
+  `@fastify/websocket` v11 handing the socket to the handler directly, and
+  dropping the deprecated `disableRequestLogging`. Validated end-to-end against
+  PostgreSQL (boot + login + VPN + gateways + rate limit).
+- `uuid` 10 → 11.1.1 (clears its advisory).
+
+### Added
+- **OpenAPI docs** — `@fastify/swagger` + Swagger UI browsable at `/docs`,
+  opt-in via `ENABLE_API_DOCS` (off by default so the API surface isn't exposed
+  in production). Lists all API endpoints for handover/reference.
+
+### Internal / tooling (enterprise-readiness pass)
+- Added ESLint (both packages) + Prettier + `.editorconfig` + `rustfmt.toml`, a
+  CI workflow (`.github/workflows/ci.yml`: typecheck · lint · test · build ·
+  audit · fmt/clippy), and the previously-undefined `make test` / `make lint`.
+- Added **DB integration tests** (`*.itest.ts`, `npm run test:integration`) that
+  run against a real Postgres — `vpnRepo` (secret encryption-at-rest round-trip +
+  `resolveForHost` folder inheritance) and `RoleService` (built-in reconciliation
+  + live permission resolution). CI now spins up a `postgres:16` service, runs
+  migrations, and executes them; they skip gracefully when no `DATABASE_URL`.
+- Removed dead code / duplication: the double `set_metadata` in `sftp_chmod`,
+  write-only `SshSession` fields (crate is warning-clean), stale eslint-disable
+  comments.
+- Added `SECURITY.md` and `docs/ENTERPRISE_READINESS.md` (full audit + backlog).
+
 ## [1.51.0] — 2026-08-01 — OpenVPN client profiles (reach assets behind a VPN)
 
 ### Added

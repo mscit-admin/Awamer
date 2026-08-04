@@ -4,9 +4,12 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import multipart from "@fastify/multipart";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import { v4 as uuid } from "uuid";
 
 import { loadConfig } from "./config/index.js";
+import { DomainError } from "./domain/index.js";
 import { createLogger } from "./logger/index.js";
 import { createPool } from "./db/index.js";
 import { createArgon2 } from "./crypto/argon2.js";
@@ -65,6 +68,17 @@ import { makeWsTunnelGateway } from "./ssh/wsTunnelGateway.js";
 import { VpnProfileRepository } from "./repos/vpnRepo.js";
 import { VpnManager } from "./vpn/vpnManager.js";
 import { makeVpnRoutes } from "./routes/vpn.js";
+import { VpnServerRepository } from "./repos/vpnServerRepo.js";
+import { VpnServerManager } from "./vpn/vpnServerManager.js";
+import { makeVpnServerRoutes } from "./routes/vpnServer.js";
+
+/** Map a DomainError code to an HTTP status for the global error handler. */
+function statusForDomainError(code: string): number {
+  if (code.endsWith("_not_found")) return 404;
+  if (code.endsWith("_taken") || code === "vpn_too_many") return 409;
+  if (code === "forbidden") return 403;
+  return 400;
+}
 
 async function main() {
   const cfg = loadConfig();
@@ -103,6 +117,9 @@ async function main() {
   // OpenVPN client profiles (encrypted) + backend-runtime tunnel manager.
   const vpnProfiles = new VpnProfileRepository(pool, secretBox);
   const vpnManager = new VpnManager(log);
+  // Awamer-as-OpenVPN-server: PKI-backed server instances + their users.
+  const vpnServers = new VpnServerRepository(pool, secretBox, argon2);
+  const vpnServerManager = new VpnServerManager(log);
   // Backup / restore of a user's own session data.
   const backup = new BackupRepository(pool, secretBox);
   // Custom roles — load the DB-backed RBAC resolver before serving traffic.
@@ -129,10 +146,11 @@ async function main() {
 
   // Fastify app
   const app = Fastify({
-    logger: log,
+    // Fastify 5: a pre-created logger instance goes in `loggerInstance`
+    // (`logger` now only accepts a config object).
+    loggerInstance: log,
     trustProxy: true,
     bodyLimit: 1024 * 100,
-    disableRequestLogging: false,
   });
 
   await app.register(websocket);
@@ -154,11 +172,49 @@ async function main() {
     keyGenerator: (req) => req.ip,
   });
 
+  // Global safety net: per-route handlers still respond first; this catches
+  // anything uncaught so a stray throw never leaks a stack/internal detail to
+  // the client. Domain errors keep their code + a safe status; everything
+  // unexpected is logged server-side and returned as a generic 500.
+  app.setErrorHandler((err, req, reply) => {
+    if (err instanceof DomainError) {
+      return reply.code(statusForDomainError(err.code)).send({ error: { code: err.code, message: err.message } });
+    }
+    const e = err as { statusCode?: number; validation?: unknown; code?: string; message?: string };
+    if (e.validation) {
+      return reply.code(400).send({ error: { code: "validation_failed", message: e.message ?? "validation failed" } });
+    }
+    if (typeof e.statusCode === "number" && e.statusCode >= 400 && e.statusCode < 500) {
+      return reply.code(e.statusCode).send({ error: { code: e.code ?? "error", message: e.message ?? "error" } });
+    }
+    req.log.error({ err }, "unhandled error");
+    return reply.code(500).send({ error: { code: "internal_error", message: "internal server error" } });
+  });
+  app.setNotFoundHandler((_req, reply) => {
+    reply.code(404).send({ error: { code: "not_found", message: "route not found" } });
+  });
+
+  // OpenAPI docs (opt-in). Registered before the routes so it captures them;
+  // browsable at /docs. Off by default so the API surface isn't exposed in prod.
+  if (cfg.env.ENABLE_API_DOCS) {
+    await app.register(swagger, {
+      openapi: {
+        info: { title: "Awamer / NetSphere Terminal API", version: "1.8.0" },
+        components: {
+          securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
+        },
+      },
+    });
+    await app.register(swaggerUi, { routePrefix: "/docs" });
+    log.info("API docs enabled at /docs");
+  }
+
   app.get("/healthz", async () => ({ status: "ok" }));
   app.get("/readyz", async () => ({ status: "ready" }));
 
   await app.register(makeAuthRoutes({
     login: loginUC, refresh: refreshUC, mfa: mfaUC, users, jwt,
+    loginRateMax: cfg.env.RATE_LIMIT_LOGIN_PER_MIN,
   }), { prefix: "/api/v1/auth" });
   // Public forgot/reset password (same prefix as auth).
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });
@@ -198,12 +254,15 @@ async function main() {
   await app.register(makeWsTunnelGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/tunnel" });
   // OpenVPN client profiles + backend-runtime connections.
   await app.register(makeVpnRoutes({ vpn: vpnProfiles, manager: vpnManager, audit, jwt }), { prefix: "/api/v1/vpn" });
+  // Built-in OpenVPN server management (PKI, users, .ovpn, start/stop).
+  await app.register(makeVpnServerRoutes({ servers: vpnServers, manager: vpnServerManager, audit, jwt }), { prefix: "/api/v1/vpn-server" });
 
   const closeOn = (sig: NodeJS.Signals) => async () => {
     log.info({ sig }, "shutdown signal received");
     try {
       tunnels.stopAll();
       vpnManager.stopAll();
+      vpnServerManager.stopAll();
       await app.close();
       await pool.end();
       log.info("clean shutdown complete");

@@ -19,11 +19,14 @@
 set -euo pipefail
 
 # --- Config (override via environment) -------------------------------
-BRANCH="${BRANCH:-claude/serene-cray-fdzqwy}"
+BRANCH="${BRANCH:-claude/feature-addition-ygosfh}"
 API_BASE_URL="${API_BASE_URL:-https://161.97.78.116.nip.io:6655}"
 WEB_ROOT="${WEB_ROOT:-/var/www/awamer}"
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/docker-compose.production.yml}"
 ENV_FILE="${ENV_FILE:-.env.production}"
+# VPN-server listener port(s) to open on the host firewall (VPN Server feature).
+# Set VPN_PORTS="" to skip, or e.g. "1194/udp 1195/udp" for extra servers.
+VPN_PORTS="${VPN_PORTS:-1194/udp 1194/tcp}"
 # ---------------------------------------------------------------------
 
 # Resolve project root (this script lives in deploy/scripts/).
@@ -90,4 +93,16 @@ if command -v nginx >/dev/null 2>&1; then
   nginx -t && systemctl reload nginx
 fi
 
+# 5) Open the VPN-server port(s) on the host firewall (best-effort). The compose
+#    publishes the port from the container, but the host firewall must also allow
+#    it inbound for external OpenVPN clients to connect. Cloud security groups
+#    still need the same rule added in your provider console.
+if [ -n "$VPN_PORTS" ] && command -v ufw >/dev/null 2>&1 && ufw status >/dev/null 2>&1; then
+  for p in $VPN_PORTS; do
+    say "Allowing $p through ufw…"
+    ufw allow "$p" >/dev/null 2>&1 || true
+  done
+fi
+
 say "Done. Hard-refresh the browser (Ctrl-Shift-R) to pick up the new frontend."
+say "VPN Server: ensure your cloud security group also allows inbound $VPN_PORTS."

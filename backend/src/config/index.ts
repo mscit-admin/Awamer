@@ -34,6 +34,12 @@ const envSchema = z.object({
   RATE_LIMIT_LOGIN_PER_MIN: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_API_PER_MIN: z.coerce.number().int().positive().default(120),
   ACCOUNT_LOCKOUT_THRESHOLD: z.coerce.number().int().positive().default(5),
+  // Minutes an account is auto-locked after hitting the failed-attempt
+  // threshold, then it unlocks itself (temporary lockout).
+  ACCOUNT_LOCKOUT_MINUTES: z.coerce.number().int().positive().default(15),
+  // Expose the OpenAPI docs UI at /docs (off by default; it lists the API
+  // surface, so enable it deliberately — e.g. in staging/dev).
+  ENABLE_API_DOCS: z.string().optional().transform((v) => v === "true"),
 
   // CORS
   CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:1420,tauri://localhost,https://tauri.localhost"),

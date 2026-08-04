@@ -126,6 +126,9 @@ pub async fn vpn_connect(args: VpnConnectArgs) -> Result<VpnStatus, AppError> {
         write_secure(&auth_path, &body)?;
         cmd.arg("--auth-user-pass").arg(&auth_path).arg("--auth-nocache");
     }
+    // Restrict openvpn to its built-in helpers only — no user up/down/plugin
+    // scripts — even though the config was already sanitized server-side.
+    cmd.arg("--script-security").arg("1");
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
 
     let mut child = cmd.spawn().map_err(|e| {

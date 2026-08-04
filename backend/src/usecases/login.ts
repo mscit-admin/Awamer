@@ -1,5 +1,5 @@
 import { v4 as uuid } from "uuid";
-import { Errors, type User } from "../domain/index.js";
+import { Errors, isAccountLocked, type User } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
 import type { RefreshRepository, AuditRepository } from "../repos/otherRepos.js";
 import type { JwtService } from "../jwt/index.js";
@@ -58,7 +58,7 @@ export class LoginUseCase {
       });
       throw Errors.AccountInactive();
     }
-    if (user.isLocked) {
+    if (isAccountLocked(user, new Date())) {
       await this.audit.log({
         userId: user.id, action: "login", success: false,
         ipAddress: input.ip, userAgent: input.ua, details: { reason: "locked" },
@@ -70,8 +70,11 @@ export class LoginUseCase {
     if (!ok) {
       const newCount = await this.users.incrementFailedAttempts(user.id);
       if (newCount >= this.cfg.env.ACCOUNT_LOCKOUT_THRESHOLD) {
-        await this.users.setLocked(user.id, true);
-        this.log.warn({ userId: user.id, attempts: newCount }, "account locked due to failed attempts");
+        // Temporary lockout that expires on its own — avoids an anonymous
+        // "lock any account forever" DoS while still throttling guessing.
+        const until = new Date(Date.now() + this.cfg.env.ACCOUNT_LOCKOUT_MINUTES * 60_000);
+        await this.users.setLockedUntil(user.id, until);
+        this.log.warn({ userId: user.id, attempts: newCount, until }, "account temporarily locked due to failed attempts");
       }
       await this.audit.log({
         userId: user.id, action: "login", success: false,
@@ -140,7 +143,7 @@ export async function completeMFALogin(
 ): Promise<LoginResult> {
   const user = await users.getById(userId);
   if (!user.isActive) throw Errors.AccountInactive();
-  if (user.isLocked) throw Errors.AccountLocked();
+  if (isAccountLocked(user, new Date())) throw Errors.AccountLocked();
   return uc.completeLogin(user, ip, ua);
 }
 

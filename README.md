@@ -220,6 +220,7 @@ Open `http://localhost:1420`. Login works; the catch is that token persistence a
 | **Self-service password change** | ✅ Phase 2.x (1.10.0) |
 | **SSH tunnels / port forwarding (local `ssh -L` + WebSocket TCP tunnel)** | ✅ Phase 5 (1.21.0) |
 | **VPN — OpenVPN client profiles (desktop or backend runtime, folder/asset association, auto-connect)** | ✅ Phase 12 (1.51.0) |
+| **VPN Server — Awamer as an OpenVPN hub (self-signed PKI, per-user cert + username/password, downloadable .ovpn, start/stop)** | ✅ Phase 12 (1.52.0) |
 | **VNC remote desktop** | ✅ Phase 6 (1.18.0) |
 | RDP | ❌ Phase 6 (needs a Guacamole/guacd gateway) |
 | Serial | ❌ Phase 7 |

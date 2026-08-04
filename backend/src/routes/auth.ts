@@ -15,6 +15,8 @@ interface Deps {
   mfa: MFAUseCase;
   users: UserRepository;
   jwt: JwtService;
+  /** Per-IP requests/minute for the auth endpoints (stricter than the global API limit). */
+  loginRateMax: number;
 }
 
 export function userView(u: User) {
@@ -37,13 +39,17 @@ export function userView(u: User) {
 
 export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
+    // Stricter per-IP throttle for the credential-taking endpoints than the
+    // global API limit — this is the online password-guessing surface.
+    const authRateLimit = { config: { rateLimit: { max: deps.loginRateMax, timeWindow: "1 minute" } } };
+
     // ----- POST /login --------------------------------------------------
     const loginSchema = z.object({
       username: z.string().min(3).max(64),
       password: z.string().min(8).max(256),
     });
 
-    app.post("/login", async (req, reply) => {
+    app.post("/login", authRateLimit, async (req, reply) => {
       const parsed = loginSchema.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
@@ -91,7 +97,7 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
       code: z.string().regex(/^\d{6}$/, "code must be 6 digits"),
     });
 
-    app.post("/mfa/verify", async (req, reply) => {
+    app.post("/mfa/verify", authRateLimit, async (req, reply) => {
       const auth = req.headers.authorization;
       if (!auth?.startsWith("Bearer ")) {
         return reply.code(401).send({ error: { code: "missing_mfa_token", message: "" } });
@@ -130,7 +136,7 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
     // ----- POST /refresh -----------------------------------------------
     const refreshSchema = z.object({ refresh_token: z.string().min(1) });
 
-    app.post("/refresh", async (req, reply) => {
+    app.post("/refresh", authRateLimit, async (req, reply) => {
       const parsed = refreshSchema.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });

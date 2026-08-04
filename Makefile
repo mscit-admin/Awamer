@@ -80,6 +80,16 @@ docker-down: ## Stop all services
 docker-logs: ## Tail docker logs
 	$(COMPOSE) logs -f
 
+# --- Quality ----------------------------------------------------------
+test: ## Run backend + desktop test suites
+	cd backend && npm test
+	cd desktop && npm test
+
+lint: ## Typecheck + lint backend, desktop, and the Rust crate
+	cd backend && npm run typecheck && npm run lint
+	cd desktop && npx tsc --noEmit && npm run lint
+	cd desktop/src-tauri && cargo check
+
 clean: ## Remove build artifacts
 	rm -rf backend/dist backend/node_modules
 	rm -rf desktop/dist desktop/node_modules desktop/src-tauri/target

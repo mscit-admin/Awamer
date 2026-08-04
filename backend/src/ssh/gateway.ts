@@ -54,8 +54,8 @@ function sendJson(ws: import("ws").WebSocket, obj: unknown): void {
 export function makeSshGateway(deps: SshGatewayDeps) {
   return async function plugin(app: FastifyInstance) {
     app.get("/connect", { websocket: true }, async (connection, req) => {
-      // @fastify/websocket v8: connection.socket is the ws WebSocket.
-      const ws = connection.socket;
+      // @fastify/websocket v11: the handler receives the WebSocket directly.
+      const ws = connection;
       const q = req.query as Record<string, string | undefined>;
       const token = q.token;
       const hostId = q.host_id;

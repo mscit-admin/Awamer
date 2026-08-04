@@ -193,7 +193,7 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
       if (companyId === undefined) companyId = target.companyId ?? undefined;
 
       // The org unit, if given, must live in the resolved company.
-      let orgUnitId = p.data.org_unit_id ?? null;
+      const orgUnitId = p.data.org_unit_id ?? null;
       if (orgUnitId) {
         const unit = await deps.units.getById(orgUnitId);
         if (!unit || (companyId && unit.companyId !== companyId)) return err(reply, 400, "bad_unit", "org unit is not in the target company");

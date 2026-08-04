@@ -21,7 +21,10 @@ export interface User {
   fullName: string | null;
   role: Role;
   isActive: boolean;
+  /** Admin/manual permanent lock. */
   isLocked: boolean;
+  /** Automatic temporary lockout expiry; null when not auto-locked. */
+  lockedUntil: Date | null;
   failedAttempts: number;
   lastLoginAt: Date | null;
   lastLoginIp: string | null;
@@ -30,6 +33,16 @@ export interface User {
   orgUnitId: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Whether an account is currently locked: an admin permanent lock (`isLocked`),
+ * or a temporary auto-lock (`lockedUntil`) that has not yet expired. Pure so it
+ * can be unit-tested without a clock or DB.
+ */
+export function isAccountLocked(user: Pick<User, "isLocked" | "lockedUntil">, now: Date): boolean {
+  if (user.isLocked) return true;
+  return user.lockedUntil != null && user.lockedUntil.getTime() > now.getTime();
 }
 
 export type MFAMethod = "totp" | "webauthn" | "backup_codes";

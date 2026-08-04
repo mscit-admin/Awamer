@@ -36,7 +36,7 @@ function sendJson(ws: import("ws").WebSocket, obj: unknown): void {
 export function makeWsTunnelGateway(deps: WsTunnelDeps) {
   return async function plugin(app: FastifyInstance) {
     app.get("/connect", { websocket: true }, async (connection, req) => {
-      const ws = connection.socket;
+      const ws = connection;
       const q = req.query as Record<string, string | undefined>;
       const token = q.token;
       const hostId = q.host_id;

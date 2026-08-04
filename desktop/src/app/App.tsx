@@ -46,6 +46,7 @@ const FilesPage = lz(() => import("@/modules/sessions/components/FilesPage"), "F
 const NetworkPage = lz(() => import("@/modules/sessions/components/NetworkPage"), "NetworkPage");
 const TunnelsPage = lz(() => import("@/modules/sessions/components/TunnelsPage"), "TunnelsPage");
 const VpnPage = lz(() => import("@/modules/sessions/components/VpnPage"), "VpnPage");
+const VpnServerPage = lz(() => import("@/modules/sessions/components/VpnServerPage"), "VpnServerPage");
 const BackupPage = lz(() => import("@/modules/sessions/components/BackupPage"), "BackupPage");
 const NotesPage = lz(() => import("@/modules/notes/NotesPage"), "NotesPage");
 
@@ -108,6 +109,7 @@ export default function App() {
           <Route path="/network" element={<NetworkPage />} />
           <Route path="/tunnels" element={<TunnelsPage />} />
           <Route path="/vpn" element={<VpnPage />} />
+          <Route path="/vpn-server" element={<VpnServerPage />} />
           <Route path="/backup" element={<BackupPage />} />
           <Route path="/credentials" element={<CredentialsPage />} />
           <Route path="/credentials/import/keepass" element={<KeepassImportPage />} />

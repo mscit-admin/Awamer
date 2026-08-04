@@ -27,7 +27,9 @@ export const PERMISSIONS = [
   "ai:use",             // use AI assistance in the terminal
   "ai:manage",          // configure the organization's AI providers
   "ai:use_personal",    // add / use personal AI provider subscriptions
-  "vpn:manage",         // create / use OpenVPN client profiles to reach assets
+  "vpn:manage",         // create / edit / attach OpenVPN client profiles
+  "vpn:reveal",         // read a VPN profile's decrypted config + credentials
+  "vpn_server:manage",  // run OpenVPN server instances + manage their users
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -47,7 +49,9 @@ export const PERMISSION_META: Record<Permission, { label: string; description: s
   "ai:use":             { label: "Use AI assistant", description: "Use AI assistance (suggest, explain, analyze) in the terminal" },
   "ai:manage":          { label: "Manage org AI providers", description: "Configure the organization's shared AI provider subscriptions" },
   "ai:use_personal":    { label: "Use personal AI", description: "Add and use personal AI provider subscriptions with your own API keys" },
-  "vpn:manage":         { label: "Manage VPN", description: "Create and use OpenVPN client profiles, and attach them to assets and folders, to reach assets behind a VPN" },
+  "vpn:manage":         { label: "Manage VPN", description: "Create, edit and attach OpenVPN client profiles to assets and folders" },
+  "vpn:reveal":         { label: "Reveal VPN config", description: "Read a VPN profile's decrypted OpenVPN config and credentials (needed to launch a tunnel)" },
+  "vpn_server:manage":  { label: "Manage VPN server", description: "Run OpenVPN server instances on this host, manage their users, and issue client profiles" },
 };
 
 const ALL: Permission[] = [...PERMISSIONS];
@@ -60,7 +64,7 @@ export const BUILTIN_ROLES: { key: string; name: string; description: string; pe
   { key: "super_admin", name: "Super admin", description: "Full access to everything.", permissions: ALL },
   { key: "admin",       name: "Admin",       description: "Full access within their company.", permissions: ADMIN_ALL },
   { key: "user",        name: "User",        description: "Self-service over own resources; no user administration.",
-    permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage", "command_history:read", "ai:use", "ai:use_personal", "vpn:manage"] },
+    permissions: ["resources:write", "sessions:connect", "credentials:reveal", "tunnels:manage", "backup:manage", "command_history:read", "ai:use", "ai:use_personal", "vpn:manage", "vpn:reveal"] },
   { key: "readonly",    name: "Read-only",   description: "Browse the inventory; cannot modify, connect, or reveal secrets.", permissions: [] },
   { key: "auditor",     name: "Auditor",     description: "Read-only plus access to audit logs.", permissions: ["audit:read"] },
 ];
