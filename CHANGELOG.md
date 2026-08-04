@@ -60,6 +60,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PostgreSQL (boot + login + VPN + gateways + rate limit).
 - `uuid` 10 → 11.1.1 (clears its advisory).
 
+### Added
+- **OpenAPI docs** — `@fastify/swagger` + Swagger UI browsable at `/docs`,
+  opt-in via `ENABLE_API_DOCS` (off by default so the API surface isn't exposed
+  in production). Lists all API endpoints for handover/reference.
+
 ### Internal / tooling (enterprise-readiness pass)
 - Added ESLint (both packages) + Prettier + `.editorconfig` + `rustfmt.toml`, a
   CI workflow (`.github/workflows/ci.yml`: typecheck · lint · test · build ·

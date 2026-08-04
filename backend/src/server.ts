@@ -4,6 +4,8 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import multipart from "@fastify/multipart";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import { v4 as uuid } from "uuid";
 
 import { loadConfig } from "./config/index.js";
@@ -185,6 +187,21 @@ async function main() {
   app.setNotFoundHandler((_req, reply) => {
     reply.code(404).send({ error: { code: "not_found", message: "route not found" } });
   });
+
+  // OpenAPI docs (opt-in). Registered before the routes so it captures them;
+  // browsable at /docs. Off by default so the API surface isn't exposed in prod.
+  if (cfg.env.ENABLE_API_DOCS) {
+    await app.register(swagger, {
+      openapi: {
+        info: { title: "Awamer / NetSphere Terminal API", version: "1.8.0" },
+        components: {
+          securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
+        },
+      },
+    });
+    await app.register(swaggerUi, { routePrefix: "/docs" });
+    log.info("API docs enabled at /docs");
+  }
 
   app.get("/healthz", async () => ({ status: "ok" }));
   app.get("/readyz", async () => ({ status: "ready" }));

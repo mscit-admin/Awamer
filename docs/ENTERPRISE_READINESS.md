@@ -27,7 +27,7 @@ Legend: ✅ fixed · 🟡 partially addressed · ⬜ backlog
 | Test coverage | 🟡 | Unit (sanitizer, RBAC, lockout) + **DB integration tests** (vpnRepo encryption/resolve, RoleService) running in CI against Postgres; still expanding. |
 | Per-permission VPN reveal | ✅ | `vpn:reveal` splits secret reveal from `vpn:manage`. |
 | Login rate limit / lockout | ✅ | Per-IP auth throttle wired; lockout is now temporary. |
-| OpenAPI docs | ⬜ | None; routes already carry zod schemas. |
+| OpenAPI docs | ✅ | `@fastify/swagger` at `/docs` (81 endpoints), flag-gated (`ENABLE_API_DOCS`). |
 | Version consistency | ⬜ | backend 1.8.0 vs desktop/Cargo 1.7.0. |
 
 ---
@@ -128,5 +128,8 @@ permanent anonymous lockout. Admin/manual `is_locked` is unchanged.
   doesn't override handlers that catch first.)
 
 ### 7. Docs & consistency (Medium/Low)
-Add `@fastify/swagger` + Swagger UI (routes already carry zod schemas), a short
-architecture doc + ADR log, and reconcile the 1.7.0/1.8.0 version drift.
+- ✅ **Done** — `@fastify/swagger` + Swagger UI at `/docs` (opt-in via
+  `ENABLE_API_DOCS`; off in prod by default). Lists all 81 endpoints; request/
+  response bodies are sparse because routes validate with zod manually rather
+  than Fastify JSON schemas — attaching those would enrich the spec later.
+- ⬜ A short architecture doc + ADR log; reconcile the 1.7.0/1.8.0 version drift.
