@@ -110,14 +110,17 @@ migration 018) with a configurable `ACCOUNT_LOCKOUT_MINUTES` — no more
 permanent anonymous lockout. Admin/manual `is_locked` is unchanged.
 
 ### 6. Duplication refactors (Medium)
-- Extract the `__nochange__`/`__null__` SQL patch pattern (repeated ~21× across
+- ✅ **Done** — `desktop/src/shared/lib/api.ts`: unified the two error parsers and
+  the three 401-refresh-retry copies behind one `withRefresh()` wrapper +
+  single `parseError()`.
+- ⬜ Extract the `__nochange__`/`__null__` SQL patch pattern (repeated ~21× across
   repos) into a `patchArg()` + column-builder helper; standardize on the `CASE`
-  form (drop the `NULLIF` variants).
-- Promote `routes/vpn.ts`'s `domainStatus`/`fail` into a shared route-error module
-  (or rely on the new global `setErrorHandler`) — inline `404`-only handlers
-  elsewhere return wrong status codes for `*_taken` conflicts.
-- `desktop/src/shared/lib/api.ts`: unify the two error parsers and the three
-  401-refresh-retry copies behind one `withRefresh()` wrapper.
+  form (drop the `NULLIF` variants). *(DRY only — current code is correct; left
+  for a pass with DB integration tests, since it touches critical CRUD SQL.)*
+- ⬜ Promote `routes/vpn.ts`'s `domainStatus`/`fail` into a shared route-error
+  module — inline `404`-only handlers elsewhere return the wrong status for
+  `*_taken` conflicts. (The new global `setErrorHandler` is a safety net but
+  doesn't override handlers that catch first.)
 
 ### 7. Docs & consistency (Medium/Low)
 Add `@fastify/swagger` + Swagger UI (routes already carry zod schemas), a short

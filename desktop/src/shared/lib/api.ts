@@ -51,67 +51,31 @@ export function configureApiClient(opts: { token: TokenProvider; onUnauthorized?
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    ...opts.headers,
+  // Build the request fresh each call so the 401-refresh retry (below) picks up
+  // the newly-issued token via tokenProvider().
+  const doFetch = () => {
+    const headers: Record<string, string> = { Accept: "application/json", ...opts.headers };
+    if (!opts.unauthenticated) {
+      const token = opts.bearerOverride ?? tokenProvider();
+      if (token) headers.Authorization = `Bearer ${token}`;
+    }
+    const init: RequestInit = { method: opts.method ?? "GET", headers };
+    // Only declare a JSON body (+ its Content-Type) when there actually is one:
+    // a bodyless POST/DELETE with a JSON content-type makes Fastify reject it.
+    if (opts.body !== undefined) {
+      if (!("Content-Type" in headers)) headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(opts.body);
+    }
+    return fetch(url, init);
   };
 
-  if (!opts.unauthenticated) {
-    const token = opts.bearerOverride ?? tokenProvider();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
-
-  const init: RequestInit = {
-    method: opts.method ?? "GET",
-    headers,
-  };
-  // Only declare a JSON body (and its Content-Type) when there actually is one:
-  // a POST/DELETE with no body + "Content-Type: application/json" makes Fastify
-  // reject with "Body cannot be empty when content-type is set to ...".
-  if (opts.body !== undefined) {
-    if (!("Content-Type" in headers)) headers["Content-Type"] = "application/json";
-    init.body = JSON.stringify(opts.body);
-  }
-
-  let response = await fetch(url, init);
-
-  // 401 + we have a refresh hook + this wasn't an explicit override → try to refresh once.
-  if (response.status === 401 && !opts.unauthenticated && !opts.bearerOverride && onUnauthorized) {
-    const newToken = await onUnauthorized();
-    if (newToken) {
-      headers.Authorization = `Bearer ${newToken}`;
-      response = await fetch(url, { ...init, headers });
-    }
-  }
-
-  if (!response.ok) {
-    let payload: unknown;
-    let message = `HTTP ${response.status}`;
-    try {
-      payload = await response.json();
-      const p = payload as { error?: unknown; message?: unknown };
-      const err = p?.error;
-      if (err && typeof err === "object") {
-        // Our envelope: { error: { code, message } }
-        const eo = err as { message?: unknown; code?: unknown };
-        message = String(eo.message ?? eo.code ?? p?.message ?? message);
-      } else if (typeof err === "string") {
-        // Fastify default: { error: "Not Found", message: "..." }
-        message = String(p?.message ?? err);
-      } else if (typeof p?.message === "string") {
-        message = p.message;
-      }
-    } catch {
-      // Non-JSON error body — keep generic message.
-    }
-    throw new ApiError(response.status, message, payload);
-  }
-
+  const response = await withRefresh(doFetch, opts.unauthenticated || Boolean(opts.bearerOverride));
+  if (!response.ok) throw await parseError(response);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
-/** Attach the bearer token to a set of headers, refreshing once on demand. */
+/** Attach the current bearer token to a set of headers. */
 function authHeaders(base: Record<string, string> = {}): Record<string, string> {
   const headers = { ...base };
   const token = tokenProvider();
@@ -119,27 +83,45 @@ function authHeaders(base: Record<string, string> = {}): Record<string, string> 
   return headers;
 }
 
+/**
+ * Run a fetch, retrying once after a 401 if a refresh hook is set. `doFetch`
+ * must read the current token each call so the retry uses the refreshed one.
+ */
+async function withRefresh(doFetch: () => Promise<Response>, skip = false): Promise<Response> {
+  const response = await doFetch();
+  if (response.status === 401 && !skip && onUnauthorized) {
+    const newToken = await onUnauthorized();
+    if (newToken) return doFetch();
+  }
+  return response;
+}
+
+/** Single error-body parser for all entry points. Handles our
+ *  `{ error: { code, message } }` envelope and Fastify's `{ error, message }`. */
 async function parseError(response: Response): Promise<ApiError> {
   let payload: unknown;
   let message = `HTTP ${response.status}`;
   try {
     payload = await response.json();
-    const p = payload as { error?: { message?: unknown; code?: unknown }; message?: unknown };
-    if (p?.error && typeof p.error === "object") message = String(p.error.message ?? p.error.code ?? message);
-    else if (typeof p?.message === "string") message = p.message;
-  } catch { /* keep generic */ }
+    const p = payload as { error?: unknown; message?: unknown };
+    const err = p?.error;
+    if (err && typeof err === "object") {
+      const eo = err as { message?: unknown; code?: unknown };
+      message = String(eo.message ?? eo.code ?? p?.message ?? message);
+    } else if (typeof err === "string") {
+      message = String(p?.message ?? err);
+    } else if (typeof p?.message === "string") {
+      message = p.message;
+    }
+  } catch { /* non-JSON body — keep generic message */ }
   return new ApiError(response.status, message, payload);
 }
 
 /** Upload multipart/form-data (e.g. a file). The browser sets the boundary. */
 export async function uploadMultipart<T>(path: string, form: FormData): Promise<T> {
   const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
-  const doFetch = () => fetch(url, { method: "POST", headers: authHeaders({ Accept: "application/json" }), body: form });
-  let response = await doFetch();
-  if (response.status === 401 && onUnauthorized) {
-    const newToken = await onUnauthorized();
-    if (newToken) response = await doFetch();
-  }
+  const response = await withRefresh(() =>
+    fetch(url, { method: "POST", headers: authHeaders({ Accept: "application/json" }), body: form }));
   if (!response.ok) throw await parseError(response);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -148,12 +130,7 @@ export async function uploadMultipart<T>(path: string, form: FormData): Promise<
 /** GET a binary response as a Blob (e.g. an attachment download). */
 export async function fetchBlob(path: string): Promise<Blob> {
   const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
-  const doFetch = () => fetch(url, { method: "GET", headers: authHeaders() });
-  let response = await doFetch();
-  if (response.status === 401 && onUnauthorized) {
-    const newToken = await onUnauthorized();
-    if (newToken) response = await doFetch();
-  }
+  const response = await withRefresh(() => fetch(url, { method: "GET", headers: authHeaders() }));
   if (!response.ok) throw await parseError(response);
   return await response.blob();
 }
