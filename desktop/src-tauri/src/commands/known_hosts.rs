@@ -107,6 +107,7 @@ pub enum VerifyOutcome {
 pub static STORE: Lazy<Arc<Mutex<Option<KnownHostsStore>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
 
+#[allow(dead_code)] // public lazy accessor for the known-hosts store (kept for API completeness)
 pub async fn store() -> Result<&'static Arc<Mutex<Option<KnownHostsStore>>>, AppError> {
     let mut guard = STORE.lock().await;
     if guard.is_none() {

@@ -34,7 +34,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use russh::client::{self, Config, Handle, Handler, Msg};
 use russh::keys::key::PublicKey;
-use russh::{ChannelId, ChannelMsg, Disconnect};
+use russh::{ChannelMsg, Disconnect};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
@@ -49,15 +49,13 @@ use crate::errors::AppError;
 
 /// One live SSH connection. The struct holds:
 /// - `handle`: the russh client handle used to send packets
-/// - `channel_id`: the shell channel id, used for write/resize/close
-/// - `cmd_tx`: a channel of commands the writer task consumes
-/// - `host_id` and `history_id`: bookkeeping for the backend
+/// - `cmd_tx`: a channel of write/resize commands the I/O task consumes
+///
+/// The shell channel, host id and history id are owned by the spawned I/O
+/// task, not this registry entry.
 struct SshSession {
     handle: Handle<ClientHandler>,
-    channel_id: ChannelId,
     cmd_tx: mpsc::UnboundedSender<SessionCommand>,
-    host_id: String,
-    history_id: Option<i64>,
 }
 
 enum SessionCommand {
@@ -423,7 +421,6 @@ pub async fn ssh_connect(
         .await
         .map_err(|e| AppError::new("ssh_shell_failed", format!("shell: {e}")))?;
 
-    let channel_id = channel.id();
     let session_id = Uuid::new_v4().to_string();
 
     // 5. Tell the backend a connection has started, so it shows up in history.
@@ -448,10 +445,7 @@ pub async fn ssh_connect(
 
     SESSIONS.lock().await.insert(session_id.clone(), SshSession {
         handle,
-        channel_id,
         cmd_tx,
-        host_id: host.id.clone(),
-        history_id,
     });
 
     // 7. Touch the host so it shows up as recently-used.

@@ -7,6 +7,7 @@ import multipart from "@fastify/multipart";
 import { v4 as uuid } from "uuid";
 
 import { loadConfig } from "./config/index.js";
+import { DomainError } from "./domain/index.js";
 import { createLogger } from "./logger/index.js";
 import { createPool } from "./db/index.js";
 import { createArgon2 } from "./crypto/argon2.js";
@@ -65,6 +66,14 @@ import { makeWsTunnelGateway } from "./ssh/wsTunnelGateway.js";
 import { VpnProfileRepository } from "./repos/vpnRepo.js";
 import { VpnManager } from "./vpn/vpnManager.js";
 import { makeVpnRoutes } from "./routes/vpn.js";
+
+/** Map a DomainError code to an HTTP status for the global error handler. */
+function statusForDomainError(code: string): number {
+  if (code.endsWith("_not_found")) return 404;
+  if (code.endsWith("_taken") || code === "vpn_too_many") return 409;
+  if (code === "forbidden") return 403;
+  return 400;
+}
 
 async function main() {
   const cfg = loadConfig();
@@ -152,6 +161,28 @@ async function main() {
     max: cfg.env.RATE_LIMIT_API_PER_MIN,
     timeWindow: "1 minute",
     keyGenerator: (req) => req.ip,
+  });
+
+  // Global safety net: per-route handlers still respond first; this catches
+  // anything uncaught so a stray throw never leaks a stack/internal detail to
+  // the client. Domain errors keep their code + a safe status; everything
+  // unexpected is logged server-side and returned as a generic 500.
+  app.setErrorHandler((err, req, reply) => {
+    if (err instanceof DomainError) {
+      return reply.code(statusForDomainError(err.code)).send({ error: { code: err.code, message: err.message } });
+    }
+    const e = err as { statusCode?: number; validation?: unknown; code?: string };
+    if (e.validation) {
+      return reply.code(400).send({ error: { code: "validation_failed", message: err.message } });
+    }
+    if (typeof e.statusCode === "number" && e.statusCode >= 400 && e.statusCode < 500) {
+      return reply.code(e.statusCode).send({ error: { code: e.code ?? "error", message: err.message } });
+    }
+    req.log.error({ err }, "unhandled error");
+    return reply.code(500).send({ error: { code: "internal_error", message: "internal server error" } });
+  });
+  app.setNotFoundHandler((_req, reply) => {
+    reply.code(404).send({ error: { code: "not_found", message: "route not found" } });
   });
 
   app.get("/healthz", async () => ({ status: "ok" }));
