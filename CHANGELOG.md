@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.54.1] — 2026-08-05 — Fix: VPN internet routing must never break the base VPN
+
+### Fixed
+- Enabling internet access could stop the VPN server from coming up. The NAT
+  setup (`iptables`) ran **before** openvpn was spawned and was `await`ed with no
+  timeout, so if iptables blocked on the xtables lock (Docker holds it) `start()`
+  could stall and every client would time out. Now:
+  - NAT is applied **after** openvpn reports "Initialization Sequence Completed",
+    fully fire-and-forget — it can never block or fail the VPN coming online.
+  - `iptables` calls use `-w 5` (lock wait) plus a hard 10s exec timeout.
+  - The per-client `client-config-dir` setup is wrapped so any filesystem error
+    falls back to starting **without** internet routing instead of failing the
+    server. Full-tunnel routing degrades gracefully; the base VPN always starts.
+
 ## [1.54.0] — 2026-08-05 — VPN server: internet access (full tunnel), per-client
 
 ### Added

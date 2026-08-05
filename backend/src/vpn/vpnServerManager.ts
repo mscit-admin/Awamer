@@ -113,18 +113,27 @@ export class VpnServerManager {
       await writeFile(wrapperPath, wrapper, { mode: 0o700 });
 
       // Internet routing (full tunnel): write a client-config-dir with a
-      // redirect-gateway push for each selected, non-revoked client, and NAT the
-      // VPN subnet out to the internet. Requires the server master switch on.
+      // redirect-gateway push for each selected, non-revoked client. Requires
+      // the server master switch on. This is best-effort — if it fails, the base
+      // VPN must still start (just without internet routing), so any error here
+      // drops back to no client-config-dir rather than failing the server.
       const internetClients = server.internetAccess
         ? clients.filter((c) => c.internetAccess && !c.revoked)
         : [];
       let clientConfigDir: string | null = null;
       if (internetClients.length > 0) {
-        clientConfigDir = join(dir, "ccd");
-        await mkdir(clientConfigDir, { mode: 0o700 });
-        const ccd = clientInternetCcd(server.dns);
-        for (const c of internetClients) {
-          await writeFile(join(clientConfigDir, c.username), ccd, { mode: 0o600 });
+        try {
+          const ccdDir = join(dir, "ccd");
+          await mkdir(ccdDir, { mode: 0o700 });
+          const ccd = clientInternetCcd(server.dns);
+          for (const c of internetClients) {
+            await writeFile(join(ccdDir, c.username), ccd, { mode: 0o600 });
+          }
+          clientConfigDir = ccdDir;
+        } catch (e) {
+          this.log.warn({ err: e instanceof Error ? e.message : String(e) },
+            "vpn-server: internet client-config-dir setup failed — starting without internet routing");
+          clientConfigDir = null;
         }
       }
 
@@ -136,12 +145,6 @@ export class VpnServerManager {
       });
       const configPath = join(dir, "server.conf");
       await writeFile(configPath, config, { mode: 0o600 });
-
-      // Install NAT/masquerade so full-tunnel clients can reach the internet.
-      if (internetClients.length > 0) {
-        await this.applyNat(server.subnet, true);
-        runtime.natSubnet = server.subnet;
-      }
 
       const proc = spawn("openvpn", ["--config", configPath], {
         stdio: ["ignore", "pipe", "pipe"],
@@ -180,6 +183,16 @@ export class VpnServerManager {
           void this.cleanup(runtime);
         });
       });
+
+      // Install NAT/masquerade *after* the server is confirmed up, so a slow or
+      // failing iptables can never block or break the VPN coming online. Fully
+      // best-effort: full-tunnel clients just won't reach the internet if it
+      // fails (logged inside applyNat).
+      if (clientConfigDir) {
+        this.applyNat(server.subnet, true)
+          .then(() => { runtime.natSubnet = server.subnet; })
+          .catch((e) => this.log.warn({ err: e instanceof Error ? e.message : String(e) }, "vpn-server: NAT setup failed"));
+      }
 
       this.log.info({ server: server.id, port: server.port }, "VPN server started");
       return this.status(server.id);
@@ -220,20 +233,23 @@ export class VpnServerManager {
    */
   private async applyNat(subnet: string, add: boolean): Promise<void> {
     const flag = add ? "-A" : "-D";
+    // `-w 5` waits up to 5s for the xtables lock instead of hanging forever
+    // (Docker/other iptables users may hold it). Each exec also gets a hard
+    // 10s timeout as a backstop.
     const rules: string[][] = [
-      ["-t", "nat", flag, "POSTROUTING", "-s", subnet, "!", "-d", subnet, "-j", "MASQUERADE"],
-      [flag, "FORWARD", "-s", subnet, "-j", "ACCEPT"],
-      [flag, "FORWARD", "-d", subnet, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
+      ["-w", "5", "-t", "nat", flag, "POSTROUTING", "-s", subnet, "!", "-d", subnet, "-j", "MASQUERADE"],
+      ["-w", "5", flag, "FORWARD", "-s", subnet, "-j", "ACCEPT"],
+      ["-w", "5", flag, "FORWARD", "-d", subnet, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
     ];
     for (const args of rules) {
       // When adding, remove any stale copy first so rules don't stack.
       if (add) {
         const del = args.slice();
         del[del.indexOf("-A")] = "-D";
-        await execFileAsync("iptables", del).catch(() => { /* not present yet */ });
+        await execFileAsync("iptables", del, { timeout: 10_000 }).catch(() => { /* not present yet */ });
       }
       try {
-        await execFileAsync("iptables", args);
+        await execFileAsync("iptables", args, { timeout: 10_000 });
       } catch (e) {
         const err = e as NodeJS.ErrnoException;
         if (err.code === "ENOENT") {
