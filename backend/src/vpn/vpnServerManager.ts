@@ -15,7 +15,10 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Logger } from "../logger/index.js";
-import { assembleServerConfig, clientInternetCcd, type VpnServer, VpnServerErrors } from "../domain/vpnServer.js";
+import {
+  assembleServerConfig, assignClientIps, cidrNetmask, clientIpCcd, internetFirewallSpecs,
+  type FirewallSpec, type VpnServer, VpnServerErrors,
+} from "../domain/vpnServer.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,8 +45,8 @@ interface ServerProc {
   startedAt: string | null;
   proc: ChildProcess | null;
   dir: string | null;
-  /** Subnet whose NAT/masquerade rules were installed (for teardown), or null. */
-  natSubnet: string | null;
+  /** Firewall rules installed for internet policy (for exact teardown), or null. */
+  firewall: FirewallSpec[] | null;
 }
 
 const READY = "Initialization Sequence Completed";
@@ -92,7 +95,7 @@ export class VpnServerManager {
     }
 
     const runtime: ServerProc = {
-      serverId: server.id, state: "starting", error: null, startedAt: null, proc: null, dir: null, natSubnet: null,
+      serverId: server.id, state: "starting", error: null, startedAt: null, proc: null, dir: null, firewall: null,
     };
     this.servers.set(server.id, runtime);
 
@@ -112,28 +115,36 @@ export class VpnServerManager {
         `exec ${VERIFY_EXEC} "$@"\n`;
       await writeFile(wrapperPath, wrapper, { mode: 0o700 });
 
-      // Internet routing (full tunnel): write a client-config-dir with a
-      // redirect-gateway push for each selected, non-revoked client. Requires
-      // the server master switch on. This is best-effort — if it fails, the base
-      // VPN must still start (just without internet routing), so any error here
-      // drops back to no client-config-dir rather than failing the server.
-      const internetClients = server.internetAccess
-        ? clients.filter((c) => c.internetAccess && !c.revoked)
-        : [];
+      // Internet policy (master switch on): force every client through the
+      // tunnel and let the server firewall allow (allowed users) or block
+      // (everyone else) their internet — blocked users can still reach the local
+      // VPN subnet. Each non-revoked client gets a fixed VPN IP so the firewall
+      // can identify them. Best-effort: any failure here falls back to no policy
+      // (base VPN still starts), so it can never take the server down.
       let clientConfigDir: string | null = null;
-      if (internetClients.length > 0) {
+      let firewallSpecs: FirewallSpec[] | null = null;
+      if (server.internetAccess) {
         try {
+          const active = clients.filter((c) => !c.revoked);
+          const ips = assignClientIps(server.subnet, active.map((c) => c.username));
+          const netmask = cidrNetmask(server.subnet);
           const ccdDir = join(dir, "ccd");
           await mkdir(ccdDir, { mode: 0o700 });
-          const ccd = clientInternetCcd(server.dns);
-          for (const c of internetClients) {
-            await writeFile(join(ccdDir, c.username), ccd, { mode: 0o600 });
+          for (const c of active) {
+            const ip = ips.get(c.username);
+            if (ip) await writeFile(join(ccdDir, c.username), clientIpCcd(ip, netmask), { mode: 0o600 });
           }
           clientConfigDir = ccdDir;
+          const blockedIps = active
+            .filter((c) => !c.internetAccess)
+            .map((c) => ips.get(c.username))
+            .filter((ip): ip is string => Boolean(ip));
+          firewallSpecs = internetFirewallSpecs(server.subnet, blockedIps);
         } catch (e) {
           this.log.warn({ err: e instanceof Error ? e.message : String(e) },
-            "vpn-server: internet client-config-dir setup failed — starting without internet routing");
+            "vpn-server: internet policy setup failed — starting without it");
           clientConfigDir = null;
+          firewallSpecs = null;
         }
       }
 
@@ -141,7 +152,8 @@ export class VpnServerManager {
         port: server.port, proto: server.proto, subnet: server.subnet, dns: server.dns,
         clientToClient: server.clientToClient, cipher: server.cipher,
         caCert: server.caCert, serverCert: server.serverCert, serverKey: server.serverKey,
-        tlsCrypt: server.tlsCrypt, verifyCommand: `"${wrapperPath}"`, clientConfigDir,
+        tlsCrypt: server.tlsCrypt, verifyCommand: `"${wrapperPath}"`,
+        clientConfigDir, internetPolicy: Boolean(firewallSpecs),
       });
       const configPath = join(dir, "server.conf");
       await writeFile(configPath, config, { mode: 0o600 });
@@ -184,14 +196,14 @@ export class VpnServerManager {
         });
       });
 
-      // Install NAT/masquerade *after* the server is confirmed up, so a slow or
+      // Install the firewall *after* the server is confirmed up, so a slow or
       // failing iptables can never block or break the VPN coming online. Fully
-      // best-effort: full-tunnel clients just won't reach the internet if it
-      // fails (logged inside applyNat).
-      if (clientConfigDir) {
-        this.applyNat(server.subnet, true)
-          .then(() => { runtime.natSubnet = server.subnet; })
-          .catch((e) => this.log.warn({ err: e instanceof Error ? e.message : String(e) }, "vpn-server: NAT setup failed"));
+      // best-effort: internet allow/block just won't apply if it fails (logged).
+      if (firewallSpecs) {
+        const specs = firewallSpecs;
+        this.applyFirewall(specs, true)
+          .then(() => { runtime.firewall = specs; })
+          .catch((e) => this.log.warn({ err: e instanceof Error ? e.message : String(e) }, "vpn-server: firewall setup failed"));
       }
 
       this.log.info({ server: server.id, port: server.port }, "VPN server started");
@@ -217,9 +229,9 @@ export class VpnServerManager {
   }
 
   private async cleanup(s: ServerProc): Promise<void> {
-    if (s.natSubnet) {
-      const subnet = s.natSubnet; s.natSubnet = null;
-      await this.applyNat(subnet, false).catch(() => { /* best-effort teardown */ });
+    if (s.firewall) {
+      const specs = s.firewall; s.firewall = null;
+      await this.applyFirewall(specs, false).catch(() => { /* best-effort teardown */ });
     }
     if (!s.dir) return;
     const dir = s.dir; s.dir = null;
@@ -227,25 +239,19 @@ export class VpnServerManager {
   }
 
   /**
-   * Add (`add=true`) or remove the NAT/masquerade + forward rules that let a
-   * VPN subnet's full-tunnel clients reach the internet. Best-effort: missing
-   * iptables just disables internet routing (the server still runs).
+   * Add (`add=true`) or remove the internet-policy firewall rules. Best-effort:
+   * missing iptables just means the allow/block policy isn't enforced (the
+   * server still runs). `-w 5` avoids hanging on the xtables lock; each exec has
+   * a hard 10s timeout. Rules are appended in `specs` order so the per-IP DROPs
+   * precede the general internet ACCEPT.
    */
-  private async applyNat(subnet: string, add: boolean): Promise<void> {
+  private async applyFirewall(specs: FirewallSpec[], add: boolean): Promise<void> {
     const flag = add ? "-A" : "-D";
-    // `-w 5` waits up to 5s for the xtables lock instead of hanging forever
-    // (Docker/other iptables users may hold it). Each exec also gets a hard
-    // 10s timeout as a backstop.
-    const rules: string[][] = [
-      ["-w", "5", "-t", "nat", flag, "POSTROUTING", "-s", subnet, "!", "-d", subnet, "-j", "MASQUERADE"],
-      ["-w", "5", flag, "FORWARD", "-s", subnet, "-j", "ACCEPT"],
-      ["-w", "5", flag, "FORWARD", "-d", subnet, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
-    ];
-    for (const args of rules) {
-      // When adding, remove any stale copy first so rules don't stack.
+    for (const s of specs) {
+      const args = ["-w", "5", ...(s.table ? ["-t", s.table] : []), flag, s.chain, ...s.rule];
       if (add) {
         const del = args.slice();
-        del[del.indexOf("-A")] = "-D";
+        del[del.indexOf(flag)] = "-D";
         await execFileAsync("iptables", del, { timeout: 10_000 }).catch(() => { /* not present yet */ });
       }
       try {
@@ -253,7 +259,7 @@ export class VpnServerManager {
       } catch (e) {
         const err = e as NodeJS.ErrnoException;
         if (err.code === "ENOENT") {
-          this.log.warn("VPN internet routing needs iptables, which is not installed — full-tunnel clients won't reach the internet");
+          this.log.warn("VPN internet policy needs iptables, which is not installed — allow/block won't be enforced");
           return;
         }
         if (add) this.log.warn({ err: err.message, rule: args.join(" ") }, "vpn-server: iptables rule failed");

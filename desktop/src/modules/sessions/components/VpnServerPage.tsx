@@ -237,8 +237,8 @@ export function VpnServerPage() {
           <label className="flex items-start gap-2 text-xs text-fg-muted">
             <input type="checkbox" checked={form.internet_access} onChange={(e) => set("internet_access", e.target.checked)} className="accent-accent mt-0.5" />
             <span>
-              Allow clients to access the internet through this server (full tunnel / NAT).
-              <span className="block text-2xs text-fg-subtle">Master switch — then pick which users get it from the user list below. The server host NATs their traffic out to the internet.</span>
+              Control internet access for this server (full tunnel).
+              <span className="block text-2xs text-fg-subtle">Master switch. When on, all clients route through the server: users you allow (globe on) get internet via the server; everyone else is <b>blocked from the internet</b> and can reach only the VPN/local assets. When off, clients keep their own internet (VPN carries local traffic only).</span>
             </span>
           </label>
 
@@ -307,7 +307,7 @@ export function VpnServerPage() {
 
       <p className="text-2xs text-fg-muted mt-4 flex items-start gap-1.5">
         <KeyRound className="size-3.5 mt-0.5 shrink-0" />
-        The server process runs on the backend host (needs <span className="font-mono">openvpn</span> installed, the tun device, and the VPN port published). Each user authenticates with both a certificate and a username/password; revoking a user blocks their next connection. Internet routing (full tunnel) also needs <span className="font-mono">iptables</span> on the host; changes to the internet switch or per-user internet access take effect when the server is (re)started. Running servers are in-memory and must be re-started after a backend restart.
+        The server process runs on the backend host (needs <span className="font-mono">openvpn</span> installed, the tun device, and the VPN port published). Each user authenticates with both a certificate and a username/password; revoking a user blocks their next connection. Internet policy (allow/block per user) also needs <span className="font-mono">iptables</span> on the host and forces those clients through the tunnel; changes to the internet switch or per-user access take effect when the server is (re)started. Running servers are in-memory and must be re-started after a backend restart.
       </p>
     </div>
   );
@@ -498,11 +498,16 @@ function ClientPanel({ server, onError, onChanged }: {
                   <span className="text-xs font-medium truncate">{c.name}</span>
                   <span className="text-2xs text-fg-subtle font-mono">{c.username}</span>
                   {c.revoked && <span className="text-2xs text-red-300 border border-red-500/40 rounded px-1">revoked</span>}
-                  {c.internet_access && (
-                    <span className={"text-2xs rounded px-1 flex items-center gap-0.5 border " + (server.internet_access ? "text-sky-300 border-sky-500/40" : "text-fg-subtle border-border")}
-                      title={server.internet_access ? "Full-tunnel: internet via this server" : "Enabled, but the server's internet switch is off"}>
-                      <Globe className="size-2.5" /> internet
-                    </span>
+                  {server.internet_access && (
+                    c.internet_access ? (
+                      <span className="text-2xs rounded px-1 flex items-center gap-0.5 border text-sky-300 border-sky-500/40" title="Internet allowed — routed via this server">
+                        <Globe className="size-2.5" /> internet
+                      </span>
+                    ) : (
+                      <span className="text-2xs rounded px-1 flex items-center gap-0.5 border text-amber-300 border-amber-500/40" title="Internet blocked — this user can reach only local assets">
+                        <Globe className="size-2.5" /> blocked
+                      </span>
+                    )
                   )}
                 </div>
                 {reveal[c.id] && (
@@ -518,7 +523,7 @@ function ClientPanel({ server, onError, onChanged }: {
               </button>
               <button onClick={() => toggleInternet(c)} disabled={busy === c.id}
                 className={"btn-ghost text-2xs " + (c.internet_access ? "text-sky-400" : "text-fg-muted")}
-                title={c.internet_access ? "Internet access on — click to disable" : "Give this user internet access (full tunnel)"}>
+                title={c.internet_access ? "Internet allowed — click to block (local assets only)" : "Internet blocked — click to allow (via the server). Only applies when the server's internet switch is on."}>
                 <Globe className="size-3.5" />
               </button>
               <button onClick={() => toggleRevoke(c)} disabled={busy === c.id} className={"btn-ghost text-2xs " + (c.revoked ? "text-emerald-400" : "text-amber-400")} title={c.revoked ? "Un-revoke" : "Revoke"}>

@@ -98,13 +98,73 @@ export function toVpnServerClientPublic(c: VpnServerClient): VpnServerClientPubl
 const DATA_CIPHERS = "AES-256-GCM:AES-128-GCM";
 const inline = (tag: string, pem: string) => `<${tag}>\n${pem.trim()}\n</${tag}>`;
 
+function maskInt(prefix: number): number {
+  return prefix >= 32 ? 0xffffffff : (0xffffffff << (32 - prefix)) >>> 0;
+}
+function ipToInt(ip: string): number {
+  const p = ip.split(".").map(Number);
+  return (((p[0] ?? 0) << 24) | ((p[1] ?? 0) << 16) | ((p[2] ?? 0) << 8) | (p[3] ?? 0)) >>> 0;
+}
+function intToIp(n: number): string {
+  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+}
+
+/** Netmask (dotted) for a CIDR, e.g. "10.8.0.0/24" → "255.255.255.0". */
+export function cidrNetmask(cidr: string): string {
+  return intToIp(maskInt(Number(cidr.split("/")[1] ?? 24)));
+}
+
 /** Convert a CIDR ("10.8.0.0/24") to OpenVPN's `network netmask` pair. */
 export function cidrToServerLine(cidr: string): string {
+  const [net] = cidr.split("/");
+  return `${net} ${cidrNetmask(cidr)}`;
+}
+
+/**
+ * Assign a stable VPN IP to each client so the server firewall can identify
+ * them. The server takes host .1; clients get .2, .3, … Deterministic by sorted
+ * username, so a restart keeps the same mapping. Clients past the subnet's
+ * capacity are omitted (fall back to the dynamic pool, no fixed rule).
+ */
+export function assignClientIps(cidr: string, usernames: string[]): Map<string, string> {
   const [net, prefixStr] = cidr.split("/");
   const prefix = Number(prefixStr ?? 24);
-  const mask = prefix >= 32 ? 0xffffffff : (0xffffffff << (32 - prefix)) >>> 0;
-  const netmask = [(mask >>> 24) & 255, (mask >>> 16) & 255, (mask >>> 8) & 255, mask & 255].join(".");
-  return `${net} ${netmask}`;
+  const netInt = ipToInt(net ?? "0.0.0.0") & maskInt(prefix);
+  const usableHosts = prefix >= 31 ? 0 : 2 ** (32 - prefix) - 2;
+  const map = new Map<string, string>();
+  let host = 2; // .1 is the server
+  for (const u of [...usernames].sort()) {
+    if (host > usableHosts) break;
+    map.set(u, intToIp(netInt + host));
+    host += 1;
+  }
+  return map;
+}
+
+/** Per-client config-dir file pinning a fixed VPN IP (topology subnet). */
+export function clientIpCcd(ip: string, netmask: string): string {
+  return `ifconfig-push ${ip} ${netmask}\n`;
+}
+
+export interface FirewallSpec { table?: "nat"; chain: string; rule: string[] }
+
+/**
+ * iptables rule specs (each an argv sans the add/remove flag) enforcing the
+ * "internet policy" mode: everyone reaches the local subnet; blocked client IPs
+ * have their internet-bound traffic dropped; allowed clients are NATed out.
+ * Order matters — the per-IP DROPs must precede the general internet ACCEPT.
+ */
+export function internetFirewallSpecs(subnet: string, blockedIps: string[]): FirewallSpec[] {
+  const specs: FirewallSpec[] = [
+    { chain: "FORWARD", rule: ["-s", subnet, "-d", subnet, "-j", "ACCEPT"] },
+    { chain: "FORWARD", rule: ["-d", subnet, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"] },
+  ];
+  for (const ip of blockedIps) {
+    specs.push({ chain: "FORWARD", rule: ["-s", ip, "!", "-d", subnet, "-j", "DROP"] });
+  }
+  specs.push({ chain: "FORWARD", rule: ["-s", subnet, "!", "-d", subnet, "-j", "ACCEPT"] });
+  specs.push({ table: "nat", chain: "POSTROUTING", rule: ["-s", subnet, "!", "-d", subnet, "-j", "MASQUERADE"] });
+  return specs;
 }
 
 /** The `.ovpn` a client downloads. Credentials are NOT embedded — the cert is
@@ -148,6 +208,9 @@ export function assembleServerConfig(input: {
   verifyCommand: string;
   /** Directory of per-client push files (set when internet routing is on). */
   clientConfigDir?: string | null;
+  /** Internet-policy mode: force all clients through the tunnel (the server
+   *  firewall then allows or blocks each client's internet). */
+  internetPolicy?: boolean;
 }): string {
   const lines = [
     `port ${input.port}`,
@@ -171,24 +234,16 @@ export function assembleServerConfig(input: {
     "verb 3",
   ];
   if (input.clientToClient) lines.push("client-to-client");
-  // Per-client push files (e.g. redirect-gateway for internet-enabled clients).
+  // Per-client push files (fixed IPs so the firewall can identify each client).
   if (input.clientConfigDir) lines.push(`client-config-dir ${input.clientConfigDir}`);
+  // Internet policy: pull every client's default route into the tunnel; the
+  // server firewall then permits (allowed) or drops (blocked) their internet.
+  if (input.internetPolicy) lines.push('push "redirect-gateway def1 bypass-dhcp"');
   if (input.dns) lines.push(`push "dhcp-option DNS ${input.dns}"`);
   lines.push(inline("ca", input.caCert));
   lines.push(inline("cert", input.serverCert));
   lines.push(inline("key", input.serverKey));
   lines.push(inline("tls-crypt", input.tlsCrypt));
-  return lines.join("\n") + "\n";
-}
-
-/**
- * Contents of a per-client `client-config-dir` file that full-tunnels the
- * client's traffic to the internet through the server (redirect-gateway). The
- * file is named after the client's common name (= username).
- */
-export function clientInternetCcd(dns: string | null): string {
-  const lines = ['push "redirect-gateway def1 bypass-dhcp"'];
-  if (dns) lines.push(`push "dhcp-option DNS ${dns}"`);
   return lines.join("\n") + "\n";
 }
 

@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cidrToServerLine, assembleClientOvpn, assembleServerConfig, clientInternetCcd } from "./vpnServer.js";
+import {
+  cidrToServerLine, cidrNetmask, assembleClientOvpn, assembleServerConfig,
+  assignClientIps, clientIpCcd, internetFirewallSpecs,
+} from "./vpnServer.js";
 
 test("cidrToServerLine converts CIDR to network+netmask", () => {
   assert.equal(cidrToServerLine("10.8.0.0/24"), "10.8.0.0 255.255.255.0");
@@ -38,7 +41,7 @@ test("assembleServerConfig includes verify, subnet, tls-crypt and client-to-clie
   assert.doesNotMatch(off, /^client-to-client$/m);
 });
 
-test("assembleServerConfig adds client-config-dir only when internet routing is on", () => {
+test("assembleServerConfig adds client-config-dir + redirect-gateway only under internet policy", () => {
   const base = {
     port: 1194, proto: "udp" as const, subnet: "10.8.0.0/24", dns: null,
     clientToClient: true, cipher: "AES-256-GCM", caCert: "CA", serverCert: "SC", serverKey: "SK",
@@ -46,15 +49,38 @@ test("assembleServerConfig adds client-config-dir only when internet routing is 
   };
   const without = assembleServerConfig(base);
   assert.doesNotMatch(without, /^client-config-dir/m);
-  const withCcd = assembleServerConfig({ ...base, clientConfigDir: "/run/ccd" });
-  assert.match(withCcd, /^client-config-dir \/run\/ccd$/m);
+  assert.doesNotMatch(without, /redirect-gateway/);
+  const withPolicy = assembleServerConfig({ ...base, clientConfigDir: "/run/ccd", internetPolicy: true });
+  assert.match(withPolicy, /^client-config-dir \/run\/ccd$/m);
+  assert.match(withPolicy, /^push "redirect-gateway def1 bypass-dhcp"$/m);
 });
 
-test("clientInternetCcd pushes redirect-gateway (and DNS when set)", () => {
-  const noDns = clientInternetCcd(null);
-  assert.match(noDns, /push "redirect-gateway def1 bypass-dhcp"/);
-  assert.doesNotMatch(noDns, /dhcp-option DNS/);
-  const withDns = clientInternetCcd("9.9.9.9");
-  assert.match(withDns, /push "redirect-gateway def1 bypass-dhcp"/);
-  assert.match(withDns, /push "dhcp-option DNS 9\.9\.9\.9"/);
+test("cidrNetmask + assignClientIps give stable, server-skipping addresses", () => {
+  assert.equal(cidrNetmask("10.8.0.0/24"), "255.255.255.0");
+  assert.equal(cidrNetmask("10.0.0.0/16"), "255.255.0.0");
+  const ips = assignClientIps("10.8.0.0/24", ["charlie", "alice", "bob"]);
+  // Sorted by username, starting at .2 (.1 is the server).
+  assert.equal(ips.get("alice"), "10.8.0.2");
+  assert.equal(ips.get("bob"), "10.8.0.3");
+  assert.equal(ips.get("charlie"), "10.8.0.4");
+  // Deterministic across calls.
+  assert.deepEqual([...assignClientIps("10.8.0.0/24", ["bob", "alice"]).entries()], [["alice", "10.8.0.2"], ["bob", "10.8.0.3"]]);
+  assert.equal(clientIpCcd("10.8.0.5", "255.255.255.0"), "ifconfig-push 10.8.0.5 255.255.255.0\n");
+});
+
+test("internetFirewallSpecs drops blocked IPs before the general internet accept", () => {
+  const specs = internetFirewallSpecs("10.8.0.0/24", ["10.8.0.3", "10.8.0.7"]);
+  const flat = specs.map((s) => `${s.table ?? "filter"} ${s.chain} ${s.rule.join(" ")}`);
+  // Local subnet reachable by everyone.
+  assert.ok(flat.some((r) => r === "filter FORWARD -s 10.8.0.0/24 -d 10.8.0.0/24 -j ACCEPT"));
+  // Each blocked IP dropped for non-local (internet) destinations.
+  const dropC = flat.findIndex((r) => r === "filter FORWARD -s 10.8.0.3 ! -d 10.8.0.0/24 -j DROP");
+  const dropG = flat.findIndex((r) => r === "filter FORWARD -s 10.8.0.7 ! -d 10.8.0.0/24 -j DROP");
+  const accept = flat.findIndex((r) => r === "filter FORWARD -s 10.8.0.0/24 ! -d 10.8.0.0/24 -j ACCEPT");
+  assert.ok(dropC >= 0 && dropG >= 0 && accept >= 0);
+  assert.ok(dropC < accept && dropG < accept, "DROP rules must come before the general ACCEPT");
+  // NAT masquerade present.
+  assert.ok(flat.some((r) => r === "nat POSTROUTING -s 10.8.0.0/24 ! -d 10.8.0.0/24 -j MASQUERADE"));
+  // No blocked IPs → no DROP rules.
+  assert.equal(internetFirewallSpecs("10.8.0.0/24", []).filter((s) => s.rule.includes("DROP")).length, 0);
 });

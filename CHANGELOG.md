@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.55.0] — 2026-08-05 — VPN server: internet policy = allow OR block per client
+
+### Changed
+- The per-client internet toggle now **blocks** the internet for not-allowed
+  users instead of leaving them on split-tunnel. When a server's internet switch
+  is **on** ("internet policy" mode):
+  - all clients are pulled through the tunnel (`push redirect-gateway def1`),
+  - **allowed** users (globe on) get internet **via the server** (NAT), and
+  - **everyone else is blocked from the internet** — they can reach only the
+    VPN/local assets. (Previously not-allowed users kept their own local
+    internet, so the toggle appeared to do nothing.)
+  - Switch **off** = unchanged split-tunnel (clients keep their own internet;
+    the VPN only carries local traffic).
+- Implementation: each non-revoked client gets a **fixed VPN IP** (via a
+  per-client `client-config-dir` `ifconfig-push`, assigned deterministically by
+  username) so the server firewall can identify them; `iptables` then drops
+  blocked IPs' internet-bound traffic while allowing the local subnet, and NATs
+  the rest out. Rule generation + IP assignment are pure and unit-tested; the
+  firewall is applied only **after** openvpn is up and is fully best-effort, so
+  it can never block or break the base VPN.
+
+### Notes
+- Blocking a client's internet requires capturing all its traffic, so a blocked
+  client has **no internet at all while connected** (kill-switch), by design —
+  only local assets are reachable.
+- Internet policy changes take effect on server (re)start.
+
 ## [1.54.1] — 2026-08-05 — Fix: VPN internet routing must never break the base VPN
 
 ### Fixed
