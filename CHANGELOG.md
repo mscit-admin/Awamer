@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.54.0] — 2026-08-05 — VPN server: internet access (full tunnel), per-client
+
+### Added
+- **VPN servers can now route selected clients' traffic to the internet**
+  (full tunnel), alongside the existing client-to-client option:
+  - A server-level **“Allow clients to access the internet”** switch (master
+    enable) plus a **per-user internet toggle** in the user list — you choose
+    exactly which clients get it (a globe button / “internet” badge per user).
+  - Selected, non-revoked clients get `push "redirect-gateway def1 bypass-dhcp"`
+    via a per-client `client-config-dir` file (keyed by username = cert CN), and
+    the server host NATs the VPN subnet out to the internet
+    (`iptables MASQUERADE` + `FORWARD` rules, installed/removed by the server
+    process manager on start/stop). Changes apply on server (re)start.
+  - Migration `020_vpn_server_internet`: `internet_access` on `vpn_servers`
+    (master switch) and on `vpn_server_clients` (per-client), both default
+    `FALSE`. New route `POST /servers/:id/clients/:cid/internet` and
+    `internet_access` accepted on server create/update and client create.
+- **Deploy:** the backend image now bundles `iptables` (for the NAT rules);
+  `net.ipv4.ip_forward` was already enabled in the production compose. Rebuild
+  the backend container to pick up iptables.
+
+### Notes
+- Internet routing is best-effort about iptables: if it isn't present the server
+  still starts, but full-tunnel clients won't reach the internet (logged).
+
+---
+
 ## [1.53.0] — 2026-08-04 — RDP remote desktop (guacd gateway + native client)
 
 ### Added

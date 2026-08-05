@@ -22,6 +22,8 @@ export interface VpnServer {
   subnet: string; // CIDR, e.g. "10.8.0.0/24"
   dns: string | null;
   clientToClient: boolean;
+  /** Master switch: route selected clients' traffic to the internet (NAT). */
+  internetAccess: boolean;
   cipher: string;
   caCert: string;
   caKey: string;       // decrypted
@@ -42,6 +44,7 @@ export interface VpnServerPublic {
   subnet: string;
   dns: string | null;
   client_to_client: boolean;
+  internet_access: boolean;
   cipher: string;
   ca_cert: string;
   client_count: number;
@@ -60,6 +63,8 @@ export interface VpnServerClient {
   key: string;       // decrypted
   revoked: boolean;
   revokedAt: Date | null;
+  /** This client's traffic is full-tunnelled to the internet via the server. */
+  internetAccess: boolean;
   createdAt: Date;
 }
 
@@ -69,6 +74,7 @@ export interface VpnServerClientPublic {
   username: string;
   revoked: boolean;
   revoked_at: Date | null;
+  internet_access: boolean;
   created_at: Date;
 }
 
@@ -76,7 +82,7 @@ export function toVpnServerPublic(s: VpnServer, clientCount = 0): VpnServerPubli
   return {
     id: s.id, name: s.name, description: s.description,
     public_host: s.publicHost, port: s.port, proto: s.proto, subnet: s.subnet,
-    dns: s.dns, client_to_client: s.clientToClient, cipher: s.cipher,
+    dns: s.dns, client_to_client: s.clientToClient, internet_access: s.internetAccess, cipher: s.cipher,
     ca_cert: s.caCert, client_count: clientCount,
     created_at: s.createdAt, updated_at: s.updatedAt,
   };
@@ -85,7 +91,7 @@ export function toVpnServerPublic(s: VpnServer, clientCount = 0): VpnServerPubli
 export function toVpnServerClientPublic(c: VpnServerClient): VpnServerClientPublic {
   return {
     id: c.id, name: c.name, username: c.username,
-    revoked: c.revoked, revoked_at: c.revokedAt, created_at: c.createdAt,
+    revoked: c.revoked, revoked_at: c.revokedAt, internet_access: c.internetAccess, created_at: c.createdAt,
   };
 }
 
@@ -140,6 +146,8 @@ export function assembleServerConfig(input: {
   clientToClient: boolean; cipher: string;
   caCert: string; serverCert: string; serverKey: string; tlsCrypt: string;
   verifyCommand: string;
+  /** Directory of per-client push files (set when internet routing is on). */
+  clientConfigDir?: string | null;
 }): string {
   const lines = [
     `port ${input.port}`,
@@ -163,11 +171,24 @@ export function assembleServerConfig(input: {
     "verb 3",
   ];
   if (input.clientToClient) lines.push("client-to-client");
+  // Per-client push files (e.g. redirect-gateway for internet-enabled clients).
+  if (input.clientConfigDir) lines.push(`client-config-dir ${input.clientConfigDir}`);
   if (input.dns) lines.push(`push "dhcp-option DNS ${input.dns}"`);
   lines.push(inline("ca", input.caCert));
   lines.push(inline("cert", input.serverCert));
   lines.push(inline("key", input.serverKey));
   lines.push(inline("tls-crypt", input.tlsCrypt));
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Contents of a per-client `client-config-dir` file that full-tunnels the
+ * client's traffic to the internet through the server (redirect-gateway). The
+ * file is named after the client's common name (= username).
+ */
+export function clientInternetCcd(dns: string | null): string {
+  const lines = ['push "redirect-gateway def1 bypass-dhcp"'];
+  if (dns) lines.push(`push "dhcp-option DNS ${dns}"`);
   return lines.join("\n") + "\n";
 }
 

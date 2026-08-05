@@ -30,7 +30,9 @@ FROM node:20-alpine
 # runs — is root and has the privileges it needs. The Node service stays
 # non-root. Still needs `cap_add: NET_ADMIN` + the /dev/net/tun device from
 # docker-compose.production.yml so NET_ADMIN is in the container's bounding set.
-RUN apk add --no-cache wget tini iputils traceroute openvpn iproute2 \
+# iptables powers VPN-server internet routing (NAT/MASQUERADE for full-tunnel
+# clients); the manager adds/removes rules at runtime (needs NET_ADMIN).
+RUN apk add --no-cache wget tini iputils traceroute openvpn iproute2 iptables \
  && chmod u+s "$(command -v openvpn)"
 
 WORKDIR /app

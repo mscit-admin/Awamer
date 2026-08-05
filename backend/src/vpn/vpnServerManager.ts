@@ -8,13 +8,23 @@
  * restart drops them (re-start from the UI). Binding a UDP/TCP listener + tun
  * needs the container's `NET_ADMIN` + tun device (already granted for VPN).
  */
-import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Logger } from "../logger/index.js";
-import { assembleServerConfig, type VpnServer, VpnServerErrors } from "../domain/vpnServer.js";
+import { assembleServerConfig, clientInternetCcd, type VpnServer, VpnServerErrors } from "../domain/vpnServer.js";
+
+const execFileAsync = promisify(execFile);
+
+/** Minimal client shape the manager needs to build per-client push files. */
+export interface VpnServerClientNet {
+  username: string;
+  internetAccess: boolean;
+  revoked: boolean;
+}
 
 export type ServerState = "starting" | "running" | "error" | "stopped";
 
@@ -32,6 +42,8 @@ interface ServerProc {
   startedAt: string | null;
   proc: ChildProcess | null;
   dir: string | null;
+  /** Subnet whose NAT/masquerade rules were installed (for teardown), or null. */
+  natSubnet: string | null;
 }
 
 const READY = "Initialization Sequence Completed";
@@ -73,14 +85,14 @@ export class VpnServerManager {
     return [...this.servers.values()].map((s) => this.status(s.serverId));
   }
 
-  async start(server: VpnServer): Promise<PublicVpnServerStatus> {
+  async start(server: VpnServer, clients: VpnServerClientNet[] = []): Promise<PublicVpnServerStatus> {
     const existing = this.servers.get(server.id);
     if (existing && (existing.state === "running" || existing.state === "starting")) {
       return this.status(server.id);
     }
 
     const runtime: ServerProc = {
-      serverId: server.id, state: "starting", error: null, startedAt: null, proc: null, dir: null,
+      serverId: server.id, state: "starting", error: null, startedAt: null, proc: null, dir: null, natSubnet: null,
     };
     this.servers.set(server.id, runtime);
 
@@ -100,14 +112,36 @@ export class VpnServerManager {
         `exec ${VERIFY_EXEC} "$@"\n`;
       await writeFile(wrapperPath, wrapper, { mode: 0o700 });
 
+      // Internet routing (full tunnel): write a client-config-dir with a
+      // redirect-gateway push for each selected, non-revoked client, and NAT the
+      // VPN subnet out to the internet. Requires the server master switch on.
+      const internetClients = server.internetAccess
+        ? clients.filter((c) => c.internetAccess && !c.revoked)
+        : [];
+      let clientConfigDir: string | null = null;
+      if (internetClients.length > 0) {
+        clientConfigDir = join(dir, "ccd");
+        await mkdir(clientConfigDir, { mode: 0o700 });
+        const ccd = clientInternetCcd(server.dns);
+        for (const c of internetClients) {
+          await writeFile(join(clientConfigDir, c.username), ccd, { mode: 0o600 });
+        }
+      }
+
       const config = assembleServerConfig({
         port: server.port, proto: server.proto, subnet: server.subnet, dns: server.dns,
         clientToClient: server.clientToClient, cipher: server.cipher,
         caCert: server.caCert, serverCert: server.serverCert, serverKey: server.serverKey,
-        tlsCrypt: server.tlsCrypt, verifyCommand: `"${wrapperPath}"`,
+        tlsCrypt: server.tlsCrypt, verifyCommand: `"${wrapperPath}"`, clientConfigDir,
       });
       const configPath = join(dir, "server.conf");
       await writeFile(configPath, config, { mode: 0o600 });
+
+      // Install NAT/masquerade so full-tunnel clients can reach the internet.
+      if (internetClients.length > 0) {
+        await this.applyNat(server.subnet, true);
+        runtime.natSubnet = server.subnet;
+      }
 
       const proc = spawn("openvpn", ["--config", configPath], {
         stdio: ["ignore", "pipe", "pipe"],
@@ -170,9 +204,45 @@ export class VpnServerManager {
   }
 
   private async cleanup(s: ServerProc): Promise<void> {
+    if (s.natSubnet) {
+      const subnet = s.natSubnet; s.natSubnet = null;
+      await this.applyNat(subnet, false).catch(() => { /* best-effort teardown */ });
+    }
     if (!s.dir) return;
     const dir = s.dir; s.dir = null;
     try { await rm(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+
+  /**
+   * Add (`add=true`) or remove the NAT/masquerade + forward rules that let a
+   * VPN subnet's full-tunnel clients reach the internet. Best-effort: missing
+   * iptables just disables internet routing (the server still runs).
+   */
+  private async applyNat(subnet: string, add: boolean): Promise<void> {
+    const flag = add ? "-A" : "-D";
+    const rules: string[][] = [
+      ["-t", "nat", flag, "POSTROUTING", "-s", subnet, "!", "-d", subnet, "-j", "MASQUERADE"],
+      [flag, "FORWARD", "-s", subnet, "-j", "ACCEPT"],
+      [flag, "FORWARD", "-d", subnet, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
+    ];
+    for (const args of rules) {
+      // When adding, remove any stale copy first so rules don't stack.
+      if (add) {
+        const del = args.slice();
+        del[del.indexOf("-A")] = "-D";
+        await execFileAsync("iptables", del).catch(() => { /* not present yet */ });
+      }
+      try {
+        await execFileAsync("iptables", args);
+      } catch (e) {
+        const err = e as NodeJS.ErrnoException;
+        if (err.code === "ENOENT") {
+          this.log.warn("VPN internet routing needs iptables, which is not installed — full-tunnel clients won't reach the internet");
+          return;
+        }
+        if (add) this.log.warn({ err: err.message, rule: args.join(" ") }, "vpn-server: iptables rule failed");
+      }
+    }
   }
 
   stopAll(): void {

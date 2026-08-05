@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   Radio, Loader2, Plus, Trash2, Pencil, Power, PowerOff, AlertCircle,
-  RefreshCw, X, Users, Download, Ban, Undo2, Eye, Copy, ChevronRight, KeyRound,
+  RefreshCw, X, Users, Download, Ban, Undo2, Eye, Copy, ChevronRight, KeyRound, Globe,
 } from "lucide-react";
 import {
   vpnServerApi, type VpnServerProfile, type VpnServerInput,
@@ -31,6 +31,7 @@ const emptyForm: VpnServerInput & { name: string; public_host: string } = {
   subnet: "10.8.0.0/24",
   dns: "",
   client_to_client: true,
+  internet_access: false,
   cipher: "AES-256-GCM",
 };
 
@@ -83,6 +84,7 @@ export function VpnServerPage() {
       subnet: s.subnet,
       dns: s.dns ?? "",
       client_to_client: s.client_to_client,
+      internet_access: s.internet_access,
       cipher: s.cipher,
     });
     setEditing(s.id);
@@ -102,6 +104,7 @@ export function VpnServerPage() {
       subnet: form.subnet || undefined,
       dns: form.dns || null,
       client_to_client: form.client_to_client,
+      internet_access: form.internet_access,
       cipher: form.cipher || undefined,
     };
     try {
@@ -231,6 +234,14 @@ export function VpnServerPage() {
             </label>
           </div>
 
+          <label className="flex items-start gap-2 text-xs text-fg-muted">
+            <input type="checkbox" checked={form.internet_access} onChange={(e) => set("internet_access", e.target.checked)} className="accent-accent mt-0.5" />
+            <span>
+              Allow clients to access the internet through this server (full tunnel / NAT).
+              <span className="block text-2xs text-fg-subtle">Master switch — then pick which users get it from the user list below. The server host NATs their traffic out to the internet.</span>
+            </span>
+          </label>
+
           <div className="flex items-center justify-end">
             <button type="submit" disabled={saving || !form.name.trim() || !form.public_host.trim()} className="btn-primary">
               {saving ? <><Loader2 className="size-4 animate-spin" /> Saving…</> : editing === "new" ? "Create server" : "Save changes"}
@@ -296,7 +307,7 @@ export function VpnServerPage() {
 
       <p className="text-2xs text-fg-muted mt-4 flex items-start gap-1.5">
         <KeyRound className="size-3.5 mt-0.5 shrink-0" />
-        The server process runs on the backend host (needs <span className="font-mono">openvpn</span> installed, the tun device, and the VPN port published). Each user authenticates with both a certificate and a username/password; revoking a user blocks their next connection. Running servers are in-memory and must be re-started after a backend restart.
+        The server process runs on the backend host (needs <span className="font-mono">openvpn</span> installed, the tun device, and the VPN port published). Each user authenticates with both a certificate and a username/password; revoking a user blocks their next connection. Internet routing (full tunnel) also needs <span className="font-mono">iptables</span> on the host; changes to the internet switch or per-user internet access take effect when the server is (re)started. Running servers are in-memory and must be re-started after a backend restart.
       </p>
     </div>
   );
@@ -377,6 +388,20 @@ function ClientPanel({ server, onError, onChanged }: {
       setReveal((r) => ({ ...r, [c.id]: cred.password }));
     } catch (e) {
       onError(errMsg(e, "reveal failed"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function toggleInternet(c: VpnServerClient) {
+    setBusy(c.id);
+    onError(null);
+    try {
+      await vpnServerApi.setInternet(server.id, c.id, !c.internet_access);
+      await load();
+      onChanged();
+    } catch (e) {
+      onError(errMsg(e, "could not change internet access"));
     } finally {
       setBusy(null);
     }
@@ -473,6 +498,12 @@ function ClientPanel({ server, onError, onChanged }: {
                   <span className="text-xs font-medium truncate">{c.name}</span>
                   <span className="text-2xs text-fg-subtle font-mono">{c.username}</span>
                   {c.revoked && <span className="text-2xs text-red-300 border border-red-500/40 rounded px-1">revoked</span>}
+                  {c.internet_access && (
+                    <span className={"text-2xs rounded px-1 flex items-center gap-0.5 border " + (server.internet_access ? "text-sky-300 border-sky-500/40" : "text-fg-subtle border-border")}
+                      title={server.internet_access ? "Full-tunnel: internet via this server" : "Enabled, but the server's internet switch is off"}>
+                      <Globe className="size-2.5" /> internet
+                    </span>
+                  )}
                 </div>
                 {reveal[c.id] && (
                   <div className="text-2xs font-mono text-amber-300 flex items-center gap-1 mt-0.5">
@@ -484,6 +515,11 @@ function ClientPanel({ server, onError, onChanged }: {
               <button onClick={() => revealCred(c)} disabled={busy === c.id} className="btn-ghost text-2xs" title="Reveal password"><Eye className="size-3.5" /></button>
               <button onClick={() => download(c)} disabled={busy === c.id} className="btn-ghost text-2xs text-accent" title="Download .ovpn">
                 {busy === c.id ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+              </button>
+              <button onClick={() => toggleInternet(c)} disabled={busy === c.id}
+                className={"btn-ghost text-2xs " + (c.internet_access ? "text-sky-400" : "text-fg-muted")}
+                title={c.internet_access ? "Internet access on — click to disable" : "Give this user internet access (full tunnel)"}>
+                <Globe className="size-3.5" />
               </button>
               <button onClick={() => toggleRevoke(c)} disabled={busy === c.id} className={"btn-ghost text-2xs " + (c.revoked ? "text-emerald-400" : "text-amber-400")} title={c.revoked ? "Un-revoke" : "Revoke"}>
                 {c.revoked ? <Undo2 className="size-3.5" /> : <Ban className="size-3.5" />}
