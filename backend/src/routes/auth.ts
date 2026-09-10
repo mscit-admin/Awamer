@@ -8,6 +8,7 @@ import type { JwtService } from "../jwt/index.js";
 import type { User } from "../domain/index.js";
 import { DomainError } from "../domain/index.js";
 import { permissionsFor } from "../domain/permissions.js";
+import { makeAuthMiddleware } from "../middleware/auth.js";
 
 interface Deps {
   login: LoginUseCase;
@@ -155,8 +156,21 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
     });
 
     // ----- POST /logout -------------------------------------------------
-    app.post("/logout", async (_req, reply) => {
-      // Phase 1: best-effort; the client clears its tokens.
+    // SEC-017: revoke the current refresh session server-side (not just a
+    // client-side token wipe), so the presented token — and any stolen copy —
+    // can no longer be refreshed. The refresh token is accepted in the body.
+    const logoutSchema = z.object({ refresh_token: z.string().min(1).optional() });
+    app.post("/logout", async (req, reply) => {
+      const parsed = logoutSchema.safeParse(req.body ?? {});
+      const rt = parsed.success ? parsed.data.refresh_token : undefined;
+      if (rt) await deps.refresh.logout(rt, req.ip, String(req.headers["user-agent"] ?? ""));
+      return reply.code(204).send();
+    });
+
+    // ----- POST /logout-all --------------------------------------------
+    // Revoke every active session for the authenticated user.
+    app.post("/logout-all", { preHandler: makeAuthMiddleware(deps.jwt) }, async (req, reply) => {
+      await deps.refresh.logoutAll(req.auth!.sub, req.ip, String(req.headers["user-agent"] ?? ""));
       return reply.code(204).send();
     });
   };

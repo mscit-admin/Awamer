@@ -117,6 +117,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
     },
 
     async logout() {
+      // SEC-017: revoke the session server-side before clearing local state.
+      const refresh = await secureGet(REFRESH_KEY);
+      await authApi.logout(refresh);
       await secureDelete(REFRESH_KEY);
       set({
         status: "unauthenticated",

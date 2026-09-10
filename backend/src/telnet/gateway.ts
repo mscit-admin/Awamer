@@ -16,6 +16,7 @@ import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, ConnectionHistoryRepository } from "../repos/sessionRepos.js";
+import { awaitAuthFrame } from "../ssh/gateway.js";
 
 export interface TelnetGatewayDeps {
   jwt: JwtService;
@@ -86,7 +87,6 @@ export function makeTelnetGateway(deps: TelnetGatewayDeps) {
     app.get("/connect", { websocket: true }, async (connection, req) => {
       const ws = connection;
       const q = req.query as Record<string, string | undefined>;
-      const token = q.token;
       const hostId = q.host_id;
 
       const fail = (code: string, message: string) => {
@@ -94,7 +94,13 @@ export function makeTelnetGateway(deps: TelnetGatewayDeps) {
         try { ws.close(); } catch { /* ignore */ }
       };
 
-      if (!token || !hostId) return fail("bad_request", "token and host_id are required");
+      if (!hostId) return fail("bad_request", "host_id is required");
+
+      // SEC-018: token arrives over the channel (first frame), never the URL.
+      sendJson(ws, { type: "status", status: "authenticating" });
+      const authFrame = await awaitAuthFrame(ws);
+      if (!authFrame) return fail("auth_required", "no authentication frame received");
+      const token = authFrame.token;
 
       let userId: string;
       try {
