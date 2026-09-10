@@ -39,4 +39,13 @@ export class RoleService {
   has(key: string): boolean {
     return this.cache.some((r) => r.key === key);
   }
+
+  /**
+   * Tenant ownership of a role key (SEC-016): built-ins are global, custom
+   * roles belong to a company. Returns undefined for an unknown key.
+   */
+  tenantOf(key: string): { isBuiltin: boolean; companyId: string | null } | undefined {
+    const r = this.cache.find((x) => x.key === key);
+    return r ? { isBuiltin: r.isBuiltin, companyId: r.companyId } : undefined;
+  }
 }

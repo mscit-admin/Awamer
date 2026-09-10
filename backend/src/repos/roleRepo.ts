@@ -7,24 +7,27 @@ export interface RoleRecord {
   description: string | null;
   permissions: string[];
   isBuiltin: boolean;
+  companyId: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 interface RoleRow {
   id: string; key: string; name: string; description: string | null;
-  permissions: string[]; is_builtin: boolean; created_at: Date; updated_at: Date;
+  permissions: string[]; is_builtin: boolean; company_id: string | null;
+  created_at: Date; updated_at: Date;
 }
 
 function rowToRole(r: RoleRow): RoleRecord {
   return {
     id: r.id, key: r.key, name: r.name, description: r.description,
     permissions: r.permissions ?? [], isBuiltin: r.is_builtin,
+    companyId: r.company_id,
     createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
   };
 }
 
-const COLS = `id, key, name, description, permissions, is_builtin, created_at, updated_at`;
+const COLS = `id, key, name, description, permissions, is_builtin, company_id, created_at, updated_at`;
 
 export class RoleNotFound extends Error { constructor() { super("role_not_found"); this.name = "RoleNotFound"; } }
 export class RoleKeyTaken extends Error { constructor() { super("role_key_taken"); this.name = "RoleKeyTaken"; } }
@@ -35,6 +38,23 @@ export class RoleRepository {
   async listAll(): Promise<RoleRecord[]> {
     const { rows } = await this.pool.query<RoleRow>(
       `SELECT ${COLS} FROM roles ORDER BY is_builtin DESC, name`,
+    );
+    return rows.map(rowToRole);
+  }
+
+  /**
+   * Roles visible to a tenant: all built-ins (global) plus the caller's own
+   * company's custom roles. A `null` companyId (super-admin / no-company view)
+   * sees everything. SEC-016: prevents leaking or touching another tenant's
+   * custom roles.
+   */
+  async listForCompany(companyId: string | null): Promise<RoleRecord[]> {
+    if (companyId == null) return this.listAll();
+    const { rows } = await this.pool.query<RoleRow>(
+      `SELECT ${COLS} FROM roles
+        WHERE is_builtin = TRUE OR company_id = $1
+        ORDER BY is_builtin DESC, name`,
+      [companyId],
     );
     return rows.map(rowToRole);
   }
@@ -64,12 +84,12 @@ export class RoleRepository {
     );
   }
 
-  async create(input: { key: string; name: string; description?: string | null; permissions: string[] }): Promise<RoleRecord> {
+  async create(input: { key: string; name: string; description?: string | null; permissions: string[]; companyId: string | null }): Promise<RoleRecord> {
     try {
       const { rows } = await this.pool.query<RoleRow>(
-        `INSERT INTO roles (key, name, description, permissions, is_builtin)
-         VALUES ($1, $2, $3, $4::text[], FALSE) RETURNING ${COLS}`,
-        [input.key, input.name, input.description ?? null, input.permissions],
+        `INSERT INTO roles (key, name, description, permissions, is_builtin, company_id)
+         VALUES ($1, $2, $3, $4::text[], FALSE, $5) RETURNING ${COLS}`,
+        [input.key, input.name, input.description ?? null, input.permissions, input.companyId],
       );
       return rowToRole(rows[0]!);
     } catch (e) {

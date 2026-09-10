@@ -226,7 +226,7 @@ async function main() {
   await app.register(makeAdminRoutes({ users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, jwt }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeSessionSettingsRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/admin/session-settings" });
-  await app.register(makeRoleRoutes({ roles, roleService, audit, jwt }), { prefix: "/api/v1/roles" });
+  await app.register(makeRoleRoutes({ roles, roleService, audit, jwt, users }), { prefix: "/api/v1/roles" });
 
   // Phase 2 — Session Management routes
   await app.register(makeFolderRoutes({ folders, audit, jwt }), { prefix: "/api/v1/folders" });
