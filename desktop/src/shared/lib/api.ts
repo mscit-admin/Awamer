@@ -12,7 +12,10 @@
  * fetch directly so behaviours like auth and logging stay consistent.
  */
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8080";
+// BUG-001: the backend dev port is 8081 (AUTH_HTTP_PORT default). The previous
+// 8080 default pointed at nothing, so a dev build without VITE_API_BASE_URL set
+// silently failed every API call. Aligned with the rest of the app + backend.
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8081";
 
 export class ApiError extends Error {
   constructor(

@@ -9,9 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — Security remediation (Phases 1–3)
+## [Unreleased] — Security remediation (Phases 1–4)
 
 ### Security
+- **SEC-005 — Docker least privilege.** The production API container now drops
+  ALL Linux capabilities and adds back only `NET_ADMIN` (what OpenVPN needs),
+  and sets `no-new-privileges:true`. VPN functionality (tun device, ip_forward)
+  is preserved; the fully-unprivileged posture for desktop-only-VPN deployments
+  is documented.
+- **SEC-006 — Browser Content-Security-Policy.** nginx now sends a tight CSP
+  (`default-src 'self'`, no `unsafe-eval`, no inline/wildcard scripts;
+  `style-src 'unsafe-inline'` only, for xterm/React inline styles;
+  `frame-ancestors 'none'`).
+
+### Fixed
+- **BUG-001 — Tauri/dev endpoint mismatch.** The web API client defaulted to
+  `localhost:8080` while the backend listens on `8081`; aligned to `8081`. The
+  Tauri CSP `connect-src` now allows the correct dev port + `ws:`/`wss:` (and
+  `https:`/`wss:` for packaged apps reaching a remote backend), and drops the
+  unused Google-Fonts sources.
 - **SEC-008 — SSH host-key pinning (TOFU + change detection).** The SSH, SFTP,
   WS-tunnel and server-managed-tunnel connectors previously accepted any server
   host key on every connection and never noticed a change (`hostVerifier: () =>
