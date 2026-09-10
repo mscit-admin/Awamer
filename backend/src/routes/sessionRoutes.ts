@@ -267,7 +267,10 @@ export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
         await deps.audit.log({ userId: req.auth!.sub, action: "host_update", success: true, resourceType: "host", resourceId: id });
         return reply.send({ user_ids: parsed.data.user_ids });
       } catch (e) {
-        if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
+        if (e instanceof DomainError) {
+          const status = e.code === "cross_company_share" ? 403 : 404;
+          return reply.code(status).send({ error: { code: e.code, message: e.message } });
+        }
         throw e;
       }
     });

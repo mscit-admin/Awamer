@@ -251,6 +251,7 @@ import { DomainError } from "./index.js";
 
 export const PhaseTwoErrors = {
   HostNotFound: () => new DomainError("host_not_found", "host not found"),
+  CrossCompanyShare: () => new DomainError("cross_company_share", "a resource can only be shared with users in the same company"),
   HostNameTaken: () => new DomainError("host_name_taken", "a host with this name already exists"),
   FolderNotFound: () => new DomainError("folder_not_found", "folder not found"),
   FolderNameTaken: () => new DomainError("folder_name_taken", "a folder with this name already exists at the same level"),

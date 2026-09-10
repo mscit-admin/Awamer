@@ -533,7 +533,7 @@ export class HostRepository {
     // whole installation — otherwise a user in another tenant sees (and can
     // connect through, with the owner's credential) this company's shared hosts.
     const where: string[] = [
-      "(h.user_id = $1 OR (h.is_shared = TRUE AND h.company_id = (SELECT company_id FROM users WHERE id = $1)) OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = h.id AND hs.user_id = $1))",
+      "(h.user_id = $1 OR ((h.is_shared = TRUE OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = h.id AND hs.user_id = $1)) AND h.company_id = (SELECT company_id FROM users WHERE id = $1)))",
     ];
     const params: unknown[] = [userId];
     let p = 1;
@@ -598,8 +598,8 @@ export class HostRepository {
     const { rows } = await this.pool.query<HostRow>(
       `SELECT ${HOST_COLS} FROM hosts
        WHERE id = $1 AND (user_id = $2
-                          OR (is_shared = TRUE AND company_id = (SELECT company_id FROM users WHERE id = $2))
-                          OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = hosts.id AND hs.user_id = $2))`,
+                          OR ((is_shared = TRUE OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = hosts.id AND hs.user_id = $2))
+                              AND company_id = (SELECT company_id FROM users WHERE id = $2)))`,
       [id, userId],
     );
     if (!rows[0]) throw PhaseTwoErrors.HostNotFound();
@@ -705,8 +705,8 @@ export class HostRepository {
     const r = await this.pool.query(
       `UPDATE hosts SET last_used_at = NOW(), use_count = use_count + 1
        WHERE id = $1 AND (user_id = $2
-                          OR (is_shared = TRUE AND company_id = (SELECT company_id FROM users WHERE id = $2))
-                          OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = hosts.id AND hs.user_id = $2))`,
+                          OR ((is_shared = TRUE OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = hosts.id AND hs.user_id = $2))
+                              AND company_id = (SELECT company_id FROM users WHERE id = $2)))`,
       [id, userId],
     );
     if (r.rowCount === 0) throw PhaseTwoErrors.HostNotFound();
@@ -719,11 +719,23 @@ export class HostRepository {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const own = await client.query(`SELECT id FROM hosts WHERE id = $1 AND user_id = $2`, [hostId, ownerId]);
+      const own = await client.query<{ company_id: string | null }>(
+        `SELECT company_id FROM hosts WHERE id = $1 AND user_id = $2`, [hostId, ownerId]);
       if (own.rowCount === 0) throw PhaseTwoErrors.HostNotFound();
-      await client.query(`DELETE FROM host_shares WHERE host_id = $1`, [hostId]);
+      const hostCompany = own.rows[0]!.company_id;
       // Never share with the owner themselves; de-dup.
       const targets = [...new Set(userIds)].filter((u) => u && u !== ownerId);
+      // SEC-015: every recipient must belong to the host's company. Reject the
+      // ENTIRE operation (no partial share) if any recipient is foreign or
+      // missing — an explicit share must never cross a tenant boundary.
+      if (targets.length > 0) {
+        const { rows } = await client.query<{ id: string }>(
+          `SELECT id FROM users WHERE id = ANY($1::uuid[]) AND company_id IS NOT DISTINCT FROM $2`,
+          [targets, hostCompany],
+        );
+        if (rows.length !== targets.length) throw PhaseTwoErrors.CrossCompanyShare();
+      }
+      await client.query(`DELETE FROM host_shares WHERE host_id = $1`, [hostId]);
       if (targets.length > 0) {
         const values = targets.map((_, i) => `($1, $${i + 2}::uuid)`).join(",");
         await client.query(`INSERT INTO host_shares (host_id, user_id) VALUES ${values}`, [hostId, ...targets]);

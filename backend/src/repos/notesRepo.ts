@@ -1,4 +1,5 @@
 import type { Pool } from "../db/index.js";
+import { PhaseTwoErrors } from "../domain/session.js";
 
 export interface Note {
   id: string;
@@ -47,7 +48,7 @@ export class NotesRepository {
     // SEC-003: `is_shared` is scoped to the viewer's company, not the whole
     // installation, so a shared note never crosses a tenant boundary.
     const where = [
-      "(n.user_id = $1 OR (n.is_shared = TRUE AND n.company_id = (SELECT company_id FROM users WHERE id = $1)) OR EXISTS (SELECT 1 FROM note_shares ns WHERE ns.note_id = n.id AND ns.user_id = $1))",
+      "(n.user_id = $1 OR ((n.is_shared = TRUE OR EXISTS (SELECT 1 FROM note_shares ns WHERE ns.note_id = n.id AND ns.user_id = $1)) AND n.company_id = (SELECT company_id FROM users WHERE id = $1)))",
     ];
     const params: unknown[] = [viewerId];
     if (opts.hostId) { params.push(opts.hostId); where.push(`n.host_id = $${params.length}`); }
@@ -101,10 +102,20 @@ export class NotesRepository {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const own = await client.query(`SELECT id FROM notes WHERE id = $1 AND user_id = $2`, [noteId, ownerId]);
+      const own = await client.query<{ company_id: string | null }>(`SELECT company_id FROM notes WHERE id = $1 AND user_id = $2`, [noteId, ownerId]);
       if (own.rowCount === 0) { await client.query("ROLLBACK"); return false; }
-      await client.query(`DELETE FROM note_shares WHERE note_id = $1`, [noteId]);
+      const noteCompany = own.rows[0]!.company_id;
       const targets = [...new Set(userIds)].filter((u) => u && u !== ownerId);
+      // SEC-015: every recipient must be in the note's company. Reject the whole
+      // operation (no partial share) if any recipient is foreign or missing.
+      if (targets.length > 0) {
+        const { rows } = await client.query<{ id: string }>(
+          `SELECT id FROM users WHERE id = ANY($1::uuid[]) AND company_id IS NOT DISTINCT FROM $2`,
+          [targets, noteCompany],
+        );
+        if (rows.length !== targets.length) throw PhaseTwoErrors.CrossCompanyShare();
+      }
+      await client.query(`DELETE FROM note_shares WHERE note_id = $1`, [noteId]);
       for (const uid of targets) {
         await client.query(`INSERT INTO note_shares (note_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [noteId, uid]);
       }

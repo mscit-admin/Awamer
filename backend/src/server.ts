@@ -77,7 +77,7 @@ import { makeVpnServerRoutes } from "./routes/vpnServer.js";
 function statusForDomainError(code: string): number {
   if (code.endsWith("_not_found")) return 404;
   if (code.endsWith("_taken") || code === "vpn_too_many") return 409;
-  if (code === "forbidden") return 403;
+  if (code === "forbidden" || code === "cross_company_share") return 403;
   return 400;
 }
 
