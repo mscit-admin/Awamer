@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Security remediation (Phase 1 — Auth & Secrets)
+
+### Security
+- **SEC-002 — Refresh now enforces current account state.** A valid refresh
+  token is no longer sufficient: on every refresh the account must still be
+  active and unlocked (mirroring login). A disabled, locked, or deleted user is
+  denied, their whole refresh-session chain is revoked, and the attempt is
+  audited (`token_refresh_denied`). Callers still receive a generic
+  `401 invalid_refresh` (no account-state disclosure).
+- **SEC-007 — Admin actions revoke sessions.** Disabling, locking, or changing a
+  user's role (`PATCH /api/v1/admin/users/:id`) now revokes that user's refresh
+  chain immediately, so access ends within the short access-token TTL instead of
+  persisting for the refresh lifetime.
+- **SEC-001 — Secrets out of WebSocket URLs.** The browser SSH gateway
+  (`/api/v1/ssh/connect`) authenticates over the channel: the access token and
+  any SSH password/passphrase are sent as the first WS frame
+  (`{"type":"auth",…}`) instead of URL query params, so they no longer leak into
+  nginx/proxy access logs or browser history. Sockets that don't authenticate
+  within 10s are dropped. As defense-in-depth, nginx now logs request paths
+  only (`log_format noquery`), so no gateway writes a token to the access log.
+
 ## [1.52.0] — 2026-08-04 — VPN Server (Awamer as an OpenVPN hub)
 
 ### Added

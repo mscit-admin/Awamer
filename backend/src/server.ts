@@ -220,7 +220,7 @@ async function main() {
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });
 
   await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
-  await app.register(makeAdminRoutes({ users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt }), { prefix: "/api/v1/admin" });
+  await app.register(makeAdminRoutes({ users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, jwt }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeSessionSettingsRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/admin/session-settings" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt }), { prefix: "/api/v1/roles" });
