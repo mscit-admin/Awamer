@@ -3,6 +3,7 @@ import { z } from "zod";
 import { userView } from "./auth.js";
 import { DomainError } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
+import type { RefreshRepository } from "../repos/otherRepos.js";
 import type { RegisterUseCase } from "../usecases/register.js";
 import type { ChangePasswordUseCase } from "../usecases/changePassword.js";
 import type { MFAUseCase } from "../usecases/mfa.js";
@@ -18,6 +19,7 @@ interface Deps {
   mfa: MFAUseCase;
   roleService: RoleService;
   jwt: JwtService;
+  refresh: RefreshRepository;
 }
 
 export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
@@ -152,12 +154,23 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         const u = await deps.users.getById(idP.data.id);
         const s = await scope(req);
         if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
+        const prevRole = u.role;
         if (bodyP.data.full_name !== undefined) u.fullName = bodyP.data.full_name;
         if (bodyP.data.email !== undefined) u.email = bodyP.data.email;
         if (bodyP.data.role !== undefined) u.role = bodyP.data.role as typeof u.role;
         if (bodyP.data.is_active !== undefined) u.isActive = bodyP.data.is_active;
         if (bodyP.data.is_locked !== undefined) u.isLocked = bodyP.data.is_locked;
         await deps.users.update(u);
+        // SEC-007: security-relevant admin actions must not leave stale sessions
+        // trusted. Disabling, locking, or changing a user's role revokes their
+        // whole refresh-session chain so refresh stops immediately; combined
+        // with the short (15m) access-token TTL, access is cut off promptly.
+        const disabled = bodyP.data.is_active === false;
+        const locked = bodyP.data.is_locked === true;
+        const roleChanged = bodyP.data.role !== undefined && bodyP.data.role !== prevRole;
+        if (disabled || locked || roleChanged) {
+          await deps.refresh.revokeAllForUser(u.id);
+        }
         return reply.send(userView(u));
       } catch (e) {
         if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });

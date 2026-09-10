@@ -31,18 +31,21 @@ import { useBranding } from "@/shared/branding";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
-function gatewayUrl(token: string, hostId: string, cols: number, rows: number, password?: string): string {
+function gatewayUrl(hostId: string, cols: number, rows: number): string {
   // Resolve an absolute ws(s):// URL from the configured API base (or the
   // current origin when the API is served same-origin).
+  //
+  // SEC-001: the access token and any SSH password/passphrase are NEVER placed
+  // in the URL (they would leak into nginx/proxy access logs and browser
+  // history). Only the non-secret host id + initial window size travel in the
+  // query; the token and secrets are sent as the first WS frame after open.
   const base = API_BASE_URL || window.location.origin;
   const u = new URL(base);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
   u.pathname = (u.pathname.replace(/\/$/, "")) + "/api/v1/ssh/connect";
-  u.searchParams.set("token", token);
   u.searchParams.set("host_id", hostId);
   u.searchParams.set("cols", String(cols));
   u.searchParams.set("rows", String(rows));
-  if (password) u.searchParams.set("password", password);
   return u.toString();
 }
 
@@ -361,9 +364,18 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
     updateTab(tab.tabId, { phase: "connecting", errorMessage: null, errorCode: null });
 
     const pw = attempt > 0 && password ? password : undefined;
-    const ws = new WebSocket(gatewayUrl(token, tab.hostId, cols, rows, pw));
+    const ws = new WebSocket(gatewayUrl(tab.hostId, cols, rows));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
+
+    // SEC-001: authenticate over the channel. Send the token (and any password
+    // override) as the first frame once the socket is open — never in the URL.
+    ws.onopen = () => {
+      if (wsRef.current !== ws) return;
+      const frame: { type: "auth"; token: string; password?: string } = { type: "auth", token };
+      if (pw) frame.password = pw;
+      ws.send(JSON.stringify(frame));
+    };
     // Tracks whether this specific socket ever reached "connected", so a late
     // close can tell a real disconnect from a failed handshake.
     let opened = false;

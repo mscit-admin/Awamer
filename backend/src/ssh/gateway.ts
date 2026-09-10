@@ -14,8 +14,11 @@
  *     - binary frame            → terminal output (stdout/stderr)
  *     - text frame (JSON)       → control: {"type":"status"|"error","message":...}
  *
- * Auth: the access token and host id arrive as query params (browsers can't
- * set headers on a WebSocket). The token is verified before any SSH work.
+ * Auth: only the (non-secret) host id + initial window size arrive as query
+ * params. The access token and any SSH password/passphrase are sent as the
+ * first WS frame ({"type":"auth",…}) over the encrypted channel — never in the
+ * URL, where nginx/proxy logs and browser history would capture them (SEC-001).
+ * The token is verified before any SSH work.
  *
  * Security note: host-key verification currently accepts the server's key on
  * first sight (TOFU is not yet persisted server-side) — the fingerprint is
@@ -51,25 +54,76 @@ function sendJson(ws: import("ws").WebSocket, obj: unknown): void {
   }
 }
 
+export interface AuthFrame {
+  token: string;
+  password: string | null;
+  passphrase: string | null;
+}
+
+/**
+ * SEC-001: authenticate the WebSocket over the (encrypted) channel, not the
+ * URL. Browsers can't set headers on a WS handshake, so the original design
+ * smuggled the JWT — and worse, the SSH password/passphrase — through query
+ * params, where nginx/proxy access logs and browser history capture them.
+ *
+ * Instead we open the socket unauthenticated and wait for the first text frame
+ * to be `{"type":"auth","token":"…","password"?:"…","passphrase"?:"…"}`. The
+ * secrets travel inside the TLS-wrapped WS payload, never in the request line.
+ * A short deadline drops sockets that never authenticate so an unauthenticated
+ * peer can't sit and consume resources.
+ */
+export function awaitAuthFrame(ws: import("ws").WebSocket, timeoutMs = 10_000): Promise<AuthFrame | null> {
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMsg);
+      ws.off("close", onClose);
+    };
+    const timer = setTimeout(() => { cleanup(); resolve(null); }, timeoutMs);
+    const onMsg = (raw: Buffer, isBinary: boolean) => {
+      if (isBinary) return; // ignore stray stdin before auth
+      let msg: { type?: unknown; token?: unknown; password?: unknown; passphrase?: unknown };
+      try { msg = JSON.parse(raw.toString("utf8")); } catch { return; }
+      if (!msg || msg.type !== "auth" || typeof msg.token !== "string" || msg.token.length === 0) return;
+      cleanup();
+      resolve({
+        token: msg.token,
+        password: typeof msg.password === "string" ? msg.password : null,
+        passphrase: typeof msg.passphrase === "string" ? msg.passphrase : null,
+      });
+    };
+    const onClose = () => { cleanup(); resolve(null); };
+    ws.on("message", onMsg);
+    ws.on("close", onClose);
+  });
+}
+
 export function makeSshGateway(deps: SshGatewayDeps) {
   return async function plugin(app: FastifyInstance) {
     app.get("/connect", { websocket: true }, async (connection, req) => {
       // @fastify/websocket v11: the handler receives the WebSocket directly.
       const ws = connection;
       const q = req.query as Record<string, string | undefined>;
-      const token = q.token;
       const hostId = q.host_id;
-      const password_override = q.password ?? null;
-      const passphrase_override = q.passphrase ?? null;
 
       const fail = (code: string, message: string) => {
         sendJson(ws, { type: "error", code, message });
         ws.close();
       };
 
-      if (!token || !hostId) {
-        return fail("bad_request", "token and host_id are required");
+      if (!hostId) {
+        return fail("bad_request", "host_id is required");
       }
+
+      // SEC-001: credentials/token arrive over the WS channel, not the URL.
+      sendJson(ws, { type: "status", status: "authenticating" });
+      const authFrame = await awaitAuthFrame(ws);
+      if (!authFrame) {
+        return fail("auth_required", "no authentication frame received");
+      }
+      const token = authFrame.token;
+      const password_override = authFrame.password;
+      const passphrase_override = authFrame.passphrase;
 
       // 1. Authenticate + authorize.
       let userId: string;
