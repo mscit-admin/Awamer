@@ -19,12 +19,14 @@ import { can } from "../domain/permissions.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
 import { resolveSshConnection, SshResolveError } from "./resolveAuth.js";
+import { makeHostVerifier, type HostKeyStore } from "./hostKeys.js";
 
 export interface WsTunnelDeps {
   jwt: JwtService;
   hosts: HostRepository;
   credentials: CredentialRepository;
   log: Logger;
+  hostKeys: HostKeyStore;
 }
 
 const DST_HOST_RE = /^[a-zA-Z0-9._-]+$/;
@@ -106,7 +108,7 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
         port: host.port,
         username,
         readyTimeout: 20_000,
-        hostVerifier: () => true, // TOFU (consistent with the SSH gateway)
+        hostVerifier: makeHostVerifier(deps.hostKeys, deps.log, host.hostname, host.port),
         ...auth,
       });
     });

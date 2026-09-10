@@ -18,11 +18,13 @@ import { randomUUID } from "node:crypto";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
 import type { Logger } from "../logger/index.js";
 import { resolveSshConnection } from "./resolveAuth.js";
+import { makeHostVerifier, type HostKeyStore } from "./hostKeys.js";
 
 export interface TunnelDeps {
   hosts: HostRepository;
   credentials: CredentialRepository;
   log: Logger;
+  hostKeys: HostKeyStore;
 }
 
 export interface CreateTunnelParams {
@@ -148,7 +150,7 @@ export class TunnelManager {
         port: host.port,
         username,
         readyTimeout: 20_000,
-        hostVerifier: () => true, // TOFU (consistent with the SSH gateway)
+        hostVerifier: makeHostVerifier(this.deps.hostKeys, this.deps.log, host.hostname, host.port),
         ...auth,
       });
     });

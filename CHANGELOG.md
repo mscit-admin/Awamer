@@ -9,9 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — Security remediation (Phase 1 — Auth & Secrets; Phase 2 — Tenant Isolation)
+## [Unreleased] — Security remediation (Phases 1–3)
 
 ### Security
+- **SEC-008 — SSH host-key pinning (TOFU + change detection).** The SSH, SFTP,
+  WS-tunnel and server-managed-tunnel connectors previously accepted any server
+  host key on every connection and never noticed a change (`hostVerifier: () =>
+  true`), so a man-in-the-middle was trusted silently. Migration `021` adds a
+  `host_keys` pin store; the first key seen for a `hostname:port` is pinned, a
+  matching key is trusted, and a **changed key is refused** with a security log
+  line. Re-pin a legitimately rotated key by deleting its `host_keys` row.
+- **SEC-014 — Log redaction hardened.** Verified no secret is logged via string
+  interpolation; extended pino redaction to also cover `private_key`,
+  `api_key`/`apiKey`, `credential`, `password_hash`, `otp`.
 - **SEC-003 (P0) — Shared resources are now company-scoped.** `hosts` and
   `notes` predate the multi-company model and their `is_shared` flag made a
   resource visible to every user on the installation, across tenants — and a

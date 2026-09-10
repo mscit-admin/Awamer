@@ -35,6 +35,7 @@ import type {
   ConnectionHistoryRepository,
 } from "../repos/sessionRepos.js";
 import { resolveSshConnection, SshResolveError, type SshAuth } from "./resolveAuth.js";
+import { makeHostVerifier } from "./hostKeys.js";
 import { STATS_CMD, parseStats, type PrevSample } from "./serverStats.js";
 
 export interface SshGatewayDeps {
@@ -44,6 +45,7 @@ export interface SshGatewayDeps {
   history: ConnectionHistoryRepository;
   settings: import("../repos/appSettings.js").AppSettingsRepository;
   log: Logger;
+  hostKeys: import("./hostKeys.js").HostKeyStore;
 }
 
 function sendJson(ws: import("ws").WebSocket, obj: unknown): void {
@@ -361,12 +363,8 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         // Keepalive so the session survives network/NAT idle gaps.
         keepaliveInterval: 30_000,
         keepaliveCountMax: 3,
-        // TOFU: accept the host key on first sight; log its fingerprint.
-        hostVerifier: (key: Buffer) => {
-          deps.log.info({ host: host.hostname, port: host.port }, "ssh gateway: accepting host key (TOFU)");
-          void key;
-          return true;
-        },
+        // Host-key pinning: trust a matching/first-seen key, refuse a change.
+        hostVerifier: makeHostVerifier(deps.hostKeys, deps.log, host.hostname, host.port),
         ...auth,
       });
     });

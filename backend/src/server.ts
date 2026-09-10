@@ -63,6 +63,7 @@ import { makeSftpGateway } from "./ssh/sftpGateway.js";
 import { makeVncGateway } from "./vnc/gateway.js";
 import { makeTelnetGateway } from "./telnet/gateway.js";
 import { TunnelManager } from "./ssh/tunnelManager.js";
+import { HostKeyRepository } from "./ssh/hostKeys.js";
 import { makeTunnelRoutes } from "./routes/tunnels.js";
 import { makeWsTunnelGateway } from "./ssh/wsTunnelGateway.js";
 import { VpnProfileRepository } from "./repos/vpnRepo.js";
@@ -112,8 +113,10 @@ async function main() {
   const orgUnits = new OrgUnitRepository(pool);
   // AI providers (org + personal), keys encrypted at rest.
   const aiProviders = new AiProviderRepository(pool, secretBox);
+  // SSH host-key pinning (TOFU + change detection), shared by all ssh2 sites.
+  const hostKeys = new HostKeyRepository(pool);
   // Phase 5 — server-managed SSH local tunnels (in-memory).
-  const tunnels = new TunnelManager({ hosts, credentials, log });
+  const tunnels = new TunnelManager({ hosts, credentials, log, hostKeys });
   // OpenVPN client profiles (encrypted) + backend-runtime tunnel manager.
   const vpnProfiles = new VpnProfileRepository(pool, secretBox);
   const vpnManager = new VpnManager(log);
@@ -241,9 +244,9 @@ async function main() {
   await app.register(makeBackupRoutes({ backup, jwt }), { prefix: "/api/v1/backup" });
 
   // Phase 5 — browser SSH gateway (WebSocket).
-  await app.register(makeSshGateway({ jwt, hosts, credentials, history, settings: appSettings, log }), { prefix: "/api/v1/ssh" });
+  await app.register(makeSshGateway({ jwt, hosts, credentials, history, settings: appSettings, log, hostKeys }), { prefix: "/api/v1/ssh" });
   // Phase 4 — browser SFTP gateway (REST, session-based).
-  await app.register(makeSftpGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/sftp" });
+  await app.register(makeSftpGateway({ jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/sftp" });
   // Phase 6 — browser VNC gateway (WebSocket byte relay).
   await app.register(makeVncGateway({ jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
   // Browser Telnet gateway (WebSocket ↔ raw TCP relay).
@@ -251,7 +254,7 @@ async function main() {
   // Phase 5 — SSH port forwarding: server-managed local tunnels (REST) and a
   // per-user WebSocket TCP tunnel.
   await app.register(makeTunnelRoutes({ tunnels, jwt }), { prefix: "/api/v1/tunnels" });
-  await app.register(makeWsTunnelGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/tunnel" });
+  await app.register(makeWsTunnelGateway({ jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/tunnel" });
   // OpenVPN client profiles + backend-runtime connections.
   await app.register(makeVpnRoutes({ vpn: vpnProfiles, manager: vpnManager, audit, jwt }), { prefix: "/api/v1/vpn" });
   // Built-in OpenVPN server management (PKI, users, .ovpn, start/stop).

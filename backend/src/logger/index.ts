@@ -20,7 +20,13 @@ const REDACT_PATHS = [
   "accessToken", "*.accessToken",
   "refreshToken", "*.refreshToken",
   "privateKey", "*.privateKey",
+  "private_key", "*.private_key",
   "passphrase", "*.passphrase",
+  "apiKey", "*.apiKey",
+  "api_key", "*.api_key",
+  "credential", "*.credential",
+  "password_hash", "*.password_hash",
+  "otp", "*.otp",
   "config", "*.config", // VPN .ovpn config text
 ];
 
