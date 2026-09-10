@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SEC-006 — Browser Content-Security-Policy.** nginx now sends a tight CSP
   (`default-src 'self'`, no `unsafe-eval`, no inline/wildcard scripts;
   `style-src 'unsafe-inline'` only, for xterm/React inline styles;
+  `script-src` adds only the narrow `'wasm-unsafe-eval'` so the KeePass import's
+  Argon2 (hash-wasm/WebAssembly) still works without permitting JS `eval`;
   `frame-ancestors 'none'`).
 
 ### Fixed

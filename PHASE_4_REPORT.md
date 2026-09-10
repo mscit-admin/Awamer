@@ -42,7 +42,11 @@
   'none'; frame-ancestors 'none'; img-src 'self' data: blob:; style-src 'self'
   'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self';
   form-action 'self'`.
-  - **No** `unsafe-eval`, **no** inline/wildcard **script** source.
+  - **No** `unsafe-eval`, **no** inline/wildcard **script** source. Only the
+    narrow `'wasm-unsafe-eval'` is granted — the KeePass import compiles Argon2
+    via `hash-wasm` (WebAssembly, inlined as base64), which needs WASM
+    compilation but **not** JS `eval()`. This was caught by auditing the
+    frontend deps (`hash-wasm`, `kdbxweb`) before finalizing the policy.
   - `style-src 'unsafe-inline'` is the one concession — xterm.js and React set
     element inline styles; styles cannot execute code, so this does not enable
     script injection. `script-src 'self'` still blocks JS injection.
