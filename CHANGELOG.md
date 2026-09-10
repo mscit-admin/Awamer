@@ -9,9 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — Security remediation (Phases 1–4)
+## [Unreleased] — Security remediation v1.1 gate (SEC-015..019, STAB-001)
 
 ### Security
+- **SEC-016 (P0) — Custom-role privilege-escalation blocked.** Role create/edit
+  now rejects granting any permission the actor does not hold (`companies:manage`
+  stays super-admin-only), stopping self-escalation via editing one's own role.
+  Migration `022` gives custom roles a `company_id`; a role is now editable and
+  assignable only within its owning company.
+- **SEC-015 (P0) — Cross-company explicit sharing blocked.** `host`/`note`
+  `setShares` reject any recipient outside the resource's company (whole-op
+  reject, no partial share); the `*_shares` read branch is company-scoped too,
+  so even a stale cross-company share row is denied on read.
+- **SEC-017 (P1) — Logout revokes the server-side session.** `POST /logout`
+  revokes the presented refresh session (and a stolen copy); `POST /logout-all`
+  revokes all of a user's sessions.
+- **SEC-018 (P1) — No auth token in any WebSocket URL.** Telnet and WS-tunnel
+  authenticate via the first WS frame; VNC uses a one-time single-use ticket
+  (noVNC speaks raw RFB). No gateway keeps a JWT in the URL.
+- **SEC-019 (P2) — Browser refresh token moved to an HttpOnly cookie.** The
+  browser build opts into a `HttpOnly; Secure; SameSite=Strict` refresh cookie
+  (never readable by JS, never sent cross-site); Tauri keeps the OS keyring.
+
+### Stability
+- **STAB-001 — `/readyz` probes PostgreSQL** (`SELECT 1`, bounded) → 200/503;
+  `/healthz` stays liveness-only.
 - **SEC-005 — Docker least privilege.** The production API container now drops
   ALL Linux capabilities and adds back only `NET_ADMIN` (what OpenVPN needs),
   and sets `no-new-privileges:true`. VPN functionality (tun device, ip_forward)

@@ -12,6 +12,7 @@ import { loadConfig } from "./config/index.js";
 import { DomainError } from "./domain/index.js";
 import { createLogger } from "./logger/index.js";
 import { createPool } from "./db/index.js";
+import { probeDb } from "./db/readiness.js";
 import { createArgon2 } from "./crypto/argon2.js";
 import { createSecretBox, resolveSecretKey } from "./crypto/secretBox.js";
 import { createJwt } from "./jwt/index.js";
@@ -212,12 +213,21 @@ async function main() {
     log.info("API docs enabled at /docs");
   }
 
+  // Liveness: the process itself is up. MUST NOT depend on PostgreSQL, so an
+  // orchestrator doesn't kill a healthy process during a transient DB blip.
   app.get("/healthz", async () => ({ status: "ok" }));
-  app.get("/readyz", async () => ({ status: "ready" }));
+  // Readiness (STAB-001): only "ready" when the DB actually answers, so traffic
+  // isn't routed to an instance that can't serve it. Recovers automatically
+  // when the DB returns (no restart needed).
+  app.get("/readyz", async (_req, reply) => {
+    const ok = await probeDb(pool);
+    return reply.code(ok ? 200 : 503).send({ status: ok ? "ready" : "not_ready" });
+  });
 
   await app.register(makeAuthRoutes({
     login: loginUC, refresh: refreshUC, mfa: mfaUC, users, jwt,
     loginRateMax: cfg.env.RATE_LIMIT_LOGIN_PER_MIN,
+    refreshCookieMaxAgeSec: cfg.jwtRefreshTtlSec,
   }), { prefix: "/api/v1/auth" });
   // Public forgot/reset password (same prefix as auth).
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });

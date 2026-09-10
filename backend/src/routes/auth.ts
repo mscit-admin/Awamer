@@ -9,6 +9,8 @@ import type { User } from "../domain/index.js";
 import { DomainError } from "../domain/index.js";
 import { permissionsFor } from "../domain/permissions.js";
 import { makeAuthMiddleware } from "../middleware/auth.js";
+import { isWebClient, setRefreshCookie, clearRefreshCookie, readRefreshCookie } from "./authCookies.js";
+import type { FastifyReply, FastifyRequest } from "fastify";
 
 interface Deps {
   login: LoginUseCase;
@@ -18,6 +20,8 @@ interface Deps {
   jwt: JwtService;
   /** Per-IP requests/minute for the auth endpoints (stricter than the global API limit). */
   loginRateMax: number;
+  /** Max-Age for the browser HttpOnly refresh cookie (SEC-019). */
+  refreshCookieMaxAgeSec: number;
 }
 
 export function userView(u: User) {
@@ -43,6 +47,23 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
     // Stricter per-IP throttle for the credential-taking endpoints than the
     // global API limit — this is the online password-guessing surface.
     const authRateLimit = { config: { rateLimit: { max: deps.loginRateMax, timeWindow: "1 minute" } } };
+
+    // SEC-019: emit the token pair. For the browser SPA (X-Awamer-Client: web)
+    // the refresh token goes into an HttpOnly cookie and is withheld from the
+    // JSON body (JS can never read it). The Tauri client (no header) gets the
+    // refresh token in the body for its OS keyring — unchanged.
+    interface TokenResult { accessToken?: string; refreshToken?: string; expiresAt?: Date }
+    const emitTokens = (req: FastifyRequest, reply: FastifyReply, result: TokenResult, extra: Record<string, unknown> = {}) => {
+      const web = isWebClient(req);
+      if (web && result.refreshToken) setRefreshCookie(reply, result.refreshToken, deps.refreshCookieMaxAgeSec);
+      return reply.send({
+        access_token: result.accessToken,
+        refresh_token: web ? undefined : result.refreshToken,
+        token_type: "Bearer",
+        expires_at: result.expiresAt,
+        ...extra,
+      });
+    };
 
     // ----- POST /login --------------------------------------------------
     const loginSchema = z.object({
@@ -76,13 +97,7 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
             user: userPayload,
           });
         }
-        return reply.send({
-          access_token: result.accessToken,
-          refresh_token: result.refreshToken,
-          token_type: "Bearer",
-          expires_at: result.expiresAt,
-          user: result.user ? userView(result.user) : undefined,
-        });
+        return emitTokens(req, reply, result, { user: result.user ? userView(result.user) : undefined });
       } catch (e) {
         if (e instanceof DomainError) {
           const status = e.code === "account_inactive" || e.code === "account_locked" ? 403 : 401;
@@ -125,31 +140,22 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
       }
 
       const result = await completeMFALogin(deps.login, deps.users, claims.sub, req.ip, String(req.headers["user-agent"] ?? ""));
-      return reply.send({
-        access_token: result.accessToken,
-        refresh_token: result.refreshToken,
-        token_type: "Bearer",
-        expires_at: result.expiresAt,
-        user: result.user ? userView(result.user) : undefined,
-      });
+      return emitTokens(req, reply, result, { user: result.user ? userView(result.user) : undefined });
     });
 
     // ----- POST /refresh -----------------------------------------------
-    const refreshSchema = z.object({ refresh_token: z.string().min(1) });
+    // Token comes from the HttpOnly cookie (browser) or the body (Tauri).
+    const refreshSchema = z.object({ refresh_token: z.string().min(1).optional() });
 
     app.post("/refresh", authRateLimit, async (req, reply) => {
-      const parsed = refreshSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
+      const parsed = refreshSchema.safeParse(req.body ?? {});
+      const token = readRefreshCookie(req) ?? (parsed.success ? parsed.data.refresh_token : undefined);
+      if (!token) {
+        return reply.code(400).send({ error: { code: "validation_failed", message: "refresh token required" } });
       }
       try {
-        const r = await deps.refresh.execute(parsed.data.refresh_token, req.ip, String(req.headers["user-agent"] ?? ""));
-        return reply.send({
-          access_token: r.accessToken,
-          refresh_token: r.refreshToken,
-          token_type: "Bearer",
-          expires_at: r.expiresAt,
-        });
+        const r = await deps.refresh.execute(token, req.ip, String(req.headers["user-agent"] ?? ""));
+        return emitTokens(req, reply, r);
       } catch {
         return reply.code(401).send({ error: { code: "invalid_refresh", message: "refresh token invalid or reused" } });
       }
@@ -162,8 +168,9 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
     const logoutSchema = z.object({ refresh_token: z.string().min(1).optional() });
     app.post("/logout", async (req, reply) => {
       const parsed = logoutSchema.safeParse(req.body ?? {});
-      const rt = parsed.success ? parsed.data.refresh_token : undefined;
+      const rt = readRefreshCookie(req) ?? (parsed.success ? parsed.data.refresh_token : undefined);
       if (rt) await deps.refresh.logout(rt, req.ip, String(req.headers["user-agent"] ?? ""));
+      clearRefreshCookie(reply); // SEC-019: drop the browser cookie too
       return reply.code(204).send();
     });
 
@@ -171,6 +178,7 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
     // Revoke every active session for the authenticated user.
     app.post("/logout-all", { preHandler: makeAuthMiddleware(deps.jwt) }, async (req, reply) => {
       await deps.refresh.logoutAll(req.auth!.sub, req.ip, String(req.headers["user-agent"] ?? ""));
+      clearRefreshCookie(reply);
       return reply.code(204).send();
     });
   };

@@ -19,7 +19,7 @@ test("an unknown ticket is rejected", () => {
 test("an expired ticket is rejected", async () => {
   const s = new VncTicketStore(10); // 10ms TTL
   const t = s.issue({ userId: "u1", hostId: "h1" });
-  await new Promise((r) => setTimeout(r, 25));
+  await new Promise((r) => setTimeout(r, 80));
   assert.equal(s.consume(t), null, "expired ticket denied");
 });
 

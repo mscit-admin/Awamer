@@ -59,10 +59,12 @@ export const authApi = {
     });
   },
 
-  refresh(refreshToken: string) {
+  refresh(refreshToken?: string | null) {
+    // SEC-019: the browser sends no body token — the HttpOnly cookie is used.
+    // Tauri passes its keyring token in the body.
     return request<TokenResponse>("/api/v1/auth/refresh", {
       method: "POST",
-      body: { refresh_token: refreshToken },
+      body: refreshToken ? { refresh_token: refreshToken } : {},
       unauthenticated: true,
     });
   },

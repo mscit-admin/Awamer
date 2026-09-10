@@ -13,7 +13,7 @@ import { create } from "zustand";
 
 import { authApi, type User, type LoginResponse } from "@/modules/auth/api/authApi";
 import { configureApiClient } from "@/shared/lib/api";
-import { secureDelete, secureGet, secureSet } from "@/shared/lib/keyring";
+import { secureDelete, secureGet, secureSet, isTauri } from "@/shared/lib/keyring";
 
 const REFRESH_KEY = "netsphere.refresh_token";
 
@@ -73,10 +73,12 @@ export const useAuthStore = create<AuthState>((set, get) => {
           });
           return { mfaRequired: true };
         }
-        if (!res.access_token || !res.refresh_token) {
+        // SEC-019: in the browser the refresh token lives in an HttpOnly cookie
+        // (not the body), so only the access token is required here.
+        if (!res.access_token) {
           throw new Error("malformed login response");
         }
-        await secureSet(REFRESH_KEY, res.refresh_token);
+        if (res.refresh_token) await secureSet(REFRESH_KEY, res.refresh_token);
         set({
           status: "authenticated",
           user: res.user,
@@ -100,7 +102,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       set({ status: "authenticating", error: null });
       try {
         const res = await authApi.mfaVerify(code, mfaToken);
-        await secureSet(REFRESH_KEY, res.refresh_token);
+        if (res.refresh_token) await secureSet(REFRESH_KEY, res.refresh_token);
         set({
           status: "authenticated",
           user: res.user,
@@ -135,13 +137,13 @@ export const useAuthStore = create<AuthState>((set, get) => {
     async restore() {
       try {
         const refresh = await secureGet(REFRESH_KEY);
-        if (!refresh) {
+        // Tauri needs a keyring token; the browser relies on the HttpOnly cookie.
+        if (!refresh && isTauri) {
           set({ status: "unauthenticated" });
           return;
         }
-        // Try to obtain a fresh access token using the stored refresh token.
         const res = await authApi.refresh(refresh);
-        await secureSet(REFRESH_KEY, res.refresh_token);
+        if (res.refresh_token) await secureSet(REFRESH_KEY, res.refresh_token);
         set({
           status: "authenticated",
           accessToken: res.access_token,
@@ -165,13 +167,13 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     async refreshTokens() {
       const refresh = await secureGet(REFRESH_KEY);
-      if (!refresh) {
+      if (!refresh && isTauri) {
         set({ status: "unauthenticated", accessToken: null, user: null });
         return null;
       }
       try {
         const res = await authApi.refresh(refresh);
-        await secureSet(REFRESH_KEY, res.refresh_token);
+        if (res.refresh_token) await secureSet(REFRESH_KEY, res.refresh_token);
         set({ accessToken: res.access_token, expiresAt: res.expires_at });
         return res.access_token;
       } catch {

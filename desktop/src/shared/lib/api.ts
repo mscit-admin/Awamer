@@ -15,6 +15,8 @@
 // BUG-001: the backend dev port is 8081 (AUTH_HTTP_PORT default). The previous
 // 8080 default pointed at nothing, so a dev build without VITE_API_BASE_URL set
 // silently failed every API call. Aligned with the rest of the app + backend.
+import { isTauri } from "./keyring";
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8081";
 
 export class ApiError extends Error {
@@ -62,7 +64,11 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
       const token = opts.bearerOverride ?? tokenProvider();
       if (token) headers.Authorization = `Bearer ${token}`;
     }
-    const init: RequestInit = { method: opts.method ?? "GET", headers };
+    // SEC-019: the browser build opts into HttpOnly-cookie refresh-token
+    // transport; the Tauri app keeps the OS keyring (body token, no header).
+    if (!isTauri) headers["X-Awamer-Client"] = "web";
+    // Send/receive the same-origin refresh cookie.
+    const init: RequestInit = { method: opts.method ?? "GET", headers, credentials: isTauri ? "same-origin" : "include" };
     // Only declare a JSON body (+ its Content-Type) when there actually is one:
     // a bodyless POST/DELETE with a JSON content-type makes Fastify reject it.
     if (opts.body !== undefined) {
