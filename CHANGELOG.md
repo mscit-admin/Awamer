@@ -9,9 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — Security remediation (Phase 1 — Auth & Secrets)
+## [Unreleased] — Security remediation (Phase 1 — Auth & Secrets; Phase 2 — Tenant Isolation)
 
 ### Security
+- **SEC-003 (P0) — Shared resources are now company-scoped.** `hosts` and
+  `notes` predate the multi-company model and their `is_shared` flag made a
+  resource visible to every user on the installation, across tenants — and a
+  shared host connects with the owner's server-side credential, so this allowed
+  cross-company remote access. Migration `020` adds `company_id` to `hosts` and
+  `notes` (backfilled from each owner's company), and the shared-visibility
+  queries now require the resource's company to match the viewer's. Private and
+  explicit per-user shares are unchanged; moving a user between companies now
+  carries their shared resources with them. Verified end-to-end
+  (`tenantIsolation.itest.ts`) against a real PostgreSQL.
 - **SEC-002 — Refresh now enforces current account state.** A valid refresh
   token is no longer sufficient: on every refresh the account must still be
   active and unlocked (mirroring login). A disabled, locked, or deleted user is

@@ -528,9 +528,12 @@ export class HostRepository {
   constructor(private readonly pool: Pool) {}
 
   async list(userId: string, filters: HostListFilters = {}): Promise<{ hosts: Host[]; total: number }> {
-    // Visible hosts = your own OR shared instance-wide OR shared with you.
+    // Visible hosts = your own OR shared WITHIN YOUR COMPANY OR shared with you.
+    // SEC-003: `is_shared` must be scoped to the owner/viewer's company, not the
+    // whole installation — otherwise a user in another tenant sees (and can
+    // connect through, with the owner's credential) this company's shared hosts.
     const where: string[] = [
-      "(h.user_id = $1 OR h.is_shared = TRUE OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = h.id AND hs.user_id = $1))",
+      "(h.user_id = $1 OR (h.is_shared = TRUE AND h.company_id = (SELECT company_id FROM users WHERE id = $1)) OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = h.id AND hs.user_id = $1))",
     ];
     const params: unknown[] = [userId];
     let p = 1;
@@ -594,7 +597,8 @@ export class HostRepository {
   async getById(userId: string, id: string): Promise<Host> {
     const { rows } = await this.pool.query<HostRow>(
       `SELECT ${HOST_COLS} FROM hosts
-       WHERE id = $1 AND (user_id = $2 OR is_shared = TRUE
+       WHERE id = $1 AND (user_id = $2
+                          OR (is_shared = TRUE AND company_id = (SELECT company_id FROM users WHERE id = $2))
                           OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = hosts.id AND hs.user_id = $2))`,
       [id, userId],
     );
@@ -617,8 +621,8 @@ export class HostRepository {
   }): Promise<Host> {
     try {
       const { rows } = await this.pool.query<HostRow>(
-        `INSERT INTO hosts (user_id, name, hostname, port, protocol, folder_id, credential_id, description, options, is_shared, vpn_profile_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+        `INSERT INTO hosts (user_id, name, hostname, port, protocol, folder_id, credential_id, description, options, is_shared, vpn_profile_id, company_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, (SELECT company_id FROM users WHERE id = $1))
          RETURNING ${HOST_COLS}`,
         [
           input.userId, input.name, input.hostname, input.port, input.protocol,
@@ -700,7 +704,8 @@ export class HostRepository {
     // Shared hosts can be connected (and thus touched) by non-owners too.
     const r = await this.pool.query(
       `UPDATE hosts SET last_used_at = NOW(), use_count = use_count + 1
-       WHERE id = $1 AND (user_id = $2 OR is_shared = TRUE
+       WHERE id = $1 AND (user_id = $2
+                          OR (is_shared = TRUE AND company_id = (SELECT company_id FROM users WHERE id = $2))
                           OR EXISTS (SELECT 1 FROM host_shares hs WHERE hs.host_id = hosts.id AND hs.user_id = $2))`,
       [id, userId],
     );

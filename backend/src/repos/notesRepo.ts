@@ -44,8 +44,10 @@ export class NotesRepository {
 
   /** Notes visible to the viewer: own, shared-with-everyone, or shared-with-them. */
   async list(viewerId: string, opts: { hostId?: string; search?: string } = {}): Promise<Note[]> {
+    // SEC-003: `is_shared` is scoped to the viewer's company, not the whole
+    // installation, so a shared note never crosses a tenant boundary.
     const where = [
-      "(n.user_id = $1 OR n.is_shared = TRUE OR EXISTS (SELECT 1 FROM note_shares ns WHERE ns.note_id = n.id AND ns.user_id = $1))",
+      "(n.user_id = $1 OR (n.is_shared = TRUE AND n.company_id = (SELECT company_id FROM users WHERE id = $1)) OR EXISTS (SELECT 1 FROM note_shares ns WHERE ns.note_id = n.id AND ns.user_id = $1))",
     ];
     const params: unknown[] = [viewerId];
     if (opts.hostId) { params.push(opts.hostId); where.push(`n.host_id = $${params.length}`); }
@@ -60,7 +62,8 @@ export class NotesRepository {
 
   async create(userId: string, input: { hostId?: string | null; hostLabel?: string | null; title?: string | null; body: string }): Promise<Note> {
     const { rows } = await this.pool.query<Row>(
-      `INSERT INTO notes (user_id, host_id, host_label, title, body) VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO notes (user_id, host_id, host_label, title, body, company_id)
+       VALUES ($1, $2, $3, $4, $5, (SELECT company_id FROM users WHERE id = $1))
        RETURNING ${RET}`,
       [userId, input.hostId ?? null, input.hostLabel ?? null, input.title ?? null, input.body.slice(0, MAX_BODY)],
     );

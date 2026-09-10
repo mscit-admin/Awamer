@@ -169,8 +169,8 @@ export class BackupRepository {
         let hostId = "";
         hostId = await this.insertWithSuffix(client, h.name, (name) =>
           client.query(
-            `INSERT INTO hosts (user_id, name, hostname, port, protocol, folder_id, credential_id, description, is_favorite, is_shared, options)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb) RETURNING id`,
+            `INSERT INTO hosts (user_id, name, hostname, port, protocol, folder_id, credential_id, description, is_favorite, is_shared, options, company_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb, (SELECT company_id FROM users WHERE id = $1)) RETURNING id`,
             [userId, name, h.hostname, h.port, h.protocol, folderId, credId, h.description, h.is_favorite ?? false, h.is_shared ?? false, JSON.stringify(h.options ?? {})],
           ),
         );
