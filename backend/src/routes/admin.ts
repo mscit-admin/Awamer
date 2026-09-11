@@ -49,13 +49,17 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       return permissionsFor(targetRole).every((p) => mine.has(p));
     };
 
-    // SEC-016 Rule E: a role is assignable only if it's a global built-in or a
-    // custom role owned by the actor's own company. Super-admin may assign any.
-    const mayAssignRoleTenant = (s: { isSuper: boolean; companyId: string | null }, roleKey: string): boolean => {
+    // SEC-016 Rule E / SEC-020: a role is assignable to a user in `targetCompany`
+    // only if it's a global built-in, or a custom role OWNED BY THAT SAME
+    // COMPANY. This holds for everyone (super-admin included): the invariant
+    // custom_role.company_id == user.company_id must never be broken, even when
+    // a super-admin assigns across companies. (The permission ceiling is a
+    // separate check via mayGrantRole.)
+    const mayAssignRoleTenant = (roleKey: string, targetCompany: string | null): boolean => {
       const t = deps.roleService.tenantOf(roleKey);
       if (!t) return false;
       if (t.isBuiltin) return true;
-      return s.isSuper || (s.companyId != null && t.companyId === s.companyId);
+      return targetCompany != null && t.companyId === targetCompany;
     };
 
     // ---------- list users ----------------------------------------------
@@ -104,7 +108,9 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         // Admin's new users default to the super-admin's own company; they can
         // be moved afterward via the org assignment dialog.
         const s = await scope(req);
-        if (!mayAssignRoleTenant(s, parsed.data.role)) {
+        // The new user joins the actor's company (s.companyId); a custom role
+        // must belong to that same company.
+        if (!mayAssignRoleTenant(parsed.data.role, s.companyId)) {
           return reply.code(403).send({ error: { code: "forbidden", message: "that role belongs to another company" } });
         }
         const user = await deps.register.execute({
@@ -166,7 +172,9 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         const u = await deps.users.getById(idP.data.id);
         const s = await scope(req);
         if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
-        if (bodyP.data.role !== undefined && !mayAssignRoleTenant(s, bodyP.data.role)) {
+        // A custom role must belong to the TARGET user's company (u.companyId),
+        // not the actor's — so a super-admin can't assign a foreign-tenant role.
+        if (bodyP.data.role !== undefined && !mayAssignRoleTenant(bodyP.data.role, u.companyId)) {
           return reply.code(403).send({ error: { code: "forbidden", message: "that role belongs to another company" } });
         }
         const prevRole = u.role;

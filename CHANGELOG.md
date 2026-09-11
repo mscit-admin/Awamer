@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Migration role-key compatibility (AWM-MIG-002)
+
+### Fixed
+- **AWM-MIG-002 (P2) — Over-length migrated custom-role keys.** Migration `024`
+  (cross-tenant custom-role repair) generated per-company clone keys of the form
+  `left(source_key,40) || '__c' || <company-uuid-hex>` — up to **75 characters**,
+  while every REST role-key input validates at `max(48)` (admin user
+  create/patch, org user assignment). A user migrated onto such a clone held a
+  role the API could no longer re-assign or manage (`400 validation_failed`); the
+  DB accepted it because `roles.key` is `TEXT` with no length bound.
+- New migration **`025_shorten_role_keys`** (024 is shipped and left untouched)
+  deterministically rewrites any custom-role key longer than 48 chars to a
+  collision-resistant 48-char form
+  `left(key,34) || '__' || substr(md5(key),1,12)`, failing fast if a generated
+  key would collide with a different role. Only the `key` column changes; name,
+  description, permissions, tenant (`company_id`) and user assignments are
+  preserved (`users.role` follows via the `ON UPDATE CASCADE` FK). Built-in role
+  keys are all short and untouched. Idempotent. The migration then adds a
+  `CHECK (char_length(key) <= 48)` constraint so the DB matches the API ceiling
+  permanently.
+- **No new permission** — this is a data/migration compatibility fix; no RBAC
+  matrix change.
+
+### Tests
+- `repos/roleKeyLength.itest.ts` (MIG-KEY-001..010): short keys (1/13/14/47/48)
+  untouched; over-length clone rewritten to exactly 48 chars deterministically;
+  same-prefix clones stay distinct (collision resistance); name/tenant/perms
+  preserved; CHECK present and rejects a `>48` insert; idempotent; the generated
+  key is accepted by the real org-assignment API; cross-tenant invariant = 0.
+- Hardened the two dedicated-DB migration itests (`roleMigration`, `roleKeyLength`)
+  against the parallel test runner: retrying DB (re)provisioning and swallowing
+  idle-client termination noise (`recreateDatabase`/`dropDatabaseQuiet` +
+  pool `error` listeners) — no assertion changes.
+
+---
+
 ## [Unreleased] — Security remediation v1.1 gate (SEC-015..019, STAB-001)
 
 ### Security

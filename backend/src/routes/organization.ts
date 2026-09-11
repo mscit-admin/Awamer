@@ -20,12 +20,13 @@
  */
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { z } from "zod";
-import { can } from "../domain/permissions.js";
+import { can, permissionsFor } from "../domain/permissions.js";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 import type { JwtService } from "../jwt/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
 import type { CompanyRepository, OrgUnitRepository, Company } from "../repos/orgRepos.js";
 import type { AuditRepository } from "../repos/otherRepos.js";
+import type { RoleService } from "../domain/roleService.js";
 
 // Serialize a company to the snake_case shape the client (and the rest of the
 // API) uses. Without this the client read `is_active` off a camelCase object
@@ -41,6 +42,7 @@ interface Deps {
   users: UserRepository;
   audit: AuditRepository;
   jwt: JwtService;
+  roleService: RoleService;
 }
 
 const err = (reply: import("fastify").FastifyReply, code: number, k: string, m: string) =>
@@ -174,6 +176,7 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
       const p = z.object({
         company_id: z.string().uuid().nullable().optional(),
         org_unit_id: z.string().uuid().nullable().optional(),
+        role: z.string().min(1).max(48).optional(), // destination role (SEC-020)
       }).safeParse(req.body);
       if (!p.success) return err(reply, 400, "validation_failed", p.error.message);
       const s = await scope(req);
@@ -186,21 +189,59 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
       catch { return err(reply, 404, "not_found", "user not found"); }
       if (!mayTouch(s, target.companyId ?? "")) return err(reply, 404, "not_found", "user not found");
 
-      // Determine the target company. Non-super admins can only assign within
-      // their own company.
+      // Determine the destination company. Non-super admins can only assign
+      // within their own company (so they can never perform a cross-company
+      // move — §8/§11). Resolve to a concrete company for org-unit/role checks.
+      // A non-super admin must never perform a cross-company move: reject an
+      // explicit foreign destination rather than silently confining it (§11).
+      if (!s.isSuper && p.data.company_id != null && p.data.company_id !== s.companyId) {
+        return err(reply, 403, "forbidden", "you cannot move a user to another company");
+      }
       let companyId = p.data.company_id ?? undefined;
       if (!s.isSuper) companyId = s.companyId ?? undefined;
       if (companyId === undefined) companyId = target.companyId ?? undefined;
+      const destCompany = companyId ?? null;
 
-      // The org unit, if given, must live in the resolved company.
+      // The org unit, if given, must live in the DESTINATION company (§9/§24).
       const orgUnitId = p.data.org_unit_id ?? null;
       if (orgUnitId) {
         const unit = await deps.units.getById(orgUnitId);
-        if (!unit || (companyId && unit.companyId !== companyId)) return err(reply, 400, "bad_unit", "org unit is not in the target company");
+        if (!unit || unit.companyId !== destCompany) return err(reply, 400, "bad_unit", "org unit is not in the target company");
       }
-      const user = await deps.users.setOrg(id, companyId ?? null, orgUnitId);
-      await deps.audit.log({ userId: req.auth!.sub, action: "user_assign_org", success: true, resourceType: "user", resourceId: id }).catch(() => {});
-      return reply.send({ user: { id: user.id, company_id: user.companyId, org_unit_id: user.orgUnitId } });
+
+      // SEC-020 — role/tenant integrity. Enforce: for a custom role,
+      // role.company_id == user's (destination) company.
+      const mine = new Set(permissionsFor(req.auth!.role));
+      // Validate an explicitly supplied destination role.
+      let newRole: string | undefined = p.data.role;
+      if (newRole !== undefined) {
+        const t = deps.roleService.tenantOf(newRole);
+        if (!t) return err(reply, 400, "invalid_role", "unknown role");
+        // Permission ceiling: cannot grant a role whose perms exceed your own.
+        if (!permissionsFor(newRole).every((perm) => mine.has(perm))) {
+          return err(reply, 403, "forbidden", "you cannot grant a role with more privileges than your own");
+        }
+        // A custom role must belong to the destination company (built-ins are global).
+        if (!t.isBuiltin && t.companyId !== destCompany) {
+          return err(reply, 400, "role_wrong_company", "the destination role does not belong to the target company");
+        }
+      } else {
+        // No role supplied: keep the current role ONLY if it is still valid for
+        // the destination company. A custom role owned by a different company
+        // must not silently survive the move — require an explicit destination role.
+        const t = deps.roleService.tenantOf(target.role);
+        if (t && !t.isBuiltin && t.companyId !== destCompany) {
+          return err(reply, 400, "role_required", "moving this user to another company requires a destination role in that company");
+        }
+      }
+
+      const user = await deps.users.setOrg(id, destCompany, orgUnitId, newRole);
+      await deps.audit.log({
+        userId: req.auth!.sub, action: "user_assign_org", success: true,
+        resourceType: "user", resourceId: id,
+        details: { company_id: destCompany, org_unit_id: orgUnitId, role: newRole ?? target.role },
+      }).catch(() => {});
+      return reply.send({ user: { id: user.id, company_id: user.companyId, org_unit_id: user.orgUnitId, role: user.role } });
     });
   };
 }

@@ -1,13 +1,20 @@
 /**
  * Thin wrapper around the Rust-side keyring commands.
  *
- * In the native desktop app, secrets live in the OS keyring via Tauri.
- * When running as a plain web app (no Tauri — e.g. served from nginx in a
- * browser), we fall back to localStorage so the session survives a page
- * reload. localStorage is less secure than an OS keychain (it's readable by
- * any script on the origin), but it's the standard trade-off for a browser
- * client and keeps the web build usable. If even localStorage is unavailable
- * (private mode, SSR, tests), we degrade to in-memory storage.
+ * Auth model by runtime:
+ *   - Native desktop (Tauri): secrets live in the OS keyring.
+ *   - Browser: the long-lived REFRESH token is NOT stored here at all — it is
+ *     held in an HttpOnly, script-inaccessible cookie set by the server. The
+ *     legacy `netsphere.refresh_token` localStorage entry from older browser
+ *     builds is a security liability and is purged at startup
+ *     (see `cleanupLegacyBrowserAuth` / SEC-019A). No refresh token must ever
+ *     be written to localStorage in the browser build.
+ *
+ * This wrapper is therefore used, in the browser, only for NON-refresh,
+ * per-tab conveniences (e.g. the app-lock preference), where a localStorage
+ * fallback is acceptable. localStorage is readable by any script on the origin,
+ * so it must not hold long-lived auth material. If even localStorage is
+ * unavailable (private mode, SSR, tests), we degrade to in-memory storage.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -62,4 +69,30 @@ export async function secureDelete(key: string): Promise<void> {
     return;
   }
   await invoke("keyring_delete", { key });
+}
+
+/**
+ * SEC-019A — legacy browser refresh-token keys that older builds wrote to
+ * localStorage before the HttpOnly-cookie design. They are long-lived auth
+ * material and must not linger in script-readable storage.
+ */
+export const LEGACY_REFRESH_KEYS = ["netsphere.refresh_token"] as const;
+
+/**
+ * Remove legacy browser-stored refresh tokens at startup. No-op under Tauri
+ * (its refresh token lives in the OS keyring, not localStorage) and safe when
+ * storage is unavailable. `storage`/`tauri` are injectable for tests. Does NOT
+ * touch unrelated preferences (e.g. `netsphere.lock`).
+ */
+export function cleanupLegacyBrowserAuth(opts: { storage?: Storage | null; tauri?: boolean } = {}): void {
+  const underTauri = opts.tauri ?? isTauri;
+  if (underTauri) return;
+  let store: Storage | null | undefined = opts.storage;
+  if (store === undefined) {
+    try { store = typeof window !== "undefined" ? window.localStorage : null; } catch { store = null; }
+  }
+  if (!store) return;
+  for (const key of LEGACY_REFRESH_KEYS) {
+    try { store.removeItem(key); } catch { /* ignore */ }
+  }
 }
