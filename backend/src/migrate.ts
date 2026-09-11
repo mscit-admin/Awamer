@@ -24,9 +24,29 @@ interface Migration {
   down?: string;
 }
 
+/**
+ * Fail-closed migration error (AWM-MIG-003). Thrown when the database and the
+ * repository disagree about migration history, or the repository itself carries
+ * two different migrations at one version. It propagates to the top-level
+ * handler, which exits non-zero — stopping deployment/startup rather than
+ * silently skipping a migration. Carries no secrets (no DATABASE_URL/tokens).
+ */
+export class MigrationCollisionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MigrationCollisionError";
+  }
+}
+
 async function loadMigrations(dir: string): Promise<Migration[]> {
   const entries = await fs.readdir(dir);
   const map = new Map<number, Migration>();
+  // Track the DISTINCT migration names seen at each numeric version, and the
+  // files that produced them, so we can reject two different migrations that
+  // share one number (the up/down pair of ONE migration shares its name, so
+  // only distinct names collide). Detection must not depend on read order.
+  const namesByVersion = new Map<number, Set<string>>();
+  const filesByVersion = new Map<number, string[]>();
 
   for (const file of entries) {
     const m = /^(\d+)_(.+)\.(up|down)\.sql$/.exec(file);
@@ -40,7 +60,31 @@ async function loadMigrations(dir: string): Promise<Migration[]> {
     else existing.down = sql;
     existing.name = name;
     map.set(version, existing);
+
+    let names = namesByVersion.get(version);
+    if (!names) { names = new Set(); namesByVersion.set(version, names); }
+    names.add(name);
+    let files = filesByVersion.get(version);
+    if (!files) { files = []; filesByVersion.set(version, files); }
+    files.push(file);
   }
+
+  // Repo-vs-repo collision (AWM-MIG-003, §11): a numeric version must map to
+  // exactly one migration. Fail before executing anything.
+  for (const [version, names] of namesByVersion) {
+    if (names.size > 1) {
+      const files = [...(filesByVersion.get(version) ?? [])].sort().join(", ");
+      throw new MigrationCollisionError(
+        `Duplicate migration version detected in the repository.\n\n` +
+          `Version: ${version}\n` +
+          `Conflicting migrations: ${[...names].sort().join(", ")}\n` +
+          `Files: ${files}\n\n` +
+          `A numeric migration version must identify exactly one migration. ` +
+          `Renumber one of these migrations to a free version before retrying.`,
+      );
+    }
+  }
+
   return [...map.values()].sort((a, b) => a.version - b.version);
 }
 
@@ -73,16 +117,31 @@ async function migrate(direction: "up" | "down") {
   const appliedNames = await appliedMap(pool);
   const applied = new Set(appliedNames.keys());
 
-  // Collision guard: the runner tracks by version NUMBER only, so if a version
-  // was already recorded by a DIFFERENT migration (e.g. two branches both used
-  // number 020), this branch's file at that number is silently skipped — which
-  // previously left a schema change unapplied. Surface it loudly instead.
+  // Fail-closed collision guard (AWM-MIG-003): the runner tracks by version
+  // NUMBER only, so a version recorded under a DIFFERENT name than the
+  // repository's file at that number means the database and the code disagree
+  // about migration history. Treating it as "already applied" would silently
+  // SKIP the repository migration while still running later ones — the exact
+  // defect this closes. Stop before executing ANYTHING (both up and down) and
+  // require explicit human resolution; never auto-repair the recorded history.
+  // This runs before the pending filter and the apply loop, so on a collision
+  // schema_migrations and the schema are left untouched (no partial state).
   for (const m of migrations) {
     const recorded = appliedNames.get(m.version);
     if (recorded !== undefined && recorded !== m.name) {
-      log.warn(
-        { version: m.version, recordedName: recorded, fileName: m.name },
-        "migration version already applied under a DIFFERENT name — this file will NOT run (number collision); renumber the new migration to a free version",
+      log.error(
+        { version: m.version, databaseName: recorded, repositoryName: m.name },
+        "migration version collision — database and repository disagree; execution stopped",
+      );
+      throw new MigrationCollisionError(
+        `Migration version collision detected.\n\n` +
+          `Version: ${m.version}\n` +
+          `Database migration: ${m.version}_${recorded}\n` +
+          `Repository migration: ${m.version}_${m.name}\n\n` +
+          `Migration execution has been stopped to prevent an inconsistent ` +
+          `schema. The database records a different migration at this version ` +
+          `than the repository provides. Resolve the migration-history ` +
+          `conflict before retrying — no automatic repair is performed.`,
       );
     }
   }

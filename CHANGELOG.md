@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Migration-runner fail-closed hardening (AWM-MIG-003, AWM-MIG-004)
+
+### Security
+- **AWM-MIG-003 (P1) — Migration runner now fails closed on history
+  disagreement.** The runner tracked applied migrations by numeric version only,
+  so a version recorded in `schema_migrations` under a *different* name than the
+  repository file at that number was treated as already applied — the repository
+  migration was silently skipped, later migrations still ran, and the process
+  exited 0, letting the production container start the server with a required
+  migration missing. `backend/src/migrate.ts` now **throws
+  `MigrationCollisionError` before executing anything** (naming the version, the
+  database migration and the repository migration), exiting non-zero so the
+  deploy command (`migrate up || exit 1`) stops the rollout. It performs **no
+  automatic repair** and logs no secrets. It also rejects two repository
+  migrations sharing one numeric version (order-independent), and the collision
+  guard runs before the apply loop so `schema_migrations` and the schema are left
+  untouched on failure.
+
+### Fixed
+- **AWM-MIG-004 (P3) — Role-key constraint check scoped to the roles table.**
+  Migration 025 checked for `roles_key_len_chk` by constraint name alone, which
+  is not unique across relations. New migration
+  **`026_scope_role_key_constraint`** (025 left untouched) ensures the constraint
+  exists specifically on the `roles` relation
+  (`conname='roles_key_len_chk' AND conrelid='roles'::regclass`); idempotent, no
+  duplicate.
+
+### Tests
+- `src/migrate.itest.ts` (MIG-RUNNER-001..010, MIG-CONSTRAINT-001..002): the real
+  runner is driven as a subprocess against real PostgreSQL — db-vs-repo collision
+  fails closed and blocks later migrations with no partial state; duplicate
+  repository versions fail before executing either; failed SQL rolls back and is
+  not recorded; deterministic numeric ordering; the deploy-gate shell command
+  stops the server on collision; the scoped constraint is added to `roles` even
+  when another table shares the name, with no duplicate.
+- **No new permission** and **no RBAC-matrix change** — runner/migration hardening
+  only.
+
+---
+
 ## [Unreleased] — Migration role-key compatibility (AWM-MIG-002)
 
 ### Fixed
