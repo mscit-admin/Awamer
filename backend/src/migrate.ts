@@ -54,9 +54,11 @@ async function ensureTable(pool: import("pg").Pool) {
   `);
 }
 
-async function appliedVersions(pool: import("pg").Pool): Promise<Set<number>> {
-  const { rows } = await pool.query<{ version: string }>(`SELECT version::text AS version FROM schema_migrations`);
-  return new Set(rows.map((r) => Number(r.version)));
+async function appliedMap(pool: import("pg").Pool): Promise<Map<number, string>> {
+  const { rows } = await pool.query<{ version: string; name: string }>(
+    `SELECT version::text AS version, name FROM schema_migrations`,
+  );
+  return new Map(rows.map((r) => [Number(r.version), r.name]));
 }
 
 async function migrate(direction: "up" | "down") {
@@ -68,7 +70,22 @@ async function migrate(direction: "up" | "down") {
   const dir = process.env.MIGRATIONS_DIR ?? path.resolve(__dirname, "..", "migrations");
   log.info({ dir, direction }, "running migrations");
   const migrations = await loadMigrations(dir);
-  const applied = await appliedVersions(pool);
+  const appliedNames = await appliedMap(pool);
+  const applied = new Set(appliedNames.keys());
+
+  // Collision guard: the runner tracks by version NUMBER only, so if a version
+  // was already recorded by a DIFFERENT migration (e.g. two branches both used
+  // number 020), this branch's file at that number is silently skipped — which
+  // previously left a schema change unapplied. Surface it loudly instead.
+  for (const m of migrations) {
+    const recorded = appliedNames.get(m.version);
+    if (recorded !== undefined && recorded !== m.name) {
+      log.warn(
+        { version: m.version, recordedName: recorded, fileName: m.name },
+        "migration version already applied under a DIFFERENT name — this file will NOT run (number collision); renumber the new migration to a free version",
+      );
+    }
+  }
 
   if (direction === "up") {
     const pending = migrations.filter((m) => !applied.has(m.version));
