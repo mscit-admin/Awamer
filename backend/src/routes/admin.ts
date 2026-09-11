@@ -49,6 +49,15 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       return permissionsFor(targetRole).every((p) => mine.has(p));
     };
 
+    // SEC-016 Rule E: a role is assignable only if it's a global built-in or a
+    // custom role owned by the actor's own company. Super-admin may assign any.
+    const mayAssignRoleTenant = (s: { isSuper: boolean; companyId: string | null }, roleKey: string): boolean => {
+      const t = deps.roleService.tenantOf(roleKey);
+      if (!t) return false;
+      if (t.isBuiltin) return true;
+      return s.isSuper || (s.companyId != null && t.companyId === s.companyId);
+    };
+
     // ---------- list users ----------------------------------------------
     const listQuerySchema = z.object({
       limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -95,6 +104,9 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         // Admin's new users default to the super-admin's own company; they can
         // be moved afterward via the org assignment dialog.
         const s = await scope(req);
+        if (!mayAssignRoleTenant(s, parsed.data.role)) {
+          return reply.code(403).send({ error: { code: "forbidden", message: "that role belongs to another company" } });
+        }
         const user = await deps.register.execute({
           username: parsed.data.username,
           email: parsed.data.email,
@@ -154,6 +166,9 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         const u = await deps.users.getById(idP.data.id);
         const s = await scope(req);
         if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
+        if (bodyP.data.role !== undefined && !mayAssignRoleTenant(s, bodyP.data.role)) {
+          return reply.code(403).send({ error: { code: "forbidden", message: "that role belongs to another company" } });
+        }
         const prevRole = u.role;
         if (bodyP.data.full_name !== undefined) u.fullName = bodyP.data.full_name;
         if (bodyP.data.email !== undefined) u.email = bodyP.data.email;

@@ -131,8 +131,23 @@ services:
     # device let the openvpn binary (which carries cap_net_admin+ep from the
     # image) bring tunnels up. ip_forward lets tunnel clients route to each
     # other / the host. Harmless if you only use desktop-runtime VPN profiles.
+    # Least privilege (SEC-005): drop ALL Linux capabilities and add back only
+    # NET_ADMIN — the single capability the OpenVPN client/server need to bring
+    # up the tun interface and manage routes. This removes the ~13 default
+    # Docker capabilities (chown, setuid, net_raw, mknod, …) the API never uses.
+    # no-new-privileges blocks any setuid/setgid escalation from a compromised
+    # process. (The service still runs as root per `user: "0:0"` above because
+    # openvpn's `ip` child needs it on this kernel; for a deployment that uses
+    # only desktop-runtime VPN profiles, remove NET_ADMIN, the tun device, the
+    # sysctl and the `user` override to run fully unprivileged — see the note on
+    # `user` above. For stronger isolation, run VPN in a dedicated privileged
+    # sidecar and keep this API container unprivileged.)
+    cap_drop:
+      - ALL
     cap_add:
       - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
     devices:
       - /dev/net/tun:/dev/net/tun
     sysctls:

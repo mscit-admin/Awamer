@@ -59,18 +59,25 @@ export const authApi = {
     });
   },
 
-  refresh(refreshToken: string) {
+  refresh(refreshToken?: string | null) {
+    // SEC-019: the browser sends no body token — the HttpOnly cookie is used.
+    // Tauri passes its keyring token in the body.
     return request<TokenResponse>("/api/v1/auth/refresh", {
       method: "POST",
-      body: { refresh_token: refreshToken },
+      body: refreshToken ? { refresh_token: refreshToken } : {},
       unauthenticated: true,
     });
   },
 
-  logout() {
+  logout(refreshToken?: string | null) {
+    // SEC-017: hand the server the refresh token so it revokes that session
+    // server-side (not just a client-side wipe). Best-effort — the client
+    // clears local state regardless.
     return request<void>("/api/v1/auth/logout", {
       method: "POST",
-    }).catch(() => undefined); // best-effort; client clears state anyway
+      body: refreshToken ? { refresh_token: refreshToken } : {},
+      unauthenticated: true,
+    }).catch(() => undefined);
   },
 
   me() {

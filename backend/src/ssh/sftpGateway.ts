@@ -30,12 +30,14 @@ import { can } from "../domain/permissions.js";
 import type { JwtService } from "../jwt/index.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
+import { makeHostVerifier, type HostKeyStore } from "./hostKeys.js";
 
 export interface SftpGatewayDeps {
   jwt: JwtService;
   hosts: HostRepository;
   credentials: CredentialRepository;
   log: Logger;
+  hostKeys: HostKeyStore;
 }
 
 interface SftpSession {
@@ -196,7 +198,7 @@ export function makeSftpGateway(deps: SftpGatewayDeps) {
             port: host.port,
             username,
             readyTimeout: 20_000,
-            hostVerifier: () => true, // TOFU-accept (see SSH gateway note)
+            hostVerifier: makeHostVerifier(deps.hostKeys, deps.log, host.hostname, host.port),
             ...auth,
           });
         });

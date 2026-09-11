@@ -19,12 +19,15 @@ import { can } from "../domain/permissions.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
 import { resolveSshConnection, SshResolveError } from "./resolveAuth.js";
+import { makeHostVerifier, type HostKeyStore } from "./hostKeys.js";
+import { awaitAuthFrame } from "./gateway.js";
 
 export interface WsTunnelDeps {
   jwt: JwtService;
   hosts: HostRepository;
   credentials: CredentialRepository;
   log: Logger;
+  hostKeys: HostKeyStore;
 }
 
 const DST_HOST_RE = /^[a-zA-Z0-9._-]+$/;
@@ -38,7 +41,6 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
     app.get("/connect", { websocket: true }, async (connection, req) => {
       const ws = connection;
       const q = req.query as Record<string, string | undefined>;
-      const token = q.token;
       const hostId = q.host_id;
       const dstHost = q.dst_host;
       const dstPort = Number(q.dst_port);
@@ -48,12 +50,18 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
         ws.close();
       };
 
-      if (!token || !hostId || !dstHost || !Number.isInteger(dstPort) || dstPort < 1 || dstPort > 65535) {
-        return fail("bad_request", "token, host_id, dst_host and a valid dst_port are required");
+      if (!hostId || !dstHost || !Number.isInteger(dstPort) || dstPort < 1 || dstPort > 65535) {
+        return fail("bad_request", "host_id, dst_host and a valid dst_port are required");
       }
       if (!DST_HOST_RE.test(dstHost)) {
         return fail("bad_request", "invalid destination host");
       }
+
+      // SEC-018: token arrives over the channel (first frame), never the URL.
+      sendJson(ws, { type: "status", status: "authenticating" });
+      const authFrame = await awaitAuthFrame(ws);
+      if (!authFrame) return fail("auth_required", "no authentication frame received");
+      const token = authFrame.token;
 
       let userId: string;
       try {
@@ -106,7 +114,7 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
         port: host.port,
         username,
         readyTimeout: 20_000,
-        hostVerifier: () => true, // TOFU (consistent with the SSH gateway)
+        hostVerifier: makeHostVerifier(deps.hostKeys, deps.log, host.hostname, host.port),
         ...auth,
       });
     });

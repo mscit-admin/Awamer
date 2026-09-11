@@ -9,9 +9,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — Security remediation (Phase 1 — Auth & Secrets)
+## [Unreleased] — Security remediation v1.1 gate (SEC-015..019, STAB-001)
 
 ### Security
+- **SEC-016 (P0) — Custom-role privilege-escalation blocked.** Role create/edit
+  now rejects granting any permission the actor does not hold (`companies:manage`
+  stays super-admin-only), stopping self-escalation via editing one's own role.
+  Migration `022` gives custom roles a `company_id`; a role is now editable and
+  assignable only within its owning company.
+- **SEC-015 (P0) — Cross-company explicit sharing blocked.** `host`/`note`
+  `setShares` reject any recipient outside the resource's company (whole-op
+  reject, no partial share); the `*_shares` read branch is company-scoped too,
+  so even a stale cross-company share row is denied on read.
+- **SEC-017 (P1) — Logout revokes the server-side session.** `POST /logout`
+  revokes the presented refresh session (and a stolen copy); `POST /logout-all`
+  revokes all of a user's sessions.
+- **SEC-018 (P1) — No auth token in any WebSocket URL.** Telnet and WS-tunnel
+  authenticate via the first WS frame; VNC uses a one-time single-use ticket
+  (noVNC speaks raw RFB). No gateway keeps a JWT in the URL.
+- **SEC-019 (P2) — Browser refresh token moved to an HttpOnly cookie.** The
+  browser build opts into a `HttpOnly; Secure; SameSite=Strict` refresh cookie
+  (never readable by JS, never sent cross-site); Tauri keeps the OS keyring.
+
+### Stability
+- **STAB-001 — `/readyz` probes PostgreSQL** (`SELECT 1`, bounded) → 200/503;
+  `/healthz` stays liveness-only.
+- **SEC-005 — Docker least privilege.** The production API container now drops
+  ALL Linux capabilities and adds back only `NET_ADMIN` (what OpenVPN needs),
+  and sets `no-new-privileges:true`. VPN functionality (tun device, ip_forward)
+  is preserved; the fully-unprivileged posture for desktop-only-VPN deployments
+  is documented.
+- **SEC-006 — Browser Content-Security-Policy.** nginx now sends a tight CSP
+  (`default-src 'self'`, no `unsafe-eval`, no inline/wildcard scripts;
+  `style-src 'unsafe-inline'` only, for xterm/React inline styles;
+  `script-src` adds only the narrow `'wasm-unsafe-eval'` so the KeePass import's
+  Argon2 (hash-wasm/WebAssembly) still works without permitting JS `eval`;
+  `frame-ancestors 'none'`).
+
+### Fixed
+- **BUG-001 — Tauri/dev endpoint mismatch.** The web API client defaulted to
+  `localhost:8080` while the backend listens on `8081`; aligned to `8081`. The
+  Tauri CSP `connect-src` now allows the correct dev port + `ws:`/`wss:` (and
+  `https:`/`wss:` for packaged apps reaching a remote backend), and drops the
+  unused Google-Fonts sources.
+- **SEC-008 — SSH host-key pinning (TOFU + change detection).** The SSH, SFTP,
+  WS-tunnel and server-managed-tunnel connectors previously accepted any server
+  host key on every connection and never noticed a change (`hostVerifier: () =>
+  true`), so a man-in-the-middle was trusted silently. Migration `021` adds a
+  `host_keys` pin store; the first key seen for a `hostname:port` is pinned, a
+  matching key is trusted, and a **changed key is refused** with a security log
+  line. Re-pin a legitimately rotated key by deleting its `host_keys` row.
+- **SEC-014 — Log redaction hardened.** Verified no secret is logged via string
+  interpolation; extended pino redaction to also cover `private_key`,
+  `api_key`/`apiKey`, `credential`, `password_hash`, `otp`.
+- **SEC-003 (P0) — Shared resources are now company-scoped.** `hosts` and
+  `notes` predate the multi-company model and their `is_shared` flag made a
+  resource visible to every user on the installation, across tenants — and a
+  shared host connects with the owner's server-side credential, so this allowed
+  cross-company remote access. Migration `020` adds `company_id` to `hosts` and
+  `notes` (backfilled from each owner's company), and the shared-visibility
+  queries now require the resource's company to match the viewer's. Private and
+  explicit per-user shares are unchanged; moving a user between companies now
+  carries their shared resources with them. Verified end-to-end
+  (`tenantIsolation.itest.ts`) against a real PostgreSQL.
 - **SEC-002 — Refresh now enforces current account state.** A valid refresh
   token is no longer sufficient: on every refresh the account must still be
   active and unlocked (mirroring login). A disabled, locked, or deleted user is

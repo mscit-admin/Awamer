@@ -11,11 +11,14 @@
  * VNC password is handled by noVNC on the client.
  */
 import net from "node:net";
+import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
+import { makeAuthMiddleware } from "../middleware/auth.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, ConnectionHistoryRepository } from "../repos/sessionRepos.js";
+import { VncTicketStore } from "./ticketStore.js";
 
 export interface VncGatewayDeps {
   jwt: JwtService;
@@ -25,28 +28,38 @@ export interface VncGatewayDeps {
 }
 
 export function makeVncGateway(deps: VncGatewayDeps) {
+  const tickets = new VncTicketStore();
   return async function plugin(app: FastifyInstance) {
+    // SEC-018: mint a short-lived single-use ticket (Authorization-header
+    // authenticated). The browser then opens the WS with ?ticket=… — no JWT in
+    // the URL. Access to the host is verified here, before any ticket is issued.
+    const ticketSchema = z.object({ host_id: z.string().min(1) });
+    app.post("/ticket", { preHandler: makeAuthMiddleware(deps.jwt) }, async (req, reply) => {
+      const parsed = ticketSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: "host_id required" } });
+      if (!can(req.auth!.role, "sessions:connect")) return reply.code(403).send({ error: { code: "forbidden", message: "your role cannot open sessions" } });
+      try {
+        await deps.hosts.getById(req.auth!.sub, parsed.data.host_id); // ownership/sharing + tenant check
+      } catch {
+        return reply.code(404).send({ error: { code: "host_not_found", message: "host not found" } });
+      }
+      const ticket = tickets.issue({ userId: req.auth!.sub, hostId: parsed.data.host_id });
+      return reply.send({ ticket });
+    });
+
     app.get("/connect", { websocket: true }, async (connection, req) => {
       const ws = connection;
       const q = req.query as Record<string, string | undefined>;
-      const token = q.token;
-      const hostId = q.host_id;
 
       const closeWs = (code: number, reason: string) => {
         try { ws.close(code, reason); } catch { /* already closing */ }
       };
 
-      if (!token || !hostId) return closeWs(4400, "token and host_id required");
-
-      // Authn + authz.
-      let userId: string;
-      try {
-        const claims = await deps.jwt.verifyAccess(token);
-        userId = claims.sub;
-        if (!can(claims.role, "sessions:connect")) return closeWs(4403, "forbidden");
-      } catch {
-        return closeWs(4401, "invalid token");
-      }
+      // SEC-018: authenticate with a one-time ticket, not a URL JWT.
+      const claimed = q.ticket ? tickets.consume(q.ticket) : null;
+      if (!claimed) return closeWs(4401, "invalid or expired ticket");
+      const userId = claimed.userId;
+      const hostId = claimed.hostId;
 
       // Resolve the host (honors ownership + sharing).
       let host: Awaited<ReturnType<HostRepository["getById"]>>;

@@ -97,6 +97,11 @@ export class UserRepository {
       [id, companyId, orgUnitId],
     );
     if (!rows[0]) throw Errors.UserNotFound();
+    // SEC-003: keep the tenant tag on the user's owned resources consistent when
+    // they move companies, so a shared host/note follows its owner into the new
+    // company instead of remaining visible to the old one (stale company_id).
+    await this.pool.query(`UPDATE hosts SET company_id = $2 WHERE user_id = $1`, [id, companyId]);
+    await this.pool.query(`UPDATE notes SET company_id = $2 WHERE user_id = $1`, [id, companyId]);
     return rowToUser(rows[0]);
   }
 

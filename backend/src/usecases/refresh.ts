@@ -87,4 +87,25 @@ export class RefreshUseCase {
       expiresAt: access.expiresAt,
     };
   }
+
+  /**
+   * SEC-017 — current-session logout. Verifies the presented refresh token and
+   * revokes exactly that session server-side, so it (and any stolen copy) can no
+   * longer be refreshed. Idempotent and safe on an invalid/expired token.
+   */
+  async logout(refreshToken: string, ip: string | null, ua: string | null): Promise<void> {
+    try {
+      const claims = await this.jwt.verifyRefresh(refreshToken);
+      await this.refresh.revoke(claims.jti);
+      await this.audit.log({ userId: claims.sub, action: "logout", success: true, ipAddress: ip, userAgent: ua });
+    } catch {
+      // Invalid/expired token → nothing to revoke; logout stays idempotent.
+    }
+  }
+
+  /** SEC-017 — revoke every active session for a user (logout everywhere). */
+  async logoutAll(userId: string, ip: string | null, ua: string | null): Promise<void> {
+    await this.refresh.revokeAllForUser(userId);
+    await this.audit.log({ userId, action: "logout", success: true, ipAddress: ip, userAgent: ua, details: { scope: "all" } });
+  }
 }

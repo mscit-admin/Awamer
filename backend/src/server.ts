@@ -12,6 +12,7 @@ import { loadConfig } from "./config/index.js";
 import { DomainError } from "./domain/index.js";
 import { createLogger } from "./logger/index.js";
 import { createPool } from "./db/index.js";
+import { probeDb } from "./db/readiness.js";
 import { createArgon2 } from "./crypto/argon2.js";
 import { createSecretBox, resolveSecretKey } from "./crypto/secretBox.js";
 import { createJwt } from "./jwt/index.js";
@@ -63,6 +64,7 @@ import { makeSftpGateway } from "./ssh/sftpGateway.js";
 import { makeVncGateway } from "./vnc/gateway.js";
 import { makeTelnetGateway } from "./telnet/gateway.js";
 import { TunnelManager } from "./ssh/tunnelManager.js";
+import { HostKeyRepository } from "./ssh/hostKeys.js";
 import { makeTunnelRoutes } from "./routes/tunnels.js";
 import { makeWsTunnelGateway } from "./ssh/wsTunnelGateway.js";
 import { VpnProfileRepository } from "./repos/vpnRepo.js";
@@ -76,7 +78,7 @@ import { makeVpnServerRoutes } from "./routes/vpnServer.js";
 function statusForDomainError(code: string): number {
   if (code.endsWith("_not_found")) return 404;
   if (code.endsWith("_taken") || code === "vpn_too_many") return 409;
-  if (code === "forbidden") return 403;
+  if (code === "forbidden" || code === "cross_company_share") return 403;
   return 400;
 }
 
@@ -112,8 +114,10 @@ async function main() {
   const orgUnits = new OrgUnitRepository(pool);
   // AI providers (org + personal), keys encrypted at rest.
   const aiProviders = new AiProviderRepository(pool, secretBox);
+  // SSH host-key pinning (TOFU + change detection), shared by all ssh2 sites.
+  const hostKeys = new HostKeyRepository(pool);
   // Phase 5 — server-managed SSH local tunnels (in-memory).
-  const tunnels = new TunnelManager({ hosts, credentials, log });
+  const tunnels = new TunnelManager({ hosts, credentials, log, hostKeys });
   // OpenVPN client profiles (encrypted) + backend-runtime tunnel manager.
   const vpnProfiles = new VpnProfileRepository(pool, secretBox);
   const vpnManager = new VpnManager(log);
@@ -209,12 +213,21 @@ async function main() {
     log.info("API docs enabled at /docs");
   }
 
+  // Liveness: the process itself is up. MUST NOT depend on PostgreSQL, so an
+  // orchestrator doesn't kill a healthy process during a transient DB blip.
   app.get("/healthz", async () => ({ status: "ok" }));
-  app.get("/readyz", async () => ({ status: "ready" }));
+  // Readiness (STAB-001): only "ready" when the DB actually answers, so traffic
+  // isn't routed to an instance that can't serve it. Recovers automatically
+  // when the DB returns (no restart needed).
+  app.get("/readyz", async (_req, reply) => {
+    const ok = await probeDb(pool);
+    return reply.code(ok ? 200 : 503).send({ status: ok ? "ready" : "not_ready" });
+  });
 
   await app.register(makeAuthRoutes({
     login: loginUC, refresh: refreshUC, mfa: mfaUC, users, jwt,
     loginRateMax: cfg.env.RATE_LIMIT_LOGIN_PER_MIN,
+    refreshCookieMaxAgeSec: cfg.jwtRefreshTtlSec,
   }), { prefix: "/api/v1/auth" });
   // Public forgot/reset password (same prefix as auth).
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });
@@ -223,7 +236,7 @@ async function main() {
   await app.register(makeAdminRoutes({ users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, jwt }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeSessionSettingsRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/admin/session-settings" });
-  await app.register(makeRoleRoutes({ roles, roleService, audit, jwt }), { prefix: "/api/v1/roles" });
+  await app.register(makeRoleRoutes({ roles, roleService, audit, jwt, users }), { prefix: "/api/v1/roles" });
 
   // Phase 2 — Session Management routes
   await app.register(makeFolderRoutes({ folders, audit, jwt }), { prefix: "/api/v1/folders" });
@@ -241,9 +254,9 @@ async function main() {
   await app.register(makeBackupRoutes({ backup, jwt }), { prefix: "/api/v1/backup" });
 
   // Phase 5 — browser SSH gateway (WebSocket).
-  await app.register(makeSshGateway({ jwt, hosts, credentials, history, settings: appSettings, log }), { prefix: "/api/v1/ssh" });
+  await app.register(makeSshGateway({ jwt, hosts, credentials, history, settings: appSettings, log, hostKeys }), { prefix: "/api/v1/ssh" });
   // Phase 4 — browser SFTP gateway (REST, session-based).
-  await app.register(makeSftpGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/sftp" });
+  await app.register(makeSftpGateway({ jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/sftp" });
   // Phase 6 — browser VNC gateway (WebSocket byte relay).
   await app.register(makeVncGateway({ jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
   // Browser Telnet gateway (WebSocket ↔ raw TCP relay).
@@ -251,7 +264,7 @@ async function main() {
   // Phase 5 — SSH port forwarding: server-managed local tunnels (REST) and a
   // per-user WebSocket TCP tunnel.
   await app.register(makeTunnelRoutes({ tunnels, jwt }), { prefix: "/api/v1/tunnels" });
-  await app.register(makeWsTunnelGateway({ jwt, hosts, credentials, log }), { prefix: "/api/v1/tunnel" });
+  await app.register(makeWsTunnelGateway({ jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/tunnel" });
   // OpenVPN client profiles + backend-runtime connections.
   await app.register(makeVpnRoutes({ vpn: vpnProfiles, manager: vpnManager, audit, jwt }), { prefix: "/api/v1/vpn" });
   // Built-in OpenVPN server management (PKI, users, .ovpn, start/stop).

@@ -18,12 +18,12 @@ import { useTerminalUi } from "../store/terminalUiStore";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
-function gatewayUrl(token: string, hostId: string): string {
+function gatewayUrl(hostId: string): string {
+  // SEC-018: no token in the URL — sent as the first WS frame after open.
   const base = API_BASE_URL || window.location.origin;
   const u = new URL(base);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
   u.pathname = u.pathname.replace(/\/$/, "") + "/api/v1/telnet/connect";
-  u.searchParams.set("token", token);
   u.searchParams.set("host_id", hostId);
   return u.toString();
 }
@@ -83,9 +83,14 @@ export function TelnetPage() {
     setPhase("connecting");
     setError(null);
 
-    const ws = new WebSocket(gatewayUrl(accessToken, params.id));
+    const ws = new WebSocket(gatewayUrl(params.id));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
+
+    // SEC-018: authenticate over the channel — token in the first frame.
+    ws.onopen = () => {
+      if (wsRef.current === ws) ws.send(JSON.stringify({ type: "auth", token: accessToken }));
+    };
 
     const dataDisp = term.onData((d) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));

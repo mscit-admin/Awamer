@@ -141,6 +141,15 @@ export class RefreshRepository {
       [userId],
     );
   }
+
+  /** Revoke a single session (SEC-017 current-session logout). Idempotent. */
+  async revoke(jti: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE refresh_sessions SET revoked_at = NOW()
+       WHERE jti = $1 AND revoked_at IS NULL`,
+      [jti],
+    );
+  }
 }
 
 // =========================================================================

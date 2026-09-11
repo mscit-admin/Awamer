@@ -14,17 +14,18 @@ import { ArrowLeft, Loader2, AlertCircle, Lock, Power, Maximize2, Keyboard, Clip
 import RFB from "@novnc/novnc";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { request } from "@/shared/lib/api";
 import { hostsApi, credentialsApi } from "../api/sessionsApi";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
-function gatewayUrl(token: string, hostId: string): string {
+function gatewayUrl(ticket: string): string {
+  // SEC-018: no JWT in the URL — a short-lived single-use ticket instead.
   const base = API_BASE_URL || window.location.origin;
   const u = new URL(base);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
   u.pathname = u.pathname.replace(/\/$/, "") + "/api/v1/vnc/connect";
-  u.searchParams.set("token", token);
-  u.searchParams.set("host_id", hostId);
+  u.searchParams.set("ticket", ticket);
   return u.toString();
 }
 
@@ -99,62 +100,85 @@ export function VncPage() {
     setPhase("connecting");
     setError(null);
 
-    let rfb: RFB;
-    try {
-      rfb = new RFB(screenRef.current, gatewayUrl(accessToken, hostId), {
-        credentials: {
-          username: username || prefillUserRef.current || undefined,
-          password: password || prefillRef.current || "",
-        },
+    let rfb: RFB | null = null;
+    let cancelled = false;
+    const removers: Array<() => void> = [];
+    void (async () => {
+      // SEC-018: mint a one-time ticket over the authenticated REST channel,
+      // then open the WS with ?ticket= — the JWT never touches the URL.
+      let ticket: string;
+      try {
+        ticket = (await request<{ ticket: string }>("/api/v1/vnc/ticket", { method: "POST", body: { host_id: hostId } })).ticket;
+      } catch {
+        if (!cancelled) { setPhase("error"); setError("could not authorize the VNC session"); }
+        return;
+      }
+      if (cancelled || !screenRef.current) return;
+      let conn: RFB;
+      try {
+        conn = new RFB(screenRef.current, gatewayUrl(ticket), {
+          credentials: {
+            username: username || prefillUserRef.current || undefined,
+            password: password || prefillRef.current || "",
+          },
+        });
+      } catch (e) {
+        setPhase("error");
+        setError(e instanceof Error ? e.message : "failed to start VNC");
+        return;
+      }
+      rfb = conn;
+      conn.background = "#0b0e14";
+      applyDisplay(conn, displayMode);
+      rfbRef.current = conn;
+
+      const onConnect = () => { setPhase("connected"); applyDisplay(conn, displayMode); };
+      const onDisconnect = (e: any) => {
+        if (phase === "connected") {
+          setPhase("error");
+          setError("Disconnected");
+        } else {
+          setPhase("error");
+          setError(e?.detail?.clean === false ? "Could not connect — check the host, port, and that VNC is reachable." : "Disconnected");
+        }
+      };
+      const onCredentials = () => {
+        // Pre-fill from the stored credential if we have it.
+        if (prefillUserRef.current && !username) setUsername(prefillUserRef.current);
+        setPhase("need_password");
+      };
+      const onSecurityFailure = (e: any) => { setPhase("error"); setError(e?.detail?.reason || "VNC authentication failed"); };
+      // Remote → host: when the remote clipboard changes, mirror it into the
+      // panel and (best-effort) the host clipboard.
+      const onClipboard = (e: any) => {
+        const text = e?.detail?.text;
+        if (typeof text === "string") {
+          setClipText(text);
+          navigator.clipboard?.writeText(text).catch(() => {});
+        }
+      };
+
+      conn.addEventListener("connect", onConnect);
+      conn.addEventListener("disconnect", onDisconnect);
+      conn.addEventListener("credentialsrequired", onCredentials);
+      conn.addEventListener("securityfailure", onSecurityFailure);
+      conn.addEventListener("clipboard", onClipboard);
+      removers.push(() => {
+        conn.removeEventListener("connect", onConnect);
+        conn.removeEventListener("disconnect", onDisconnect);
+        conn.removeEventListener("credentialsrequired", onCredentials);
+        conn.removeEventListener("securityfailure", onSecurityFailure);
+        conn.removeEventListener("clipboard", onClipboard);
       });
-    } catch (e) {
-      setPhase("error");
-      setError(e instanceof Error ? e.message : "failed to start VNC");
-      return;
-    }
-    rfb.background = "#0b0e14";
-    applyDisplay(rfb, displayMode);
-    rfbRef.current = rfb;
-
-    const onConnect = () => { setPhase("connected"); applyDisplay(rfb, displayMode); };
-    const onDisconnect = (e: any) => {
-      if (phase === "connected") {
-        setPhase("error");
-        setError("Disconnected");
-      } else {
-        setPhase("error");
-        setError(e?.detail?.clean === false ? "Could not connect — check the host, port, and that VNC is reachable." : "Disconnected");
-      }
-    };
-    const onCredentials = () => {
-      // Pre-fill from the stored credential if we have it.
-      if (prefillUserRef.current && !username) setUsername(prefillUserRef.current);
-      setPhase("need_password");
-    };
-    const onSecurityFailure = (e: any) => { setPhase("error"); setError(e?.detail?.reason || "VNC authentication failed"); };
-    // Remote → host: when the remote clipboard changes, mirror it into the
-    // panel and (best-effort) the host clipboard.
-    const onClipboard = (e: any) => {
-      const text = e?.detail?.text;
-      if (typeof text === "string") {
-        setClipText(text);
-        navigator.clipboard?.writeText(text).catch(() => {});
-      }
-    };
-
-    rfb.addEventListener("connect", onConnect);
-    rfb.addEventListener("disconnect", onDisconnect);
-    rfb.addEventListener("credentialsrequired", onCredentials);
-    rfb.addEventListener("securityfailure", onSecurityFailure);
-    rfb.addEventListener("clipboard", onClipboard);
+      // If the effect was torn down while the ticket request was in flight,
+      // disconnect the socket we just opened.
+      if (cancelled) { try { conn.disconnect(); } catch { /* ignore */ } }
+    })();
 
     return () => {
-      rfb.removeEventListener("connect", onConnect);
-      rfb.removeEventListener("disconnect", onDisconnect);
-      rfb.removeEventListener("credentialsrequired", onCredentials);
-      rfb.removeEventListener("securityfailure", onSecurityFailure);
-      rfb.removeEventListener("clipboard", onClipboard);
-      try { rfb.disconnect(); } catch { /* ignore */ }
+      cancelled = true;
+      for (const r of removers) r();
+      try { rfb?.disconnect(); } catch { /* ignore */ }
       rfbRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
