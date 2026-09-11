@@ -126,6 +126,11 @@ async function migrate(direction: "up" | "down") {
   // require explicit human resolution; never auto-repair the recorded history.
   // This runs before the pending filter and the apply loop, so on a collision
   // schema_migrations and the schema are left untouched (no partial state).
+  const repoByVersion = new Map(migrations.map((m) => [m.version, m.name]));
+
+  // Direction A (AWM-MIG-003): a REPOSITORY migration recorded in the database
+  // under a DIFFERENT name at its version. Treating it as applied would skip the
+  // repository migration while still running later ones.
   for (const m of migrations) {
     const recorded = appliedNames.get(m.version);
     if (recorded !== undefined && recorded !== m.name) {
@@ -143,6 +148,58 @@ async function migrate(direction: "up" | "down") {
           `than the repository provides. Resolve the migration-history ` +
           `conflict before retrying — no automatic repair is performed.`,
       );
+    }
+  }
+
+  // Direction B (AWM-MIG-005): every APPLIED migration must exist in the
+  // repository. A recorded migration this checkout does not contain means the
+  // database is ahead of / divergent from the deployed code (rolled-back image,
+  // wrong branch, stale artifact, removed or manually-applied migration). The
+  // running code must never start against a schema it does not fully know.
+  for (const [version, dbName] of appliedNames) {
+    if (!repoByVersion.has(version)) {
+      log.error(
+        { version, databaseName: dbName },
+        "applied migration absent from repository — database is ahead of/divergent from code; execution stopped",
+      );
+      throw new MigrationCollisionError(
+        `Unknown applied migration detected.\n\n` +
+          `Version: ${version}\n` +
+          `Database migration: ${version}_${dbName}\n` +
+          `Repository status: missing\n\n` +
+          `The database records a migration this repository does not contain — the ` +
+          `deployed code is older than, or divergent from, the database schema. ` +
+          `Migration execution has been stopped. Restore the correct application ` +
+          `version/repository or explicitly reconcile migration history before ` +
+          `deploying — no automatic repair is performed.`,
+      );
+    }
+  }
+
+  // Contiguity (AWM-MIG-005): the applied history must be an exact PREFIX of the
+  // repository's ordered migrations — every repository migration at or below the
+  // highest applied version must itself be applied. A missing intermediate
+  // migration while a later one is applied is a broken, non-contiguous history
+  // that must NOT be "filled in" by running the missing migration out of order.
+  if (appliedNames.size > 0) {
+    const maxApplied = Math.max(...appliedNames.keys());
+    for (const m of migrations) {
+      if (m.version <= maxApplied && !applied.has(m.version)) {
+        log.error(
+          { missingVersion: m.version, highestApplied: maxApplied },
+          "migration history gap — an earlier migration is unrecorded while a later one is applied; execution stopped",
+        );
+        throw new MigrationCollisionError(
+          `Migration history gap detected.\n\n` +
+            `Missing applied migration: ${m.version}_${m.name}\n` +
+            `Highest applied version: ${maxApplied}\n\n` +
+            `A later migration is recorded as applied while this earlier migration ` +
+            `is not — the database migration history is non-contiguous and cannot ` +
+            `be safely reconciled by running the missing migration out of order. ` +
+            `Restore the correct application version/repository or reconcile the ` +
+            `migration history before retrying — no automatic repair is performed.`,
+        );
+      }
     }
   }
 

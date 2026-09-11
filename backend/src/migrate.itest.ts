@@ -229,6 +229,179 @@ test("MIG-RUNNER-010: the deployment gate stops the server on collision", { skip
 });
 
 // ---------------------------------------------------------------------------
+// MIG-RUNNER-011..019 — bidirectional migration-history validation (AWM-MIG-005)
+// ---------------------------------------------------------------------------
+
+// Reusable synthetic migrations that create/track their own marker tables.
+const mig = (marker: string) => ({
+  up: `CREATE TABLE ${marker} (id int);`, down: `DROP TABLE IF EXISTS ${marker};`,
+});
+const one = mig("mr_one"), two = mig("mr_two"), three = mig("mr_three"), four = mig("mr_four");
+
+test("MIG-RUNNER-011: DB contains a migration ABSENT from the repository → FAIL (unknown)", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const full = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+    "003_unknown_branch_change.up.sql": three.up, "003_unknown_branch_change.down.sql": three.down,
+  });
+  assert.equal(runMigrate(full).status, 0);
+  const before = await migRows();
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+  });
+  const r = runMigrate(repo);
+  assert.notEqual(r.status, 0, "must exit non-zero");
+  assert.match(r.out, /[Uu]nknown applied migration/);
+  assert.match(r.out, /3_unknown_branch_change/);
+  assert.deepEqual(await migRows(), before, "schema_migrations unchanged");
+});
+
+test("MIG-RUNNER-012: a removed historical migration is detected even when later ones match → FAIL", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const full = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_old_security_fix.up.sql": two.up, "002_old_security_fix.down.sql": two.down,
+    "003_third.up.sql": three.up, "003_third.down.sql": three.down,
+  });
+  assert.equal(runMigrate(full).status, 0);
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "003_third.up.sql": three.up, "003_third.down.sql": three.down,
+  });
+  const r = runMigrate(repo);
+  assert.notEqual(r.status, 0, "must fail — the removed migration 002 is still recorded");
+  assert.match(r.out, /[Uu]nknown applied migration/);
+  assert.match(r.out, /2_old_security_fix/);
+});
+
+test("MIG-RUNNER-013: exact history match → PASS, no re-execution, no false collision", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const dir = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+    "003_third.up.sql": three.up, "003_third.down.sql": three.down,
+  });
+  assert.equal(runMigrate(dir).status, 0);
+  const before = await migRows();
+  const r = runMigrate(dir);
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(await migRows(), before, "no re-execution, no false collision");
+});
+
+test("MIG-RUNNER-014: database ahead of repository → FAIL", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const full = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+    "003_third.up.sql": three.up, "003_third.down.sql": three.down,
+    "004_fourth.up.sql": four.up, "004_fourth.down.sql": four.down,
+  });
+  assert.equal(runMigrate(full).status, 0);
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+    "003_third.up.sql": three.up, "003_third.down.sql": three.down,
+  });
+  const r = runMigrate(repo);
+  assert.notEqual(r.status, 0, "code behind DB must fail");
+  assert.match(r.out, /[Uu]nknown applied migration/);
+  assert.match(r.out, /4_fourth/);
+});
+
+test("MIG-RUNNER-015: repository ahead of database (normal upgrade) → PASS", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const base = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+  });
+  assert.equal(runMigrate(base).status, 0);
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+    "003_third.up.sql": three.up, "003_third.down.sql": three.down,
+    "004_fourth.up.sql": four.up, "004_fourth.down.sql": four.down,
+  });
+  const r = runMigrate(repo);
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual((await migRows()).map((m) => m.version), ["1", "2", "3", "4"]);
+  assert.equal(await tableExists("mr_three"), true);
+  assert.equal(await tableExists("mr_four"), true);
+});
+
+test("MIG-RUNNER-016: an unknown DB migration blocks a pending repo migration (validate before executing)", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const base = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+  });
+  assert.equal(runMigrate(base).status, 0);
+  await q(`INSERT INTO schema_migrations (version, name) VALUES (99, 'manual_change')`);
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+    "003_third.up.sql": three.up, "003_third.down.sql": three.down,
+  });
+  const r = runMigrate(repo);
+  assert.notEqual(r.status, 0, "must fail on the unknown v99");
+  assert.match(r.out, /[Uu]nknown applied migration/);
+  assert.match(r.out, /99/);
+  assert.equal(await tableExists("mr_three"), false, "pending migration 003 MUST NOT execute");
+  assert.deepEqual((await migRows()).map((m) => m.version), ["1", "2", "99"], "schema_migrations unchanged");
+});
+
+test("MIG-RUNNER-017: same version / different name still fails (Direction A preserved)", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const applied = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_old_name.up.sql": two.up, "002_old_name.down.sql": two.down,
+  });
+  assert.equal(runMigrate(applied).status, 0);
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_new_name.up.sql": two.up, "002_new_name.down.sql": two.down,
+  });
+  const r = runMigrate(repo);
+  assert.notEqual(r.status, 0);
+  assert.match(r.out, /collision/i);
+  assert.match(r.out, /old_name/);
+  assert.match(r.out, /new_name/);
+});
+
+test("MIG-RUNNER-018: duplicate source migration version still fails before executing (preserved)", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const dir = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_a.up.sql": "CREATE TABLE mr_dup_a (id int);",
+    "002_b.up.sql": "CREATE TABLE mr_dup_b (id int);",
+  });
+  const r = runMigrate(dir);
+  assert.notEqual(r.status, 0);
+  assert.match(r.out, /[Dd]uplicate migration version/);
+  assert.deepEqual(await migRows(), [], "nothing applied");
+});
+
+test("MIG-RUNNER-019: a history gap (earlier migration unrecorded, later applied) → FAIL", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  // Apply 001 only, then plant a later applied row (003) with 002 unrecorded.
+  const only1 = mkMigDir({ "001_first.up.sql": one.up, "001_first.down.sql": one.down });
+  assert.equal(runMigrate(only1).status, 0);
+  await q(`INSERT INTO schema_migrations (version, name) VALUES (3, 'third')`);
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+    "003_third.up.sql": three.up, "003_third.down.sql": three.down,
+  });
+  const r = runMigrate(repo);
+  assert.notEqual(r.status, 0, "non-contiguous history must fail");
+  assert.match(r.out, /[Gg]ap/);
+  assert.match(r.out, /2_second/);
+  assert.equal(await tableExists("mr_two"), false, "the missing intermediate must NOT be run out of order");
+  assert.deepEqual((await migRows()).map((m) => m.version), ["1", "3"], "schema_migrations unchanged");
+});
+
+// ---------------------------------------------------------------------------
 // MIG-CONSTRAINT — AWM-MIG-004, roles-scoped ceiling constraint (migration 026)
 // ---------------------------------------------------------------------------
 

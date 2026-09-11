@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Bidirectional migration-history validation (AWM-MIG-005)
+
+### Security
+- **AWM-MIG-005 (P1) — Migration history is now validated in both directions
+  before any pending migration runs.** The runner previously validated only
+  repository→database (a repo migration recorded under a different name). It never
+  checked database→repository, so a database containing an applied migration the
+  codebase does not know about — DB ahead of code, wrong branch, stale artifact,
+  rolled-back image, a removed historical migration, or a manually-applied one —
+  went undetected: `pending` was empty, the runner exited 0, and the app started
+  against an unknown schema. `backend/src/migrate.ts` now, before computing
+  pending migrations, additionally:
+  - **Direction B:** rejects any applied migration absent from the repository
+    (`Unknown applied migration detected …`).
+  - **Contiguity:** requires the applied history to be an exact prefix of the
+    repository's ordered versions — a gap (an earlier migration unrecorded while a
+    later one is applied) fails (`Migration history gap detected …`) rather than
+    running the missing migration out of order.
+  Both throw before executing anything → non-zero exit → the deploy gate
+  (`migrate up || exit 1`) stops the server; `schema_migrations` and the schema
+  are untouched; no automatic repair; no secrets logged. Normal upgrades
+  (repository ahead of an exact DB prefix) still apply pending migrations.
+- **No new permission** and **no RBAC-matrix change** — migration-runner hardening
+  only.
+
+### Tests
+- `src/migrate.itest.ts` MIG-RUNNER-011..019 (real runner as a subprocess vs real
+  PostgreSQL): unknown DB migration, DB-ahead, removed historical migration,
+  history gap, and unknown-migration-blocks-pending all fail closed with the
+  pending migration not executed and `schema_migrations` unchanged; exact-match
+  and repository-ahead upgrades pass; same-version/different-name and duplicate
+  source versions still fail (preserved).
+
+### Residual (documented, not implemented)
+- Migration identity remains `version + name` with **no checksum**, so an edit to
+  an already-applied migration file is undetected (P3). Recommended future model:
+  `version, name, checksum, applied_at`, verified fail-closed on mismatch.
+
+---
+
 ## [Unreleased] — Migration-runner fail-closed hardening (AWM-MIG-003, AWM-MIG-004)
 
 ### Security
