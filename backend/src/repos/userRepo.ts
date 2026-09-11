@@ -90,19 +90,38 @@ export class UserRepository {
     return rowToUser(rows[0]);
   }
 
-  /** Assign a user to a company and (optionally) an org unit. */
-  async setOrg(id: string, companyId: string | null, orgUnitId: string | null): Promise<User> {
-    const { rows } = await this.pool.query<UserRow>(
-      `UPDATE users SET company_id = $2, org_unit_id = $3, updated_at = NOW() WHERE id = $1 RETURNING ${COLS}`,
-      [id, companyId, orgUnitId],
-    );
-    if (!rows[0]) throw Errors.UserNotFound();
-    // SEC-003: keep the tenant tag on the user's owned resources consistent when
-    // they move companies, so a shared host/note follows its owner into the new
-    // company instead of remaining visible to the old one (stale company_id).
-    await this.pool.query(`UPDATE hosts SET company_id = $2 WHERE user_id = $1`, [id, companyId]);
-    await this.pool.query(`UPDATE notes SET company_id = $2 WHERE user_id = $1`, [id, companyId]);
-    return rowToUser(rows[0]);
+  /**
+   * Assign a user to a company and (optionally) an org unit and role — as ONE
+   * atomic transaction (SEC-020/§8). When `role` is provided it is applied in
+   * the same commit as the company/org move, so a company move and its required
+   * role replacement can never half-apply and leave `user.company_id !=
+   * role.company_id`. Passing `undefined` for role leaves it unchanged.
+   */
+  async setOrg(id: string, companyId: string | null, orgUnitId: string | null, role?: string): Promise<User> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const setRole = role !== undefined;
+      const { rows } = await client.query<UserRow>(
+        `UPDATE users SET company_id = $2, org_unit_id = $3,
+                          role = CASE WHEN $4::boolean THEN $5 ELSE role END,
+                          updated_at = NOW()
+         WHERE id = $1 RETURNING ${COLS}`,
+        [id, companyId, orgUnitId, setRole, role ?? null],
+      );
+      if (!rows[0]) throw Errors.UserNotFound();
+      // SEC-003: keep the tenant tag on the user's owned resources consistent
+      // when they move companies (shared host/note follows its owner).
+      await client.query(`UPDATE hosts SET company_id = $2 WHERE user_id = $1`, [id, companyId]);
+      await client.query(`UPDATE notes SET company_id = $2 WHERE user_id = $1`, [id, companyId]);
+      await client.query("COMMIT");
+      return rowToUser(rows[0]);
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 
   async getByUsername(username: string): Promise<User> {

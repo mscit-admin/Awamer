@@ -63,3 +63,29 @@ export async function secureDelete(key: string): Promise<void> {
   }
   await invoke("keyring_delete", { key });
 }
+
+/**
+ * SEC-019A — legacy browser refresh-token keys that older builds wrote to
+ * localStorage before the HttpOnly-cookie design. They are long-lived auth
+ * material and must not linger in script-readable storage.
+ */
+export const LEGACY_REFRESH_KEYS = ["netsphere.refresh_token"] as const;
+
+/**
+ * Remove legacy browser-stored refresh tokens at startup. No-op under Tauri
+ * (its refresh token lives in the OS keyring, not localStorage) and safe when
+ * storage is unavailable. `storage`/`tauri` are injectable for tests. Does NOT
+ * touch unrelated preferences (e.g. `netsphere.lock`).
+ */
+export function cleanupLegacyBrowserAuth(opts: { storage?: Storage | null; tauri?: boolean } = {}): void {
+  const underTauri = opts.tauri ?? isTauri;
+  if (underTauri) return;
+  let store: Storage | null | undefined = opts.storage;
+  if (store === undefined) {
+    try { store = typeof window !== "undefined" ? window.localStorage : null; } catch { store = null; }
+  }
+  if (!store) return;
+  for (const key of LEGACY_REFRESH_KEYS) {
+    try { store.removeItem(key); } catch { /* ignore */ }
+  }
+}
