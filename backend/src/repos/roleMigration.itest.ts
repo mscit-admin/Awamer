@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
-import { dbSkip, DATABASE_URL } from "../test/db.js";
+import { dbSkip, DATABASE_URL, recreateDatabase, dropDatabaseQuiet } from "../test/db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIG024 = fs.readFileSync(path.resolve(__dirname, "..", "..", "migrations", "024_fix_cross_tenant_roles.up.sql"), "utf8");
@@ -37,11 +37,15 @@ before(async () => {
   migUrl = `${base.protocol}//${base.username}:${base.password}@${base.host}/${MIGDB}`;
   const adminUrl = `${base.protocol}//${base.username}:${base.password}@${base.host}/postgres`;
   admin = new Pool({ connectionString: adminUrl });
-  await admin.query(`DROP DATABASE IF EXISTS ${MIGDB} WITH (FORCE)`).catch(async () => { await admin.query(`DROP DATABASE IF EXISTS ${MIGDB}`); });
-  await admin.query(`CREATE DATABASE ${MIGDB}`);
-  // MIG-RBAC-006: migrate the fresh DB up realistically (001..024).
+  // Swallow async idle-client errors from server-side connection termination
+  // (parallel sibling tests' DROP DATABASE ... WITH (FORCE)); teardown noise,
+  // not assertion failures.
+  admin.on("error", () => {});
+  await recreateDatabase(admin, MIGDB);
+  // MIG-RBAC-006: migrate the fresh DB up realistically (001..latest).
   execSync(`npx tsx src/migrate.ts up`, { env: { ...process.env, DATABASE_URL: migUrl }, stdio: "ignore" });
   pool = new Pool({ connectionString: migUrl });
+  pool.on("error", () => {});
 
   c.A = await mkCompany("MG A"); c.B = await mkCompany("MG B"); c.C = await mkCompany("MG C");
   // MIG-RBAC-001: single-company role (users only in A).
@@ -60,7 +64,7 @@ before(async () => {
 after(async () => {
   if (dbSkip) return;
   await pool?.end().catch(() => {});
-  await admin.query(`DROP DATABASE IF EXISTS ${MIGDB} WITH (FORCE)`).catch(() => {});
+  if (admin) await dropDatabaseQuiet(admin, MIGDB);
   await admin?.end().catch(() => {});
 });
 

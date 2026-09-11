@@ -1,13 +1,20 @@
 /**
  * Thin wrapper around the Rust-side keyring commands.
  *
- * In the native desktop app, secrets live in the OS keyring via Tauri.
- * When running as a plain web app (no Tauri — e.g. served from nginx in a
- * browser), we fall back to localStorage so the session survives a page
- * reload. localStorage is less secure than an OS keychain (it's readable by
- * any script on the origin), but it's the standard trade-off for a browser
- * client and keeps the web build usable. If even localStorage is unavailable
- * (private mode, SSR, tests), we degrade to in-memory storage.
+ * Auth model by runtime:
+ *   - Native desktop (Tauri): secrets live in the OS keyring.
+ *   - Browser: the long-lived REFRESH token is NOT stored here at all — it is
+ *     held in an HttpOnly, script-inaccessible cookie set by the server. The
+ *     legacy `netsphere.refresh_token` localStorage entry from older browser
+ *     builds is a security liability and is purged at startup
+ *     (see `cleanupLegacyBrowserAuth` / SEC-019A). No refresh token must ever
+ *     be written to localStorage in the browser build.
+ *
+ * This wrapper is therefore used, in the browser, only for NON-refresh,
+ * per-tab conveniences (e.g. the app-lock preference), where a localStorage
+ * fallback is acceptable. localStorage is readable by any script on the origin,
+ * so it must not hold long-lived auth material. If even localStorage is
+ * unavailable (private mode, SSR, tests), we degrade to in-memory storage.
  */
 import { invoke } from "@tauri-apps/api/core";
 

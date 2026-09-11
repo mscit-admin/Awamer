@@ -27,6 +27,42 @@ export async function closePool(): Promise<void> {
   }
 }
 
+/**
+ * Drop and recreate a dedicated test database, retrying transient provisioning
+ * errors. Integration tests that need a *fresh, isolated* database
+ * (e.g. migration tests) run in parallel under the node:test file runner, so
+ * concurrent `CREATE DATABASE` / `DROP DATABASE ... WITH (FORCE)` calls can
+ * momentarily contend on the shared template (`object_in_use` / lock-not-
+ * available / connection-terminated). This is a provisioning race, not a
+ * schema/assertion problem — retry with a short backoff makes it deterministic.
+ * `name` must be a trusted, test-controlled identifier (it is interpolated).
+ */
+export async function recreateDatabase(admin: Pool, name: string, attempts = 20): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      await admin.query(`CREATE DATABASE ${name}`);
+      return;
+    } catch (e) {
+      if (attempt >= attempts) throw e;
+      await new Promise((r) => setTimeout(r, 120 * attempt));
+    }
+  }
+}
+
+/** Best-effort drop of a dedicated test database with the same retry behaviour. */
+export async function dropDatabaseQuiet(admin: Pool, name: string, attempts = 20): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      return;
+    } catch (e) {
+      if (attempt >= attempts) return; // teardown is best-effort
+      await new Promise((r) => setTimeout(r, 120 * attempt));
+    }
+  }
+}
+
 /** Insert a throwaway user (role must already exist in `roles`) and return its id. */
 export async function seedUser(role = "user"): Promise<string> {
   const { rows } = await getPool().query<{ id: string }>(
