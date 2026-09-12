@@ -228,3 +228,29 @@ Per-finding record of the remediation program. Baseline in
   `getAuditWriteFailuresTotal()` into monitoring.
 - **Remaining risk:** audit remains fail-open by design (documented); a durable
   outbox for the most sensitive actions is a possible future hardening.
+
+---
+
+## SEC-INFRA-001 — Main API container root + NET_ADMIN  (Phase 8)  — ACCEPTED TEMPORARY ARCHITECTURAL RISK
+
+- **Status:** NOT FIXED — accepted, documented risk (per §43). See
+  `docs/SECURITY_SEC-INFRA-001.md`.
+- **Root cause:** the `auth-service` container runs root + `NET_ADMIN` +
+  `/dev/net/tun` because the backend spawns OpenVPN in-process.
+- **Decision:** the correct fix is an architectural split into a dedicated,
+  minimally-privileged `vpn-helper` service (IPC over a Unix socket, structured
+  allowlisted commands) leaving the API container unprivileged. That split
+  cannot be built AND runtime-verified in this environment (no Docker daemon, no
+  `/dev/net/tun`, no live OpenVPN), and shipping it unverified would be a fake
+  fix the program forbids. It is therefore documented and scheduled, not faked.
+- **Existing mitigations (retained):** `cap_drop: ALL` + only `NET_ADMIN`;
+  `no-new-privileges`; not `--privileged`; backend bound to 127.0.0.1; OpenVPN
+  spawned with an arg array (no shell); `assertSafeOvpnConfig` dangerous-directive
+  filtering + forced `--script-security 1`; admin-gated VPN routes.
+- **Files modified:** `docs/SECURITY_SEC-INFRA-001.md` (new — risk, blast radius,
+  mitigations, required future architecture). No runtime privilege change (would
+  break VPN without the helper).
+- **Tests added:** none (documentation/risk-acceptance).
+- **Remaining risk:** an API RCE/escape runs as root with NET_ADMIN + TUN;
+  mitigated as above; full remediation requires the helper split in a dedicated
+  cycle with a real Docker + TUN test host.
