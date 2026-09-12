@@ -9,6 +9,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Migration artifact integrity (AWM-MIG-006)
+
+### Security
+- **AWM-MIG-006 (P1) — A migration is recorded as applied only when its required
+  `.up.sql` exists and contains executable SQL.** The loader built a migration
+  from whichever of `.up.sql`/`.down.sql` it saw first and initialised `up` to
+  `""`, so a version shipped with only a `.down.sql` had `up === ""`; PostgreSQL
+  accepts an empty query string, so the runner executed nothing and still recorded
+  the migration as applied. `backend/src/migrate.ts` now models `up`/`down` as
+  optional (`undefined` = file absent, never an empty-string stand-in) and, during
+  discovery — before DB history validation and before any transaction — throws
+  `MigrationArtifactError` when a migration's `.up.sql` is missing or contains no
+  executable SQL (whitespace/comments only; comment-prefixed real SQL stays
+  valid). The apply loop re-guards `up` so an empty query can never be recorded.
+  This fails closed with a non-zero exit (stopping the deploy gate), leaving
+  `schema_migrations` and the schema untouched, and blocking later migrations —
+  even when the database already records that version (an incomplete repo artifact
+  is rejected rather than reported "already applied").
+- **`.down.sql` policy (Option A, documented):** `.down.sql` is optional;
+  `migrate down` fails clearly (`No down migration exists for …`, non-zero) when
+  the target migration has no executable down SQL, never running an empty rollback
+  or deleting a history row without reverting.
+- **No new permission** and **no RBAC-matrix change** — migration-runner hardening
+  only.
+
+### Tests
+- `src/migrate.itest.ts` MIG-RUNNER-020..028 (real runner as a subprocess vs real
+  PostgreSQL): down-only migration, empty `.up.sql`, invalid-artifact-blocks-later,
+  no-history-mutation, deploy-gate-stops-server, and applied-but-missing-`.up.sql`
+  all fail closed; complete pairs and up-only `migrate up` pass; rolling back an
+  up-only migration fails clearly.
+
+---
+
+## [Unreleased] — Bidirectional migration-history validation (AWM-MIG-005)
+
+### Security
+- **AWM-MIG-005 (P1) — Migration history is now validated in both directions
+  before any pending migration runs.** The runner previously validated only
+  repository→database (a repo migration recorded under a different name). It never
+  checked database→repository, so a database containing an applied migration the
+  codebase does not know about — DB ahead of code, wrong branch, stale artifact,
+  rolled-back image, a removed historical migration, or a manually-applied one —
+  went undetected: `pending` was empty, the runner exited 0, and the app started
+  against an unknown schema. `backend/src/migrate.ts` now, before computing
+  pending migrations, additionally:
+  - **Direction B:** rejects any applied migration absent from the repository
+    (`Unknown applied migration detected …`).
+  - **Contiguity:** requires the applied history to be an exact prefix of the
+    repository's ordered versions — a gap (an earlier migration unrecorded while a
+    later one is applied) fails (`Migration history gap detected …`) rather than
+    running the missing migration out of order.
+  Both throw before executing anything → non-zero exit → the deploy gate
+  (`migrate up || exit 1`) stops the server; `schema_migrations` and the schema
+  are untouched; no automatic repair; no secrets logged. Normal upgrades
+  (repository ahead of an exact DB prefix) still apply pending migrations.
+- **No new permission** and **no RBAC-matrix change** — migration-runner hardening
+  only.
+
+### Tests
+- `src/migrate.itest.ts` MIG-RUNNER-011..019 (real runner as a subprocess vs real
+  PostgreSQL): unknown DB migration, DB-ahead, removed historical migration,
+  history gap, and unknown-migration-blocks-pending all fail closed with the
+  pending migration not executed and `schema_migrations` unchanged; exact-match
+  and repository-ahead upgrades pass; same-version/different-name and duplicate
+  source versions still fail (preserved).
+
+### Residual (documented, not implemented)
+- Migration identity remains `version + name` with **no checksum**, so an edit to
+  an already-applied migration file is undetected (P3). Recommended future model:
+  `version, name, checksum, applied_at`, verified fail-closed on mismatch.
+
+---
+
 ## [Unreleased] — Migration-runner fail-closed hardening (AWM-MIG-003, AWM-MIG-004)
 
 ### Security
