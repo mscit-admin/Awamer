@@ -21,17 +21,13 @@ RUN npm prune --omit=dev
 # =====================================================
 FROM node:20-alpine
 
-# wget+tini for runtime; iputils/traceroute power the Network diagnostics tools.
-# openvpn powers backend-runtime VPN profiles. The container's main process runs
-# as the non-root `app` user, but openvpn must create a tun device and shell out
-# to `ip` to configure the interface/routes. Per-binary file capabilities are
-# unreliable here (they don't carry into the `ip` child on many kernels), so
-# make openvpn setuid-root: when `app` execs it, openvpn — and every `ip` it
-# runs — is root and has the privileges it needs. The Node service stays
-# non-root. Still needs `cap_add: NET_ADMIN` + the /dev/net/tun device from
-# docker-compose.production.yml so NET_ADMIN is in the container's bounding set.
-RUN apk add --no-cache wget tini iputils traceroute openvpn iproute2 \
- && chmod u+s "$(command -v openvpn)"
+# SEC-INFRA-001 — the Internet-facing backend is UNPRIVILEGED. It does NOT
+# contain the openvpn binary and never spawns OpenVPN: all privileged VPN work is
+# delegated to the isolated `awamer-vpn-helper` container over an authenticated
+# Unix socket. This image therefore installs NO openvpn / iproute2 and sets no
+# setuid bit. `iputils`/`traceroute` remain for the Network diagnostics tools
+# (they use unprivileged sockets; they do not need NET_ADMIN). tini reaps procs.
+RUN apk add --no-cache wget tini iputils traceroute
 
 WORKDIR /app
 
@@ -40,7 +36,9 @@ COPY --from=builder /src/dist ./dist
 COPY package.json ./
 COPY migrations ./migrations
 
-# Drop privileges
+# Drop privileges — the service runs as a dedicated non-root user. There is no
+# openvpn/setuid in this image and no NET_ADMIN in the container, so a compromise
+# here cannot obtain privileged network-control capabilities.
 RUN addgroup -g 10001 app && adduser -D -u 10001 -G app app
 USER app:app
 

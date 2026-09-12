@@ -286,7 +286,7 @@ export function makeVpnRoutes(deps: Deps): FastifyPluginAsync {
 
     app.delete("/connections/:id", async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ok = deps.manager.remove(req.auth!.sub, id);
+      const ok = await deps.manager.remove(req.auth!.sub, id);
       if (!ok) return reply.code(404).send({ error: { code: "vpn_connection_not_found", message: "connection not found" } });
       return reply.send({ ok: true });
     });

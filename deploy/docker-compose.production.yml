@@ -74,18 +74,19 @@ services:
     image: netsphere/auth-service:${APP_VERSION:-1.6.0.1}
     container_name: netsphere-auth
     restart: unless-stopped
-    # Run as root so backend-runtime OpenVPN works: openvpn shells out to `ip`
-    # to configure the tun interface, and that child needs the privileges the
-    # container already carries (cap_add: NET_ADMIN + /dev/net/tun). Per-binary
-    # file capabilities / setuid did not reliably reach the `ip` child on this
-    # kernel; running the service as root is the standard, dependable posture
-    # for a container that manages VPN tunnels. Remove this line if you only use
-    # desktop-runtime VPN profiles and prefer the service to stay non-root.
-    user: "0:0"
+    # SEC-INFRA-001 — the Internet-facing backend runs UNPRIVILEGED. It is a
+    # dedicated non-root user, drops ALL Linux capabilities, adds none back, has
+    # NO /dev/net/tun and never spawns OpenVPN. All privileged VPN work is
+    # delegated to the isolated `awamer-vpn-helper` over an authenticated Unix
+    # socket (shared volume below). A compromise of this container therefore
+    # cannot obtain NET_ADMIN or touch the tun device.
+    user: "10001:10001"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      vpn-helper:
         condition: service_healthy
     environment:
       # ---- Database -------------------------------------------------
@@ -111,47 +112,27 @@ services:
       # ---- Rate limiting --------------------------------------------
       RATE_LIMIT_LOGIN_PER_MIN: ${RATE_LIMIT_LOGIN_PER_MIN:-10}
       RATE_LIMIT_API_PER_MIN: ${RATE_LIMIT_API_PER_MIN:-120}
+      # ---- SEC-INFRA-001: privileged VPN helper IPC ----------------
+      # The backend never spawns OpenVPN; it talks to awamer-vpn-helper over
+      # this shared Unix socket, authenticated with a high-entropy shared secret.
+      VPN_HELPER_SOCKET: /run/awamer/ipc/vpn-helper.sock
+      VPN_HELPER_SECRET: "${VPN_HELPER_SECRET:?VPN_HELPER_SECRET missing — openssl rand -hex 32}"
     ports:
-      # Bind to LOCALHOST ONLY — nginx will reverse-proxy from public 443
+      # Bind to LOCALHOST ONLY — nginx will reverse-proxy from public 443.
+      # NOTE: the backend NO LONGER publishes the OpenVPN server port; the
+      # OpenVPN server (when used) runs inside awamer-vpn-helper.
       - "127.0.0.1:8081:8081"
-      # ---- Built-in OpenVPN *server* (VPN Server page) --------------
-      # When this host acts as an OpenVPN hub, external clients dial into the
-      # VPN server's listener. Docker publishes ports statically, so the VPN
-      # server's port must be published here. The default is UDP 1194; publish
-      # both protocols so either a udp or tcp server works out of the box. If
-      # you create a VPN server on a DIFFERENT port, add it here (same
-      # protocol) and re-create the container. Remove these lines if you don't
-      # run a VPN server.
-      - "1194:1194/udp"
-      - "1194:1194/tcp"
     networks:
       - internal
-    # Backend-runtime OpenVPN profiles (client) AND the built-in OpenVPN server
-    # both need to create a tun device and manage routes. NET_ADMIN + the tun
-    # device let the openvpn binary (which carries cap_net_admin+ep from the
-    # image) bring tunnels up. ip_forward lets tunnel clients route to each
-    # other / the host. Harmless if you only use desktop-runtime VPN profiles.
-    # Least privilege (SEC-005): drop ALL Linux capabilities and add back only
-    # NET_ADMIN — the single capability the OpenVPN client/server need to bring
-    # up the tun interface and manage routes. This removes the ~13 default
-    # Docker capabilities (chown, setuid, net_raw, mknod, …) the API never uses.
-    # no-new-privileges blocks any setuid/setgid escalation from a compromised
-    # process. (The service still runs as root per `user: "0:0"` above because
-    # openvpn's `ip` child needs it on this kernel; for a deployment that uses
-    # only desktop-runtime VPN profiles, remove NET_ADMIN, the tun device, the
-    # sysctl and the `user` override to run fully unprivileged — see the note on
-    # `user` above. For stronger isolation, run VPN in a dedicated privileged
-    # sidecar and keep this API container unprivileged.)
+    volumes:
+      # Authenticated IPC channel to the privileged helper (socket only).
+      - vpn-helper-run:/run/awamer
+    # SEC-INFRA-001 — UNPRIVILEGED: drop ALL capabilities and add NONE back; no
+    # tun device; no ip_forward. no-new-privileges blocks any setuid escalation.
     cap_drop:
       - ALL
-    cap_add:
-      - NET_ADMIN
     security_opt:
       - no-new-privileges:true
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    sysctls:
-      - net.ipv4.ip_forward=1
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/healthz"]
       interval: 15s
@@ -167,11 +148,67 @@ services:
         exec node --enable-source-maps /app/dist/server.js
       "
 
+  # ===================================================================
+  # SEC-INFRA-001 — awamer-vpn-helper: the ONLY privileged component.
+  # Minimal service that performs the privileged OpenVPN lifecycle. It holds
+  # NET_ADMIN + /dev/net/tun and NOTHING else, publishes NO public port (its API
+  # is the owner-group-only Unix socket in the shared volume), and is never
+  # reachable from the Internet. If this container is unavailable, VPN operations
+  # in the backend FAIL CLOSED — the backend never falls back to local OpenVPN.
+  # ===================================================================
+  vpn-helper:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.vpn-helper
+    image: netsphere/vpn-helper:${APP_VERSION:-1.6.0.1}
+    container_name: netsphere-vpn-helper
+    restart: unless-stopped
+    # Runs as root (privileged component) but with the BACKEND's gid (10001) as
+    # its group, so the Unix socket it creates is group-owned by 10001 and the
+    # unprivileged backend can connect WITHOUT the helper needing CAP_CHOWN.
+    user: "0:10001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # For the built-in OpenVPN SERVER's per-user auth-verify child only.
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      VPN_HELPER_SOCKET: /run/awamer/ipc/vpn-helper.sock
+      VPN_HELPER_SECRET: "${VPN_HELPER_SECRET:?VPN_HELPER_SECRET missing — openssl rand -hex 32}"
+      OPENVPN_PATH: /usr/sbin/openvpn
+      VPN_RUNTIME_DIR: /var/lib/awamer/vpn-runtime
+    networks:
+      - internal
+    volumes:
+      - vpn-helper-run:/run/awamer
+    # No `ports:` — the helper never publishes a host port. (If you use the
+    # built-in OpenVPN SERVER for EXTERNAL clients, publish ONLY that server's
+    # data port here, e.g. `- "1194:1194/udp"`; that is the VPN data plane, not
+    # the — always socket-only, never network-exposed — control/IPC surface.)
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/awamer/ipc/vpn-helper.sock"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
 volumes:
   postgres-data:
     name: netsphere-postgres-data
   redis-data:
     name: netsphere-redis-data
+  vpn-helper-run:
+    name: netsphere-vpn-helper-run
 
 networks:
   internal:

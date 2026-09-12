@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — SEC-INFRA-001: privileged VPN isolation (unprivileged backend + awamer-vpn-helper)
+
+The Internet-facing backend no longer runs privileged. Previously it ran as root
+with `NET_ADMIN` + `/dev/net/tun` because it spawned OpenVPN in-process; that
+privilege is now confined to a dedicated, minimal `awamer-vpn-helper`.
+Demonstrated in a live Docker runtime — see
+`FINAL_SEC_INFRA_001_REMEDIATION_REPORT.md` and `docs/SECURITY_SEC-INFRA-001.md`.
+
+### Security / Changed
+- **Backend is now UNPRIVILEGED.** `deploy/docker-compose.production.yml`
+  `auth-service` runs `user: "10001:10001"`, `cap_drop: ALL` (nothing added),
+  no `/dev/net/tun`, `no-new-privileges`; `backend/Dockerfile` no longer installs
+  openvpn/iproute2 or sets setuid. The backend never spawns OpenVPN.
+- **New `awamer-vpn-helper`** (`backend/src/vpn-helper/`,
+  `backend/Dockerfile.vpn-helper`) — the only component with `NET_ADMIN` +
+  `/dev/net/tun` and the only one that runs OpenVPN. No published ports.
+- **Authenticated IPC** (`backend/src/vpn/helperProtocol.ts`, `helperClient.ts`)
+  over a group-owned Unix socket: HMAC-SHA256 + timestamp + nonce replay
+  protection; structured allow-listed operations only (no exec/shell/raw args).
+- **Fail-closed:** if the helper is unavailable, backend VPN operations reject
+  with `vpn_helper_unavailable` — no local-OpenVPN fallback.
+- Preserved: `assertSafeOvpnConfig` (now re-validated helper-side too), forced
+  `--script-security 1` for client tunnels, fixed openvpn path + arg array +
+  `shell:false`, per-session dir with path-traversal protection, session
+  tracking by internal ref (no arbitrary PID kill), VPN secret encryption,
+  audit, RBAC and tenant authorization.
+- New env: `VPN_HELPER_SECRET` (required for VPN), `VPN_HELPER_SOCKET`.
+- No new DB migration; no application business logic changed.
+
 ## [Unreleased] — Focused security fixes (SEC-SESSION-002, MFA fail-closed, step-up av-binding, network CIDR)
 
 Small, controlled follow-up (no broad rewrite; reuses the existing `auth_version`
