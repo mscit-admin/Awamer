@@ -43,3 +43,9 @@ yarn-debug.log*
 
 # Docker
 .docker-cache/
+
+# Installation evidence (generated at install time; may contain host details).
+# The production location is /var/log/awamer/installation; this covers the
+# in-repo fallback and any generated support bundles.
+installation-evidence/
+awamer-installation-*.tar.gz

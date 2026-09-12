@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Installation evidence & diagnostics system
+
+### Added
+- **Installation evidence, diagnostics & future-evaluation system.** Every run
+  of the official installer (`deploy/scripts/install.sh`) now automatically
+  produces a structured, **sanitized** evidence package under
+  `/var/log/awamer/installation/<RUN_ID>/` (in-repo `installation-evidence/`
+  fallback), enough to reconstruct the install, diagnose failures, and support a
+  later production-readiness evaluation. No application source, business logic,
+  security architecture, or PostgreSQL business schema was changed.
+  - New sourceable library `deploy/scripts/lib/evidence.sh`: never-overwritten
+    per-run directories (failed runs preserved), **automatic secret redaction**
+    on every write (keyed off sensitive field names + PEM/Authorization/Cookie),
+    command logging with exit codes + durations, system-info/network/preflight
+    collection, before/after component state, health/readiness probes,
+    application-revision + config SHA-256 fingerprints, a machine-readable
+    `installation-manifest.json` (pure-Bash, no runtime deps), and an
+    `INSTALLATION_REPORT.md`. Stable `AW-INSTALL-<PHASE>-NNN` error codes.
+  - `deploy/scripts/deployment-note.sh` records manual operator interventions
+    (stored, never executed); `deploy/scripts/support-bundle.sh` builds a
+    sanitized `awamer-installation-<RUN_ID>.tar.gz` with a denylist,
+    re-redaction, and a **blocking** secret scan (rejects, not warns);
+    `deploy/scripts/validate-after-reboot.sh` verifies the stack after reboot.
+  - Installer exit codes are strict (0 only on success; non-zero on any
+    mandatory-phase failure), evidence is preserved on failure, and success is
+    explicitly **not** a production-approval claim.
+  - Docs: `docs/INSTALLATION_TROUBLESHOOTING.md` (failure knowledge base with
+    DEPLOY-001/DEPLOY-002 and the INSTALL-XXX workflow) and
+    `docs/INSTALLATION_EVIDENCE.md` (how to read/note/bundle/send evidence
+    safely). Tests: `deploy/scripts/tests/evidence-test.sh` (31) and
+    `deploy/scripts/tests/install-sim-test.sh` (33 end-to-end incl. six
+    controlled-failure scenarios) — 64 passing.
+
 ## [Unreleased] — Deployment fixes (DEPLOY-001, DEPLOY-002)
 
 ### Fixed
