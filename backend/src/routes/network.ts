@@ -18,11 +18,29 @@ import dns from "node:dns/promises";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 import type { JwtService } from "../jwt/index.js";
 import type { AuditRepository } from "../repos/otherRepos.js";
+import {
+  type NetworkDiagnosticPolicy,
+  decideTargetIp,
+  decideScanCidr,
+  parseCidr,
+} from "../usecases/networkPolicy.js";
 
 interface Deps {
   jwt: JwtService;
   users: import("../repos/userRepo.js").UserRepository;
   audit: AuditRepository;
+  /**
+   * Network CIDR hardening policy (allow/deny lists). Optional; when omitted the
+   * empty default denies ALL private targets (fail-closed) and only permits
+   * public addresses.
+   */
+  policy?: NetworkDiagnosticPolicy;
+  /**
+   * Hostname resolver seam (defaults to `dns.lookup`). Injected in tests to make
+   * DNS-rebinding / TOCTOU behaviour deterministic. Returns ALL resolved
+   * addresses so the guard can reject if ANY of them is disallowed.
+   */
+  resolveHost?: (host: string) => Promise<string[]>;
 }
 
 const HOST_RE = /^[a-zA-Z0-9._-]+$/;
@@ -30,41 +48,42 @@ const hostSchema = z.string().min(1).max(253).regex(HOST_RE, "invalid host");
 
 const MAX_OUTPUT = 64 * 1024;
 
-// SEC-NET-001: block infrastructure-sensitive diagnostic targets by default.
-// Loopback, unspecified, link-local (incl. cloud metadata 169.254.169.254),
-// and multicast/reserved are refused; general RFC1918 LAN stays allowed because
-// LAN diagnostics is the tool's legitimate purpose.
-function isInfraSensitiveIp(ip: string): boolean {
-  const fam = net.isIP(ip);
-  if (fam === 4) {
-    const o = ip.split(".").map(Number);
-    const [a, b] = o as number[];
-    if (a === 127) return true;               // loopback
-    if (a === 0) return true;                  // unspecified / this-network
-    if (a === 169 && b === 254) return true;   // link-local + cloud metadata
-    if (a! >= 224) return true;                // multicast + reserved
-    return false;
-  }
-  if (fam === 6) {
-    const low = ip.toLowerCase().split("%")[0]!;
-    if (low === "::1" || low === "::") return true;
-    if (low.startsWith("fe8") || low.startsWith("fe9") || low.startsWith("fea") || low.startsWith("feb")) return true; // fe80::/10
-    if (low.startsWith("ff")) return true;     // multicast
-    if (low.startsWith("::ffff:")) return isInfraSensitiveIp(low.slice("::ffff:".length)); // mapped v4
-    return false;
-  }
-  return false;
+/** A target that failed the diagnostic policy (or could not be resolved). */
+class TargetNotAllowedError extends Error {
+  constructor(public readonly reason: string) { super("target_not_allowed"); }
 }
 
-/** Throws { code } if the host (literal or resolved) is infra-sensitive. */
-async function assertDiagnosableTarget(host: string): Promise<void> {
+/**
+ * Network CIDR hardening — resolve `host` to a concrete IP and validate it (and
+ * EVERY address it resolves to) against the policy, then return the validated IP
+ * to actually diagnose. Resolving once here and passing the resolved IP to the
+ * tool (ping/traceroute/TCP) avoids DNS-rebinding / TOCTOU: the binary never
+ * re-resolves to a different address than the one we checked. If any resolved
+ * address is disallowed, the whole request is refused (an attacker cannot mix
+ * one allowed and one sensitive address). Returns { ip, resolved } for auditing.
+ */
+async function resolveAndCheck(
+  host: string,
+  policy: NetworkDiagnosticPolicy,
+  resolve: (h: string) => Promise<string[]>,
+): Promise<{ ip: string; resolved: string[] }> {
   if (net.isIP(host)) {
-    if (isInfraSensitiveIp(host)) throw { code: "target_not_allowed" as const };
-    return;
+    const d = decideTargetIp(host, policy);
+    if (!d.allowed) throw new TargetNotAllowedError(d.reason ?? "denied");
+    return { ip: host, resolved: [host] };
   }
-  let addrs: string[] = [];
-  try { addrs = (await dns.lookup(host, { all: true })).map((a) => a.address); } catch { return; }
-  for (const a of addrs) if (isInfraSensitiveIp(a)) throw { code: "target_not_allowed" as const };
+  let addrs: string[];
+  try {
+    addrs = await resolve(host);
+  } catch {
+    throw new TargetNotAllowedError("unresolvable");
+  }
+  if (addrs.length === 0) throw new TargetNotAllowedError("unresolvable");
+  for (const a of addrs) {
+    const d = decideTargetIp(a, policy);
+    if (!d.allowed) throw new TargetNotAllowedError(d.reason ?? "denied");
+  }
+  return { ip: addrs[0]!, resolved: addrs };
 }
 
 // SEC-NET-001 §34: simple per-user request-frequency limit (per instance).
@@ -191,6 +210,11 @@ function runCommand(cmd: string, args: string[], timeoutMs: number): Promise<{ o
 }
 
 export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
+  // Default policy fails closed (no allow list → private targets denied) and the
+  // default resolver is the system DNS. Both are injectable for tests.
+  const policy: NetworkDiagnosticPolicy = deps.policy ?? { allowed: [], deny: [] };
+  const resolveHost = deps.resolveHost ?? (async (h: string) => (await dns.lookup(h, { all: true })).map((a) => a.address));
+
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     // SEC-NET-001: dedicated permission (Super Admin + Admin), NOT the broad
@@ -203,20 +227,27 @@ export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
       }
     });
 
-    const audit = (req: import("fastify").FastifyRequest, op: string, target: string, ok: boolean) =>
+    // Audit BOTH the requested host and the validated destination IP (§9), so a
+    // reviewer sees exactly what was probed even when a hostname was supplied.
+    const audit = (req: import("fastify").FastifyRequest, op: string, target: string, ok: boolean, resolvedIp: string | null = null) =>
       deps.audit.log({
         userId: req.auth!.sub, action: "network_diagnose", success: ok,
-        ipAddress: req.ip, resourceType: "network", resourceId: op, details: { op, target },
+        ipAddress: req.ip, resourceType: "network", resourceId: op, details: { op, target, resolvedIp },
       });
-    // Guard a per-host op: reject infra-sensitive targets (audited).
-    const guardHost = async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply, op: string, host: string): Promise<boolean> => {
+    // Resolve + validate a per-host op against the policy. Returns the validated
+    // IP to actually diagnose, or null after sending a 403 (audited).
+    const guardTarget = async (
+      req: import("fastify").FastifyRequest,
+      reply: import("fastify").FastifyReply,
+      op: string,
+      host: string,
+    ): Promise<{ ip: string; resolved: string[] } | null> => {
       try {
-        await assertDiagnosableTarget(host);
-        return true;
+        return await resolveAndCheck(host, policy, resolveHost);
       } catch {
         await audit(req, op, host, false);
         reply.code(403).send({ error: { code: "target_not_allowed", message: "that target is not permitted for diagnostics" } });
-        return false;
+        return null;
       }
     };
 
@@ -224,9 +255,12 @@ export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
     app.post("/ping", async (req, reply) => {
       const parsed = z.object({ host: hostSchema }).safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
-      if (!(await guardHost(req, reply, "ping", parsed.data.host))) return;
-      const r = await runCommand("ping", ["-c", "4", "-w", "10", parsed.data.host], 12_000);
-      await audit(req, "ping", parsed.data.host, r.ok);
+      const t = await guardTarget(req, reply, "ping", parsed.data.host);
+      if (!t) return;
+      // Probe the VALIDATED IP (not the hostname) so the tool cannot re-resolve
+      // to a different address (DNS-rebinding / TOCTOU).
+      const r = await runCommand("ping", ["-c", "4", "-w", "10", t.ip], 12_000);
+      await audit(req, "ping", parsed.data.host, r.ok, t.ip);
       return reply.send(r);
     });
 
@@ -234,9 +268,10 @@ export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
     app.post("/traceroute", async (req, reply) => {
       const parsed = z.object({ host: hostSchema }).safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
-      if (!(await guardHost(req, reply, "traceroute", parsed.data.host))) return;
-      const r = await runCommand("traceroute", ["-m", "20", "-w", "2", "-q", "1", parsed.data.host], 30_000);
-      await audit(req, "traceroute", parsed.data.host, r.ok);
+      const t = await guardTarget(req, reply, "traceroute", parsed.data.host);
+      if (!t) return;
+      const r = await runCommand("traceroute", ["-m", "20", "-w", "2", "-q", "1", t.ip], 30_000);
+      await audit(req, "traceroute", parsed.data.host, r.ok, t.ip);
       return reply.send(r);
     });
 
@@ -272,7 +307,9 @@ export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
       const parsed = z.object({ host: hostSchema, port: z.number().int().min(1).max(65535) }).safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       const { host, port } = parsed.data;
-      if (!(await guardHost(req, reply, "port-check", host))) return;
+      const t = await guardTarget(req, reply, "port-check", host);
+      if (!t) return;
+      const ip = t.ip; // connect to the validated IP, never a re-resolved name
       const result = await new Promise<{ ok: boolean; output: string; error?: string }>((resolve) => {
         const started = Date.now();
         const socket = new net.Socket();
@@ -287,9 +324,9 @@ export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
         socket.once("timeout", () => finish({ ok: false, output: "", error: `Port ${port} on ${host}: timed out` }));
         socket.once("error", (e: NodeJS.ErrnoException) =>
           finish({ ok: false, output: "", error: `Port ${port} on ${host}: ${e.code === "ECONNREFUSED" ? "refused (closed)" : e.message}` }));
-        socket.connect(port, host);
+        socket.connect(port, ip);
       });
-      await audit(req, "port-check", `${host}:${port}`, result.ok);
+      await audit(req, "port-check", `${host}:${port}`, result.ok, ip);
       return reply.send(result);
     });
 
@@ -304,9 +341,14 @@ export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
       const ips = expandCidr(parsed.data.cidr);
       if (!Array.isArray(ips)) return reply.code(400).send({ error: { code: "invalid_cidr", message: ips.error } });
 
-      // SEC-NET-001: refuse scanning an infra-sensitive range (loopback,
-      // link-local/metadata, multicast). RFC1918 LAN ranges remain allowed.
-      if (ips.some((ip) => isInfraSensitiveIp(ip))) {
+      // Network CIDR hardening: the requested range must be FULLY contained in a
+      // configured allowed CIDR (no allow list → denied), must not hit the deny
+      // list, and must contain no sensitive address. With no allow list this
+      // fails closed — a privileged admin can no longer scan arbitrary RFC1918.
+      const requestedCidr = parseCidr(parsed.data.cidr);
+      const decision = requestedCidr ? decideScanCidr(requestedCidr, policy) : { allowed: false as const };
+      const everyIpAllowed = ips.every((ip) => decideTargetIp(ip, policy).allowed);
+      if (!decision.allowed || !everyIpAllowed) {
         await audit(req, "scan", parsed.data.cidr, false);
         return reply.code(403).send({ error: { code: "target_not_allowed", message: "that range is not permitted for scanning" } });
       }
@@ -314,7 +356,7 @@ export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
       const ports = parsed.data.ports?.length ? parsed.data.ports : DEFAULT_SCAN_PORTS;
       const results = await pool(ips, 48, (ip) => probeHost(ip, ports, 700));
       const devices = results.filter(Boolean);
-      await audit(req, "scan", parsed.data.cidr, true);
+      await audit(req, "scan", parsed.data.cidr, true, ips[0] ?? null);
       return reply.send({ scanned: ips.length, found: devices.length, ports, devices });
     });
   };

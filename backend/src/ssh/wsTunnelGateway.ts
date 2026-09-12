@@ -16,7 +16,7 @@ import { Client } from "ssh2";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
-import { assertAuthState } from "../middleware/auth.js";
+import { verifyCurrentAccessToken } from "../middleware/auth.js";
 import { v4 as uuid } from "uuid";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
@@ -69,10 +69,10 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
 
       let userId: string;
       try {
-        const claims = await deps.jwt.verifyAccess(token);
+        // SEC-SESSION-002: verify token + live account state + auth_version, so a
+        // stale token from before a password/MFA change cannot open a new tunnel.
+        const { claims, live } = await verifyCurrentAccessToken(deps.jwt, deps.users, token);
         userId = claims.sub;
-        // AWM-SEC-021: authorize on the LIVE account state, not the stale token.
-        const live = await assertAuthState(deps.users, claims.sub);
         if (!can(live.role, "tunnels:manage")) {
           return fail("forbidden", "your role cannot open tunnels");
         }

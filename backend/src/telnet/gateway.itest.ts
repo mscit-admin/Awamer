@@ -42,7 +42,9 @@ before(async () => {
   const history = { async start() { return 1; }, async end() {} };
   // AWM-SEC-021: the gateway now validates live account state; a valid token
   // maps to an active "user" (which holds sessions:connect).
-  const users = { async getById() { return { role: "user", isActive: true, isLocked: false, lockedUntil: null, companyId: null }; } };
+  // authVersion matches the default `av` (1) embedded by issuePair, so the
+  // SEC-SESSION-002 live auth_version check passes for a valid token.
+  const users = { async getById() { return { role: "user", isActive: true, isLocked: false, lockedUntil: null, companyId: null, authVersion: 1 }; } };
   const log = createLogger(cfg);
   app = Fastify();
   await app.register(websocket);

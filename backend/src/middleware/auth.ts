@@ -56,6 +56,43 @@ export async function assertAuthState(users: AuthUserSource, sub: string): Promi
   return user;
 }
 
+/** Result of a full access-token validation: the verified claims + live state. */
+export interface CurrentAccess {
+  claims: VerifiedClaims;
+  live: AuthUserState;
+}
+
+/**
+ * SEC-SESSION-002 — the ONE authoritative access-token check used by every entry
+ * point (HTTP middleware and the direct-token WebSocket gateways). It:
+ *   1-3. verifies the JWT signature, type ("access") and expiry (`verifyAccess`);
+ *   4-7. loads the live account and rejects a deleted/disabled/locked user
+ *        (`assertAuthState`);
+ *   8.   rejects a token minted before a security-sensitive change by comparing
+ *        the token's `av` (auth_version) with the live account version;
+ *   returns the live user so callers authorize on `live.role`, never the role
+ *   embedded in the (possibly stale) token.
+ *
+ * Throws `JwtError`/`JwtExpired` for token problems and `AuthStateError`
+ * (code `session_invalidated` for the version mismatch) for live-state problems,
+ * so callers can map them to their own responses without re-implementing any of
+ * the security logic.
+ */
+export async function verifyCurrentAccessToken(
+  jwt: JwtService,
+  users: AuthUserSource,
+  token: string,
+): Promise<CurrentAccess> {
+  const claims = await jwt.verifyAccess(token); // (1-3) signature + type + expiry
+  const live = await assertAuthState(users, claims.sub); // (4-7) live account state
+  // (8) reject tokens issued before a password/MFA change. `av` is inside the
+  // signed token, so a client cannot forge or downgrade it.
+  if (claims.av !== live.authVersion) {
+    throw new AuthStateError("session_invalidated", "credentials changed; please sign in again");
+  }
+  return { claims, live };
+}
+
 export function makeAuthMiddleware(jwt: JwtService, users: AuthUserSource) {
   return async function jwtAuth(req: FastifyRequest, reply: FastifyReply) {
     const header = req.headers.authorization;
@@ -66,26 +103,22 @@ export function makeAuthMiddleware(jwt: JwtService, users: AuthUserSource) {
       return reply.code(401).send({ error: { code: "malformed_token", message: "must be Bearer token" } });
     }
     const token = header.slice("Bearer ".length);
+    // AWM-SEC-021 / SEC-SESSION-001/002: one shared check — verify the token AND
+    // require current account state (not deleted/disabled/locked) AND a matching
+    // auth_version. The live DB role replaces the (possibly stale) token role so a
+    // downgraded/moved user cannot exercise an old privilege until token expiry.
     try {
-      req.auth = await jwt.verifyAccess(token);
-    } catch {
-      return reply.code(401).send({ error: { code: "invalid_token", message: "token is invalid or expired" } });
-    }
-    // AWM-SEC-021: authorization must reflect the CURRENT account state, never
-    // the stale token. Load the live user, reject deleted/disabled/locked
-    // accounts immediately, and replace the token role with the live DB role so
-    // a downgraded/moved user cannot exercise an old privilege until token expiry.
-    try {
-      const live = await assertAuthState(users, req.auth.sub);
-      // SEC-SESSION-001: reject tokens minted before a security-sensitive change
-      // (password/MFA). The live auth_version is the source of truth; a client
-      // cannot forge or downgrade `av` (it is inside the signed token).
-      if (req.auth.av !== live.authVersion) {
-        throw new AuthStateError("session_invalidated", "credentials changed; please sign in again");
+      const { claims, live } = await verifyCurrentAccessToken(jwt, users, token);
+      claims.role = live.role;
+      req.auth = claims;
+    } catch (e) {
+      // Distinguish a bad/expired token (invalid_token) from a valid token whose
+      // account state is no longer acceptable (session_invalidated), preserving
+      // the existing response contract.
+      if (e instanceof AuthStateError) {
+        return reply.code(401).send({ error: { code: "session_invalidated", message: "your session is no longer valid" } });
       }
-      req.auth.role = live.role;
-    } catch {
-      return reply.code(401).send({ error: { code: "session_invalidated", message: "your session is no longer valid" } });
+      return reply.code(401).send({ error: { code: "invalid_token", message: "token is invalid or expired" } });
     }
   };
 }

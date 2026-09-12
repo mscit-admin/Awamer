@@ -150,7 +150,7 @@ async function main() {
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
   const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log);
-  const stepUp = new StepUpService(jwt);
+  const stepUp = new StepUpService(jwt, users);
   const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, secretBox, appSettings, refresh, activeSessions);
   const registerUC = new RegisterUseCase(users, audit, argon2);
   const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2, activeSessions);
@@ -276,7 +276,7 @@ async function main() {
   await app.register(makeHostRoutes({ hosts, audit, users, jwt }), { prefix: "/api/v1/hosts" });
   await app.register(makeHistoryRoutes({ history, hosts, audit, users, jwt }), { prefix: "/api/v1/history" });
   await app.register(makeAuditRoutes({ audit, users, jwt }), { prefix: "/api/v1/audit" });
-  await app.register(makeNetworkRoutes({ users, jwt, audit }), { prefix: "/api/v1/network" });
+  await app.register(makeNetworkRoutes({ users, jwt, audit, policy: cfg.networkDiagnostic }), { prefix: "/api/v1/network" });
   await app.register(makeBrandingRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/branding" });
   await app.register(makeOrganizationRoutes({ sessions: activeSessions, companies, units: orgUnits, users, audit, jwt, roleService }), { prefix: "/api/v1/org" });
   await app.register(makeAiRoutes({ ai: aiProviders, users, jwt }), { prefix: "/api/v1/ai" });

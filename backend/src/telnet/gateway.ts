@@ -14,7 +14,7 @@ import net from "node:net";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
-import { assertAuthState } from "../middleware/auth.js";
+import { verifyCurrentAccessToken } from "../middleware/auth.js";
 import { v4 as uuid } from "uuid";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, ConnectionHistoryRepository } from "../repos/sessionRepos.js";
@@ -108,10 +108,10 @@ export function makeTelnetGateway(deps: TelnetGatewayDeps) {
 
       let userId: string;
       try {
-        const claims = await deps.jwt.verifyAccess(token);
+        // SEC-SESSION-002: verify token + live account state + auth_version, so a
+        // stale token from before a password/MFA change cannot open a new session.
+        const { claims, live } = await verifyCurrentAccessToken(deps.jwt, deps.users, token);
         userId = claims.sub;
-        // AWM-SEC-021: authorize on the LIVE account state, not the stale token.
-        const live = await assertAuthState(deps.users, claims.sub);
         if (!can(live.role, "sessions:connect")) return fail("forbidden", "your role cannot open sessions");
       } catch {
         return fail("invalid_token", "token is invalid or expired");
