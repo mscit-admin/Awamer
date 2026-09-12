@@ -82,6 +82,19 @@ export class MFADeviceRepository {
   async delete(id: string, userId: string): Promise<void> {
     await this.pool.query(`DELETE FROM mfa_devices WHERE id = $1 AND user_id = $2`, [id, userId]);
   }
+
+  /** SEC-MFA-001 migration support: every device's id + raw secret bytes. */
+  async listAllSecrets(): Promise<{ id: string; secretEnc: Buffer }[]> {
+    const { rows } = await this.pool.query<{ id: string; secret_enc: Buffer }>(
+      `SELECT id, secret_enc FROM mfa_devices`,
+    );
+    return rows.map((r) => ({ id: r.id, secretEnc: r.secret_enc }));
+  }
+
+  /** SEC-MFA-001 migration support: replace a device's stored secret bytes. */
+  async updateSecret(id: string, secretEnc: Buffer): Promise<void> {
+    await this.pool.query(`UPDATE mfa_devices SET secret_enc = $2 WHERE id = $1`, [id, secretEnc]);
+  }
 }
 
 // =========================================================================

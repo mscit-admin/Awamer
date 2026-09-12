@@ -32,6 +32,7 @@ import { MFAUseCase } from "./usecases/mfa.js";
 import { RegisterUseCase } from "./usecases/register.js";
 import { ChangePasswordUseCase } from "./usecases/changePassword.js";
 import { PasswordResetUseCase } from "./usecases/passwordReset.js";
+import { reencryptLegacyMfaSecrets } from "./usecases/mfaMigration.js";
 import { resolveTrustedBaseUrl, assertResetEmailBaseUrl } from "./usecases/publicBaseUrl.js";
 import { PasswordResetRepository } from "./repos/passwordResetRepo.js";
 import { MailService } from "./email/mailer.js";
@@ -41,6 +42,7 @@ import { makeSessionSettingsRoutes } from "./routes/sessionSettings.js";
 
 import { makeAuthRoutes } from "./routes/auth.js";
 import { makeAuthedRoutes } from "./routes/users.js";
+import { StepUpService } from "./usecases/stepUp.js";
 import { makeAdminRoutes } from "./routes/admin.js";
 import { makeFolderRoutes, makeTagRoutes, makeCredentialRoutes } from "./routes/sessionMeta.js";
 import { makeHostRoutes, makeHistoryRoutes } from "./routes/sessionRoutes.js";
@@ -136,6 +138,9 @@ async function main() {
   await roleService.syncBuiltins();
   await roleService.reload();
 
+  // SEC-MFA-001: encrypt any legacy plaintext TOTP secrets at rest (idempotent).
+  await reencryptLegacyMfaSecrets(mfaDevices, secretBox, log);
+
   // AWM-SEC-022: registry of active long-lived remote sessions (SSH/Telnet/
   // tunnel/VNC). A security-relevant account change revokes matching sessions
   // immediately; a periodic loop revalidates live state as a fallback.
@@ -145,7 +150,8 @@ async function main() {
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
   const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log);
-  const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, appSettings, refresh, activeSessions);
+  const stepUp = new StepUpService(jwt);
+  const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, secretBox, appSettings, refresh, activeSessions);
   const registerUC = new RegisterUseCase(users, audit, argon2);
   const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2, activeSessions);
   // Email + forgot/reset password.
@@ -257,7 +263,7 @@ async function main() {
   // Public forgot/reset password (same prefix as auth).
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });
 
-  await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
+  await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt, stepUp }), { prefix: "/api/v1" });
   await app.register(makeAdminRoutes({ sessions: activeSessions, users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, users, jwt }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeSessionSettingsRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/admin/session-settings" });

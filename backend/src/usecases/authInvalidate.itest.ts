@@ -12,6 +12,7 @@ import { authenticator } from "otplib";
 import { loadConfig } from "../config/index.js";
 import { createJwt, type JwtService } from "../jwt/index.js";
 import { createArgon2 } from "../crypto/argon2.js";
+import { createSecretBox, resolveSecretKey } from "../crypto/secretBox.js";
 import { UserRepository } from "../repos/userRepo.js";
 import { MFADeviceRepository, RefreshRepository, AuditRepository } from "../repos/otherRepos.js";
 import { AppSettingsRepository } from "../repos/appSettings.js";
@@ -80,7 +81,8 @@ before(async () => {
   resetUC = new PasswordResetUseCase(users, resets, refresh,
     { baseUrl: async () => "", resetTtlMinutes: async () => 30, isConfigured: async () => false, sendPasswordReset: async () => {} } as any,
     argon2, audit, noopLog, { isProd: false, publicBaseUrl: null }, active);
-  mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, settings, refresh, active);
+  const secretBox = createSecretBox(resolveSecretKey(cfg, noopLog));
+  mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, secretBox, settings, refresh, active);
 
   app = Fastify();
   await app.register(async (a) => {

@@ -2,7 +2,15 @@ import { SignJWT, jwtVerify, errors as joseErrors } from "jose";
 import { v4 as uuid } from "uuid";
 import type { Config } from "../config/index.js";
 
-export type TokenType = "access" | "refresh" | "mfa_pending";
+export type TokenType = "access" | "refresh" | "mfa_pending" | "step_up";
+
+/** SEC-MFA-002 — verified step-up claims for a sensitive-action re-auth token. */
+export interface StepUpClaims {
+  sub: string;
+  purpose: string;
+  jti: string;
+  exp: number;
+}
 
 export interface IssuedToken {
   jti: string;
@@ -45,6 +53,9 @@ export interface JwtService {
   issueOne(userId: string, role: string, type: TokenType, ttlSec: number): Promise<IssuedToken>;
   verifyAccess(token: string): Promise<VerifiedClaims>;
   verifyRefresh(token: string): Promise<VerifiedClaims>;
+  /** SEC-MFA-002 — short-lived, single-purpose step-up token (signed w/ access key). */
+  issueStepUp(userId: string, purpose: string, ttlSec: number): Promise<IssuedToken>;
+  verifyStepUp(token: string): Promise<StepUpClaims>;
 }
 
 export function createJwt(cfg: Config): JwtService {
@@ -107,5 +118,32 @@ export function createJwt(cfg: Config): JwtService {
     },
     verifyAccess(token) { return verify(token, accessKey, "access"); },
     verifyRefresh(token) { return verify(token, refreshKey, "refresh"); },
+    async issueStepUp(userId, purpose, ttlSec) {
+      const jti = uuid();
+      const now = Math.floor(Date.now() / 1000);
+      const exp = now + ttlSec;
+      const token = await new SignJWT({ typ: "step_up", purpose })
+        .setProtectedHeader({ alg: "HS256" })
+        .setIssuer(issuer).setSubject(userId).setJti(jti)
+        .setIssuedAt(now).setNotBefore(now).setExpirationTime(exp)
+        .sign(accessKey);
+      return { jti, token, expiresAt: new Date(exp * 1000) };
+    },
+    async verifyStepUp(token) {
+      let payload;
+      try {
+        payload = (await jwtVerify(token, accessKey, { issuer })).payload;
+      } catch (err) {
+        if (err instanceof joseErrors.JWTExpired) throw new JwtExpired();
+        throw new JwtInvalid();
+      }
+      if (payload["typ"] !== "step_up") throw new JwtInvalid("jwt: wrong type");
+      return {
+        sub: String(payload.sub ?? ""),
+        purpose: String(payload["purpose"] ?? ""),
+        jti: String(payload.jti ?? ""),
+        exp: Number(payload.exp ?? 0),
+      };
+    },
   };
 }

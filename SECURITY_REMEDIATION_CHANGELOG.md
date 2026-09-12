@@ -104,3 +104,49 @@ Per-finding record of the remediation program. Baseline in
 - **Operational impact:** after any credential/MFA change users must re-login
   everywhere; live remote sessions drop immediately.
 - **Remaining risk:** none for this vector.
+
+---
+
+## SEC-MFA-001 — TOTP secrets encrypted at rest  (Phase 4)
+
+- **Files modified:** `backend/src/crypto/secretBox.ts` (`isSealedBytes`);
+  `backend/src/usecases/mfa.ts` (seal on enroll / open on verify, fail-closed);
+  `backend/src/repos/otherRepos.ts` (`listAllSecrets`, `updateSecret`);
+  `backend/src/usecases/mfaMigration.ts` (new — idempotent startup re-encryption);
+  `backend/src/server.ts` (inject secretBox; run migration at startup).
+- **Root cause:** `mfa_devices.secret_enc` stored the raw base32 TOTP secret as
+  UTF-8 (plaintext) despite its name.
+- **Fix:** the secret is sealed with the existing AES-256-GCM binary envelope
+  (`sealBytes`, random nonce, AEAD integrity) and opened on verify. Legacy rows
+  are detected (`isSealedBytes`) and re-encrypted in place by an idempotent,
+  restart-safe startup migration that logs only counts (never seed content). In
+  production the encryption key is mandatory (`resolveSecretKey` throws), so a
+  missing/wrong key fails closed — no plaintext fallback.
+- **Tests added:** MFA-CRYPT-001..008 — 6 tests, `mfaCrypt.itest.ts`.
+- **Test result:** PASS. Backend integration 130→(with MFA-STEPUP)144.
+- **Migration required:** in-code startup migration (no SQL migration needed).
+- **Operational impact:** existing authenticators keep working (secrets migrated
+  transparently on first boot after upgrade).
+- **Remaining risk:** none; secrets are AEAD-encrypted at rest.
+
+## SEC-MFA-002 — Step-up authentication for MFA changes  (Phase 4)
+
+- **Files modified:** `backend/src/jwt/index.ts` (`step_up` token type +
+  `issueStepUp`/`verifyStepUp`); `backend/src/usecases/stepUp.ts` (new —
+  short-lived, single-purpose, single-use step-up tokens);
+  `backend/src/usecases/mfa.ts` (`disableAfterStepUp`); `backend/src/routes/users.ts`
+  (`POST /auth/step-up`; enroll + disable require step-up); `server.ts` wiring.
+- **Root cause:** MFA enroll/activate required only a normal access token, so a
+  stolen access token could add/replace an authenticator.
+- **Fix:** MFA enroll and disable now require a step-up token obtained from
+  `POST /auth/step-up`, which re-verifies the password AND the current MFA code
+  (when MFA is enabled). Step-up tokens are 5-minute, purpose-bound
+  (`mfa_change`), user-bound, and single-use (consumed jti set).
+- **Tests added:** MFA-STEPUP-001..008 — 8 tests, `mfaStepUp.itest.ts`.
+- **Test result:** PASS (8/8).
+- **Migration required:** none.
+- **Operational impact:** the desktop MFA-enroll/disable UI must first call
+  `POST /auth/step-up` (password [+ current OTP]) and send the returned
+  `step_up_token` (header `x-step-up-token` or body) — a follow-up UI change.
+- **Remaining risk:** step-up single-use is per-instance (matches the documented
+  single-instance deployment); a shared store would be needed for multi-instance.
