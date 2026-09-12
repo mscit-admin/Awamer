@@ -32,6 +32,7 @@ import { MFAUseCase } from "./usecases/mfa.js";
 import { RegisterUseCase } from "./usecases/register.js";
 import { ChangePasswordUseCase } from "./usecases/changePassword.js";
 import { PasswordResetUseCase } from "./usecases/passwordReset.js";
+import { resolveTrustedBaseUrl, assertResetEmailBaseUrl } from "./usecases/publicBaseUrl.js";
 import { PasswordResetRepository } from "./repos/passwordResetRepo.js";
 import { MailService } from "./email/mailer.js";
 import { makePasswordResetRoutes } from "./routes/passwordReset.js";
@@ -150,7 +151,20 @@ async function main() {
   // Email + forgot/reset password.
   const passwordResets = new PasswordResetRepository(pool);
   const mailer = new MailService(appSettings, secretBox, log);
-  const passwordResetUC = new PasswordResetUseCase(users, passwordResets, refresh, mailer, argon2, audit, log);
+  const passwordResetUC = new PasswordResetUseCase(users, passwordResets, refresh, mailer, argon2, audit, log,
+    { isProd: cfg.isProd, publicBaseUrl: cfg.publicBaseUrl });
+
+  // SEC-RESET-001 (§5): fail closed at startup if email/reset is enabled in
+  // production but no trusted public base URL is configured (env or setting).
+  {
+    const emailEnabled = await mailer.isConfigured();
+    const trustedBase = resolveTrustedBaseUrl({
+      envBaseUrl: cfg.publicBaseUrl,
+      dbBaseUrl: await mailer.baseUrl(),
+      allowHttp: !cfg.isProd,
+    });
+    assertResetEmailBaseUrl({ isProd: cfg.isProd, emailEnabled, trustedBase });
+  }
 
   // Bootstrap admin (only if there are no users)
   await bootstrapAdmin(users, argon2, cfg, log);

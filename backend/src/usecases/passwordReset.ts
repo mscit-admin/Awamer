@@ -17,9 +17,17 @@ import type { MailService } from "../email/mailer.js";
 import type { Logger } from "../logger/index.js";
 import { Errors, DomainError } from "../domain/index.js";
 import { validatePassword } from "./register.js";
+import { resolveTrustedBaseUrl } from "./publicBaseUrl.js";
 
 function hashToken(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
+}
+
+/** Minimal config surface the reset flow needs (SEC-RESET-001). */
+export interface ResetBaseUrlConfig {
+  isProd: boolean;
+  /** Validated APP_PUBLIC_BASE_URL, or null. */
+  publicBaseUrl: string | null;
 }
 
 export class PasswordResetUseCase {
@@ -31,21 +39,57 @@ export class PasswordResetUseCase {
     private readonly argon2: Argon2Service,
     private readonly audit: AuditRepository,
     private readonly log: Logger,
+    private readonly cfg: ResetBaseUrlConfig,
   ) {}
 
-  /** Issue + email a reset token. Never throws on unknown email. */
-  async requestReset(email: string, fallbackBaseUrl: string): Promise<void> {
+  /**
+   * Issue + email a reset token. Never throws on unknown email.
+   * SEC-RESET-001: the reset link base URL comes ONLY from the trusted config
+   * (APP_PUBLIC_BASE_URL or a valid app_base_url setting) — never from request
+   * headers. In production with no trusted base URL configured, the reset is
+   * blocked (fail closed) rather than emitting a header-poisonable link.
+   */
+  async requestReset(email: string): Promise<void> {
     const user = await this.users.findByEmail(email);
     if (!user || !user.isActive) {
       this.log.info({ email }, "password reset requested for unknown/inactive account (ignored)");
       return;
     }
+
+    // Resolve the trusted base URL BEFORE creating a token (fail fast).
+    const dbBaseUrl = await this.mailer.baseUrl();
+    let base = resolveTrustedBaseUrl({
+      envBaseUrl: this.cfg.publicBaseUrl,
+      dbBaseUrl,
+      allowHttp: !this.cfg.isProd,
+    });
+    if (!base) {
+      if (this.cfg.isProd) {
+        // Fail closed: never build a reset link from request-derived data.
+        this.log.error(
+          { userId: user.id },
+          "password reset blocked: no trusted APP_PUBLIC_BASE_URL / app_base_url configured",
+        );
+        await this.audit.log({
+          userId: user.id,
+          action: "password_change",
+          success: false,
+          details: { stage: "reset_blocked_no_base_url" },
+        });
+        throw new DomainError(
+          "reset_unavailable",
+          "password reset is not available: no trusted public base URL is configured",
+        );
+      }
+      // Development/test only: an explicit safe local default (never headers).
+      base = "http://localhost:1420";
+    }
+
     const ttlMinutes = await this.mailer.resetTtlMinutes();
     const raw = randomBytes(32).toString("base64url");
     await this.resets.invalidateForUser(user.id);
     await this.resets.create(user.id, hashToken(raw), new Date(Date.now() + ttlMinutes * 60 * 1000));
 
-    const base = (await this.mailer.baseUrl()) || fallbackBaseUrl;
     // Point at the app root with the token as a query param: the root always
     // serves the SPA, so the link works even without server-side deep-link
     // (history) fallback. The app forwards it to the reset screen on load.

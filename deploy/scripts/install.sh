@@ -401,6 +401,19 @@ else
         | sudo tee "$DEPLOYMENT_CONF" >/dev/null
     ev_action "Persisted deployment config $DEPLOYMENT_CONF (AWAMER_HTTPS_PORT=$HTTPS_PORT)"
 
+    # SEC-RESET-001: record the trusted public base URL so the backend builds
+    # password-reset links from it (never from request headers). Written to the
+    # secrets env (.env.production) since the backend reads it as APP_PUBLIC_BASE_URL.
+    _pub_base="$(build_public_https_url "$NETSPHERE_DOMAIN" "$HTTPS_PORT")"
+    if [[ -f .env.production ]]; then
+        if grep -q '^APP_PUBLIC_BASE_URL=' .env.production; then
+            sed -i "s#^APP_PUBLIC_BASE_URL=.*#APP_PUBLIC_BASE_URL=${_pub_base}#" .env.production
+        else
+            printf 'APP_PUBLIC_BASE_URL=%s\n' "$_pub_base" >> .env.production
+        fi
+        ev_action "Set APP_PUBLIC_BASE_URL=${_pub_base} in .env.production (SEC-RESET-001 trusted reset link base)"
+    fi
+
     # enable_final(): point sites-enabled at the HTTPS config, validate, reload.
     # NEVER reloads on a failed `nginx -t` (keeps the running config intact).
     enable_final() {
