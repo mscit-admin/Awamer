@@ -81,16 +81,27 @@ ev_tz() { timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 
 #   * PEM private-key blocks (BEGIN … PRIVATE KEY … END).
 # We deliberately key off the FIELD NAME, so table cells like "Result: PASS"
 # are never mangled (the key there is "Result", not a secret).
-_EV_SENSITIVE_WORDS='PASSWORD|PASSWD|PASS|SECRET|TOKEN|PRIVATE[_-]?KEY|PRIVKEY|AUTHORIZATION|AUTH[_-]?TOKEN|COOKIE|API[_-]?KEY|APIKEY|JWT|CREDENTIAL|ENCRYPTION[_-]?KEY|PSK|BEARER'
+# Sensitive key-name tokens (case-insensitive). Kept deliberately broad — the
+# rule keys off the FIELD NAME, so table cells like "Result: PASS" (key
+# "Result") are untouched. NOTE: "PAT" is only matched with a leading separator
+# (`_PAT`/`-PAT`/`GITHUB PAT`) so it never eats `PATH`; "PWD" covers `DB_PWD`
+# etc. (the full env dump is gone, so the shell's own PWD no longer appears).
+_EV_SENSITIVE_WORDS='PASSWORD|PASSWD|PASS|PWD|SECRET|CLIENT[_-]?SECRET|TOKEN|PRIVATE[_-]?KEY|PRIVKEY|AUTHORIZATION|AUTH[_-]?TOKEN|COOKIE|API[_-]?KEY|APIKEY|JWT|CREDENTIAL|ENCRYPTION[_-]?KEY|ACCESS[_-]?KEY|SECRET[_-]?ACCESS[_-]?KEY|[_-]PAT|GH[_-]?PAT|GITHUB[_-]?PAT|PSK|BEARER'
 
 redact_stream() {
     # Reads stdin, writes sanitized stdout. Pure sed + awk, no deps.
-    # Order matters: redact HTTP auth/cookie headers (whole value, incl. the
-    # bearer token) BEFORE the generic KEY=value rule, which would otherwise
-    # stop at the first space and leave the token behind.
+    # Order matters:
+    #   1. Authorization/Cookie headers — redact the WHOLE value (both the
+    #      `Authorization:` header form AND the `AUTHORIZATION=` env form), so a
+    #      bearer token after a space is never left behind (§6).
+    #   2. Credential-bearing URIs — redact the `user:pass@` userinfo of any
+    #      scheme://…@host URL (§5), before the generic rule can partial-match.
+    #   3. Generic sensitive KEY=value / KEY: value (§4/§7).
+    #   4. PEM private-key blocks (dropped entirely).
     sed -E \
-        -e "s/(Authorization[[:space:]]*:[[:space:]]*).*/\1[REDACTED]/Ig" \
-        -e "s/((Set-)?Cookie[[:space:]]*:[[:space:]]*).*/\1[REDACTED]/Ig" \
+        -e "s/(AUTHORIZATION[[:space:]]*[=:][[:space:]]*).*/\1[REDACTED]/Ig" \
+        -e "s/((Set-)?Cookie[[:space:]]*[=:][[:space:]]*).*/\1[REDACTED]/Ig" \
+        -e "s#([A-Za-z][A-Za-z0-9+.-]*://)[^@/[:space:]]+@#\1[REDACTED]@#g" \
         -e "s/([A-Za-z0-9_.-]*(${_EV_SENSITIVE_WORDS})[A-Za-z0-9_.-]*)([[:space:]]*[=:][[:space:]]*)([\"']?)[^\"'[:space:],}]+([\"']?)/\1\3\4[REDACTED]\5/Ig" \
     | awk '
         BEGIN{inkey=0}
@@ -265,6 +276,17 @@ ev_error() {
         >> "${EV_META_DIR}/errors.tsv"
 }
 
+# ev_incomplete_gate <GATE> [reason]  — record a mandatory gate that did NOT
+# complete (drives PARTIAL status; machine-readable in the manifest, §30/§31).
+ev_incomplete_gate() {
+    local gate="$1"; shift || true
+    local reason="${*:-}"
+    [[ -n "$EV_RUN_DIR" ]] || return 0
+    printf '%s\t%s\n' "$(_ev_flat "$gate")" "$(_ev_flat "$(redact_text "$reason")")" \
+        >> "${EV_META_DIR}/incomplete_gates.tsv"
+    ev_action "INCOMPLETE GATE ${gate}: ${reason}"
+}
+
 # ev_warn <message>  — 11-warnings.log (kept separate from successes, §20)
 ev_warn() {
     [[ -n "$EV_RUN_DIR" ]] || return 0
@@ -350,6 +372,74 @@ ev_ver() { # ev_ver <command> [version-args...]  -> version string or NOT INSTAL
     fi
 }
 
+# collect_safe_environment  (§2/§3) — ALLOWLIST, never a full env dump.
+# Only records explicitly approved, non-secret variables useful for
+# troubleshooting. Unknown variables are ignored by design. Values still pass
+# through redaction as defence-in-depth.
+_EV_SAFE_ENV_ALLOWLIST=(
+    LANG LC_ALL LANGUAGE TZ USER LOGNAME HOME SHELL HOSTNAME TERM PATH
+    APP_ENV NODE_ENV
+    AWAMER_DOMAIN AWAMER_HTTPS_PORT NETSPHERE_DOMAIN
+    AWAMER_EVIDENCE_ROOT COMPOSE_FILE ENV_FILE WEB_ROOT
+)
+collect_safe_environment() {
+    local v
+    for v in "${_EV_SAFE_ENV_ALLOWLIST[@]}"; do
+        if [[ -n "${!v+x}" ]]; then
+            printf '%s=%s\n' "$v" "${!v}"
+        fi
+    done
+}
+
+# ---- HTTPS port + public-URL helpers (DEPLOY-PORT-001, §15/§18/§20/§21) ----
+
+# validate_https_port <port>  — 0 if a valid TCP port (1..65535), else 1.
+validate_https_port() {
+    local p="${1:-}"
+    [[ "$p" =~ ^[0-9]+$ ]] || return 1
+    # reject leading zeros / out of range / 0
+    [[ "$p" -ge 1 && "$p" -le 65535 ]] || return 1
+    [[ "${#p}" -gt 1 && "${p:0:1}" == "0" ]] && return 1
+    return 0
+}
+
+# build_public_https_url <domain> <port>  — centralized public URL (§18).
+# 443 → https://domain (no :443); any other port → https://domain:port.
+build_public_https_url() {
+    local domain="$1" port="$2"
+    if [[ "$port" == "443" ]]; then
+        printf 'https://%s' "$domain"
+    else
+        printf 'https://%s:%s' "$domain" "$port"
+    fi
+}
+
+# build_https_redirect_target <port>  — the nginx 301 target for the :80 vhost
+# (§21). Emits nginx variables literally (NOT expanded by bash).
+build_https_redirect_target() {
+    local port="$1"
+    if [[ "$port" == "443" ]]; then
+        printf 'https://$host$request_uri'
+    else
+        printf 'https://$host:%s$request_uri' "$port"
+    fi
+}
+
+# render_nginx_config <template> <domain> <port>  — safely render the nginx
+# template to stdout (§20). The port is required to be strictly numeric by the
+# caller (validate_https_port); domain is substituted literally.
+render_nginx_config() {
+    local template="$1" domain="$2" port="$3"
+    local redirect; redirect="$(build_https_redirect_target "$port")"
+    # Use awk with -v to avoid unsafe sed metacharacter issues in the values.
+    awk -v dom="$domain" -v port="$port" -v redir="$redirect" '
+        { gsub(/__HTTPS_PORT__/, port);
+          gsub(/__HTTP_REDIRECT_TARGET__/, redir);
+          gsub(/netsphere\.example\.com/, dom);
+          print }
+    ' "$template"
+}
+
 collect_system_info() {
     local f="$EV_F_SYSTEM"
     {
@@ -391,8 +481,8 @@ collect_system_info() {
         echo "----- Application revision (§40) -----"
         collect_app_revision
         echo
-        echo "----- Environment (sanitized, §8) -----"
-        env | sort
+        echo "----- Environment (safe allowlist only, §2/§3) -----"
+        collect_safe_environment
     } | redact_stream > "${EV_RUN_DIR}/${f}"
 
     # Manifest scalars
@@ -516,6 +606,21 @@ _json_array_from_tsv() {
     printf ']'
 }
 
+# Emit a JSON array of gate-name strings from an incomplete_gates.tsv (col 1).
+_json_gate_array() {
+    local file="$1"
+    printf '['
+    if [[ -f "$file" ]]; then
+        local first=1 g rest
+        while IFS=$'\t' read -r g rest; do
+            [[ -z "$g" ]] && continue
+            [[ $first -eq 1 ]] && first=0 || printf ','
+            printf '"%s"' "$(_json_escape "$g")"
+        done < "$file"
+    fi
+    printf ']'
+}
+
 # Emit a JSON object of scalar key/values from kv.tsv (last value wins).
 _json_object_from_kv() {
     printf '{'
@@ -591,7 +696,8 @@ _ev_write_manifest() {
         printf '  "migrations": %s,\n' "$(_json_array_from_tsv "${EV_META_DIR}/migrations.tsv" version name duration result)"
         printf '  "fingerprints": %s,\n' "$(_json_array_from_tsv "${EV_META_DIR}/fingerprints.tsv" label sha256)"
         printf '  "errors": %s,\n' "$(_json_array_from_tsv "${EV_META_DIR}/errors.tsv" phase operation exit_code error_code message)"
-        printf '  "warnings": %s\n' "$(_json_array_from_tsv "${EV_META_DIR}/warnings.tsv" phase message)"
+        printf '  "warnings": %s,\n' "$(_json_array_from_tsv "${EV_META_DIR}/warnings.tsv" phase message)"
+        printf '  "incomplete_gates": %s\n' "$(_json_gate_array "${EV_META_DIR}/incomplete_gates.tsv")"
         printf '}\n'
     } > "$out"
 }
@@ -649,9 +755,11 @@ _ev_write_report() {
         echo "## Nginx"
         echo
         echo '```'
-        echo "Version:  $(_ev_kv nginx_version)"
-        echo "nginx -t: $(_ev_kv nginx_config_test)"
-        echo "service:  $(_ev_kv nginx_service)"
+        echo "Version:    $(_ev_kv nginx_version)"
+        echo "nginx -t:   $(_ev_kv nginx_config_test)"
+        echo "service:    $(_ev_kv nginx_service)"
+        echo "HTTPS Port: $(_ev_kv https_port)"
+        echo "Public URL: $(_ev_kv public_url)"
         echo '```'
         echo
         echo "## TLS"
@@ -731,6 +839,18 @@ _ev_write_report() {
             echo
             echo "Exit code: $(_ev_kv failed_exit_code)   Error code: $(_ev_kv failed_error_code)"
             echo
+        fi
+        if [[ "$(_ev_kv status)" == "PARTIAL" ]]; then
+            echo "**Installation incomplete.** $(_ev_kv partial_reason)"
+            echo
+            if [[ -s "${EV_META_DIR}/incomplete_gates.tsv" ]]; then
+                echo "Incomplete gates:"
+                echo
+                echo "| Gate | Reason |"
+                echo "| ---- | ------ |"
+                _ev_md_rows "${EV_META_DIR}/incomplete_gates.tsv" 2
+                echo
+            fi
         fi
         echo "---"
         echo

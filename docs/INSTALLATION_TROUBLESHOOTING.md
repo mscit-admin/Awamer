@@ -27,6 +27,8 @@ cause (§26). When a new installation failure occurs, follow the workflow in
 | `AW-INSTALL-MIGRATION-001` | migrations | a migration failed |
 | `AW-INSTALL-DOCKER-001` | docker | compose config invalid / daemon down |
 | `AW-INSTALL-READY-001` | readiness | `/readyz` never reached 200 |
+| `AW-INSTALL-PORT-001` | nginx | invalid HTTPS port (not 1..65535) |
+| `AW-INSTALL-PORT-002` | nginx | selected HTTPS port in use by a non-nginx process |
 | `AW-INSTALL-<PHASE>-000` | any | unexpected/unclassified command failure |
 
 ---
@@ -77,6 +79,44 @@ cause (§26). When a new installation failure occurs, follow the workflow in
   config that fails `nginx -t`.
 
 ---
+
+### EVID-STATE-001 — Skipped TLS reported as SUCCESS
+
+- **Problem ID:** EVID-STATE-001
+- **Symptoms:** Operator declines certbot issuance (or skips nginx), yet the
+  installer finalized `SUCCESS` and exited 0 — automation then treats a site
+  with no active HTTPS as production-ready.
+- **Root cause:** The finalize path was unconditionally `SUCCESS`.
+- **Resolution:** Skipping TLS now yields **PARTIAL** (exit `2`) with
+  `incomplete_gates` (`TLS_CERTIFICATE`, `HTTPS_ACTIVATION`); a certbot
+  **failure** remains **FAILED** (exit 1). The installer never prints
+  "production ready/approved" for PARTIAL.
+- **Verification:** `INSTALL-STATE-001..004` in
+  `deploy/scripts/tests/security-port-test.sh`.
+
+### DEPLOY-PORT-001 — Fixed / inconsistent HTTPS port
+
+- **Problem ID:** DEPLOY-PORT-001
+- **Symptoms:** nginx hardcoded `6655` while the installer printed
+  `https://domain` (no port) and firewall guidance said `443` — a mismatch; no
+  way to choose the port.
+- **Root cause:** Hardcoded port in the nginx config; no operator input; URL
+  strings duplicated across scripts.
+- **Resolution:** Operator-selected port (default 443, `AWAMER_HTTPS_PORT` for
+  automation), a templated nginx config rendered by `render_nginx_config`, a
+  centralized `build_public_https_url`, propagation everywhere, persistence in
+  `/etc/awamer/deployment.conf`, and preservation on update.
+- **Verification:** `PORT-001..008` + rendered `nginx -t` for 443/6655/8443 in
+  `security-port-test.sh`.
+
+### EVID-SEC-001 / -002 — Evidence secret leakage / bootstrap password shown
+
+- **Problem IDs:** EVID-SEC-001 (full `env` dump), EVID-SEC-002 (bootstrap
+  password printed).
+- **Resolution:** `collect_system_info` now uses an env **allowlist**
+  (`collect_safe_environment`), redaction covers credential URLs / `AUTHORIZATION=`
+  / more key names, and the installer never prints/greps the bootstrap password.
+- **Verification:** `EVID-SEC-TEST-001..007`, `EVID-BOOT-001/-002`.
 
 <a name="future-failure-workflow"></a>
 ## Future failure workflow (§27)

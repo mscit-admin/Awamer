@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Installation evidence security + selectable HTTPS port
+
+### Security / Fixed
+- **EVID-SEC-001 — evidence no longer dumps the full environment.**
+  `collect_system_info` now records an explicit **allowlist** of safe variables
+  (`collect_safe_environment`) instead of `env | sort`, so unknown/secret-bearing
+  variables are never written to evidence.
+- **Redaction hardened (defense-in-depth).** Credential-bearing URLs
+  (`postgres://user:pass@…`, `redis://:pass@…`, etc.) are redacted to
+  `scheme://[REDACTED]@host`; the `AUTHORIZATION=` env form is fully redacted (no
+  trailing token); added `PWD`, `CLIENT_SECRET`, `ACCESS_KEY`, `GITHUB_PAT` and
+  URL coverage. The support-bundle scanner also flags credential URIs, and
+  `RUN_ID` is validated / canonicalized against the evidence root (no path
+  traversal or symlink escape).
+- **EVID-SEC-002 — bootstrap admin password is never displayed.** Removed the
+  `grep BOOTSTRAP_ADMIN` prints from install.sh; the installer shows only the
+  non-secret username/email and `Password: [not displayed]`. The password lives
+  solely in `.env.production` (mode 600).
+- **DEPLOY-PORT-001 — operator-selectable public HTTPS port.** Default **443**;
+  choose another (e.g. 6655/8443) interactively or via `AWAMER_HTTPS_PORT`. The
+  nginx config is now a template rendered with the chosen port (`listen`,
+  IPv4/IPv6, HTTP→HTTPS redirect), and the port propagates to the public URL,
+  `VITE_API_BASE_URL`, firewall guidance, evidence report/manifest, and
+  `update.sh`. The port is validated (1..65535), checked for conflicts, and
+  persisted (non-secret) to `/etc/awamer/deployment.conf`; `update.sh` preserves
+  it and requires explicit confirmation to change it. A centralized
+  `build_public_https_url` removes duplicated URL logic. ACME HTTP-01 stays on
+  port 80 regardless of the HTTPS port.
+- **EVID-STATE-001 — incomplete TLS is no longer reported as SUCCESS.** Skipping
+  certificate issuance (or nginx) now finalizes **PARTIAL** (exit code **2**)
+  with machine-readable `incomplete_gates` in the manifest; a certbot **failure**
+  remains **FAILED** (exit 1). The installer never claims "production ready" for
+  PARTIAL.
+- **EVID-TEST-001 — tests.** New `deploy/scripts/tests/security-port-test.sh`
+  (62 checks: EVID-SEC-TEST-001..007, EVID-BOOT-001/-002, PORT-001..008 +
+  rendered `nginx -t` for 443/6655/8443, INSTALL-STATE-001..004). Existing
+  evidence (31) and installer-sim (33) suites still pass; READY-DEPLOY / CFG-BOOT
+  / AUTHZ-STATE regression gates (43) unchanged and green. No application source,
+  business logic, or schema was modified.
+
 ## [Unreleased] — Installation evidence & diagnostics system
 
 ### Added

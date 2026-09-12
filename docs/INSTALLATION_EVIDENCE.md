@@ -103,6 +103,37 @@ Before archiving, the tool **re-runs redaction** over every file and then
 **scans** the staged bundle for secret patterns. If any secret survives, it
 **refuses** to create the archive (it does not merely warn).
 
+## HTTPS port (DEPLOY-PORT-001)
+
+The public HTTPS port is chosen during installation (default **443**; override
+with `AWAMER_HTTPS_PORT` for automation). It is persisted, non-secret, to
+`/etc/awamer/deployment.conf` and recorded in the evidence as `https_port` +
+`public_url` (report "Nginx" section and manifest `meta`). `update.sh` reads
+that file to **preserve** the port; changing it requires explicit confirmation.
+ACME HTTP-01 validation always uses **port 80**, independent of the HTTPS port.
+
+## Final status: SUCCESS / PARTIAL / FAILED
+
+The manifest `status` (and the report's "Final Installation Status") is one of:
+
+- **SUCCESS** — every mandatory production gate completed. Installer exits `0`.
+- **PARTIAL** — application components installed but TLS/HTTPS was left
+  incomplete (e.g. the operator skipped certificate issuance). The manifest
+  lists `incomplete_gates` (e.g. `["TLS_CERTIFICATE","HTTPS_ACTIVATION"]`).
+  Installer exits `2`. **A PARTIAL install is not production-ready** — automation
+  must not treat exit 2 as success.
+- **FAILED** — a mandatory step failed (e.g. certbot attempted and failed, or
+  `nginx -t` failed). Installer exits non-zero (`1`). Evidence is preserved.
+
+Skipping TLS is **PARTIAL**, never SUCCESS; a certbot **failure** is **FAILED**.
+
+## Bootstrap credentials
+
+The installer **never prints or logs the bootstrap admin password** — not to the
+terminal, evidence, report, or support bundle. It shows only the (non-secret)
+username/email and `Password: [not displayed]`. The password lives solely in
+`.env.production` (mode 600). Change it via the desktop UI after first login.
+
 ## What is SAFE to send
 
 - The support bundle produced by `support-bundle.sh` (recommended).

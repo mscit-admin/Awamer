@@ -33,11 +33,31 @@ if [[ "${1:-}" == "--out" ]]; then OUT_DIR="$2"; shift 2; fi
 
 RUN_ARG="${1:-}"
 ROOT="$(evidence_root)"
-if [[ -n "$RUN_ARG" ]]; then SRC="${ROOT}/${RUN_ARG}"; else SRC="$(evidence_latest_run)"; fi
+
+# §56: RUN_ID must be a strict basename — no slashes, no traversal, no absolute
+# paths. Reject anything that could escape EVIDENCE_ROOT before touching disk.
+if [[ -n "$RUN_ARG" ]]; then
+    if [[ "$RUN_ARG" == /* || "$RUN_ARG" == *".."* || "$RUN_ARG" == */* || "$RUN_ARG" != "$(basename "$RUN_ARG")" ]]; then
+        echo "Invalid RUN_ID '$RUN_ARG' (must be a plain run directory name, no path components)." >&2
+        exit 2
+    fi
+    SRC="${ROOT}/${RUN_ARG}"
+else
+    SRC="$(evidence_latest_run)"
+fi
 
 if [[ -z "$SRC" || ! -d "$SRC" ]]; then
     echo "No installation evidence run found under: $ROOT" >&2
     exit 1
+fi
+
+# §56/§57: resolve the canonical path and ensure it stays UNDER EVIDENCE_ROOT
+# (defends against a symlinked run directory pointing elsewhere).
+_root_real="$(cd "$ROOT" 2>/dev/null && pwd -P || echo "$ROOT")"
+_src_real="$(cd "$SRC" 2>/dev/null && pwd -P || echo "")"
+if [[ -z "$_src_real" || ( "$_src_real" != "$_root_real" && "$_src_real" != "$_root_real"/* ) ]]; then
+    echo "Refusing: run directory resolves outside the evidence root ($_root_real)." >&2
+    exit 2
 fi
 RUN_ID="$(basename "$SRC")"
 
@@ -77,8 +97,14 @@ scan_file() {
     if grep -qEi 'BEGIN [A-Z ]*PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY' "$f" 2>/dev/null; then
         return 0
     fi
-    if grep -oEi 'authorization[[:space:]]*:[[:space:]]*(bearer[[:space:]]+)?[A-Za-z0-9._~+/-]+' "$f" 2>/dev/null \
-         | grep -vEi ':[[:space:]]*\[REDACTED' | grep -q .; then
+    if grep -oEi 'authorization[[:space:]]*[=:][[:space:]]*(bearer[[:space:]]+)?[A-Za-z0-9._~+/-]+' "$f" 2>/dev/null \
+         | grep -vEi '[=:][[:space:]]*\[REDACTED' | grep -q .; then
+        return 0
+    fi
+    # Credential-bearing URIs (§8): scheme://user:pass@host — a leak unless the
+    # userinfo was already redacted to [REDACTED]@.
+    if grep -oEi '[a-z][a-z0-9+.-]*://[^@/[:space:]]+@' "$f" 2>/dev/null \
+         | grep -vEi '://\[REDACTED\]@' | grep -q .; then
         return 0
     fi
     return 1
