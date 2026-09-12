@@ -281,3 +281,30 @@ Per-finding record of the remediation program. Baseline in
   no longer flags @xmldom/xmldom or kdbxweb.
 - **Migration required:** none (dependency override; reinstall on deploy).
 - **Remaining risk:** none for this chain at the pinned version.
+
+## Phase 10 — Full regression, static review & final report
+
+- **Scope:** no code changes; whole-program verification and reporting.
+- **Static security review (§51):** `git grep` sweep of `backend/src` +
+  `desktop/src` for `child_process`/`execSync`/`shell:true`, `eval`/
+  `new Function`, `dangerouslySetInnerHTML`, outbound `fetch`/`axios`/
+  `http.request`, `Host`/`Origin`/`X-Forwarded-*` reads, `companyId == null`,
+  empty `catch {}`, `rejectUnauthorized:false`, `trustProxy`. All hits reviewed
+  and benign (regex `.exec`, shell-free `spawn` arg arrays, fail-closed null
+  checks, header derivation already removed by SEC-RESET-001, one admin-opt-in
+  self-signed-SMTP TLS flag out of scope). Detail in the final report §5.
+- **Secret scan (§50):** private-key / `ghp_` / `AKIA` / `postgres://user:pass@`
+  patterns — only non-secrets (examples, CI DSNs, `${VAR}` interpolation,
+  scanner's own pattern, UI placeholder). No real committed secrets; no secret
+  value reproduced in the report.
+- **Regression (§48/§49, actual counts re-run):** backend unit 128/0/0;
+  backend integration 153/0/0 against a **real PostgreSQL 16** with all 27
+  migrations; desktop vitest 23/0; deploy evidence 31 / install-sim 33 /
+  security-port 81. `tsc --noEmit` (backend + desktop) and `vite build` clean.
+  No test skipped, deleted, weakened, or mocked-away (§57).
+- **Deliverables:** `FINAL_SECURITY_REMEDIATION_REPORT.md` (findings table,
+  actual counts, non-regression, static review, residual risk, decision).
+- **Final decision (§56): CONDITIONALLY PRODUCTION READY** — 9/10 findings
+  FIXED and verified; SEC-INFRA-001 accepted as a documented temporary
+  architectural risk (not marked FIXED, §43). No mandatory failure condition
+  present (§55).

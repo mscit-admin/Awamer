@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Full security remediation program (SEC-RESET/TENANT/SESSION/MFA/SSRF/NET/AUDIT/INFRA/DEP)
+
+Ten-finding remediation delivered in controlled phases with tests after every
+phase. Full detail in `SECURITY_REMEDIATION_CHANGELOG.md`; verification and the
+production decision in `FINAL_SECURITY_REMEDIATION_REPORT.md`. Decision:
+**CONDITIONALLY PRODUCTION READY** (9 fixed + verified; SEC-INFRA-001 accepted
+as a documented temporary architectural risk).
+
+### Security / Fixed
+- **SEC-RESET-001 (P1) — reset-link host/origin poisoning.** Reset URLs are
+  built from validated config (`APP_PUBLIC_BASE_URL`), never from
+  `Host`/`Origin`/`X-Forwarded-*`; production fails closed when unset.
+- **SEC-TENANT-001 (P0) — null-company tenant escape.** Explicit `TenantScope`
+  (`global | company | none`); a non-super actor with no company fails closed
+  instead of collapsing to global. Null-company sharing rejected.
+- **SEC-SESSION-001 (P1) — security changes invalidate all sessions.** New
+  `auth_version` (migration `027`) in the access-token `av` claim, checked live;
+  password/MFA changes bump it and revoke refresh + live sessions.
+- **SEC-MFA-001 (P1) — TOTP secrets encrypted at rest** (AES-256-GCM envelope);
+  legacy plaintext re-encrypted idempotently at startup.
+- **SEC-MFA-002 (P2) — step-up re-auth required** for enabling/disabling MFA.
+- **SEC-SSRF-001 (P1) — SSRF-safe AI outbound** (`ai/safeFetch.ts`): single DNS
+  resolution point, blocked IP ranges, per-hop redirect re-validation, timeouts,
+  size cap.
+- **SEC-NET-001 (P2) — network diagnostics scoped + restricted.** Added a new
+  **`network:diagnose`** permission (granted to **super_admin** and **admin**
+  only; not user/readonly/auditor), enforced server-side on the network routes
+  and gating the `/network` sidebar entry; target restrictions block
+  loopback/link-local/metadata/multicast (RFC1918 LAN still allowed); per-user
+  rate limit + per-operation audit.
+- **SEC-AUDIT-001 (P2) — audit failures observable, not silent.** Failure metric
+  + structured error (correlation fields only, no secret payload); real action
+  preserved instead of rewritten to `config_change`.
+- **SEC-DEP-001 (P2) — patched `@xmldom/xmldom`** to `0.8.15` via override
+  (KDBX import chain).
+
+### Risk accepted
+- **SEC-INFRA-001 (P2) — API container root + NET_ADMIN.** NOT marked fixed;
+  documented and accepted as a temporary architectural risk with compensating
+  controls pending a dedicated VPN-helper privilege-split cycle
+  (`docs/SECURITY_SEC-INFRA-001.md`).
+
 ## [Unreleased] — Deployment port preflight cleanup (DEPLOY-PORT-002)
 
 ### Fixed
