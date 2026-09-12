@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Focused security fixes (SEC-SESSION-002, MFA fail-closed, step-up av-binding, network CIDR)
+
+Small, controlled follow-up (no broad rewrite; reuses the existing `auth_version`
+column — no new migration). Detail and verification in
+`FINAL_FOCUSED_SECURITY_FIX_REPORT.md`.
+
+### Security / Fixed
+- **SEC-SESSION-002 (P1) — a stale access token can no longer open a new
+  WebSocket session.** One shared check, `verifyCurrentAccessToken`, now gates
+  the HTTP middleware and the SSH/Telnet/TCP-tunnel gateways alike: it verifies
+  the token AND the live account state AND `auth_version`, so a token minted
+  before a password/MFA change is rejected everywhere (VNC/SFTP already enforce
+  this via the HTTP middleware).
+- **MFA plaintext fail-closed.** After the at-rest migration, a stored TOTP
+  secret that is not a valid AES-256-GCM envelope (plaintext, malformed,
+  tampered, wrong key) is rejected with a sanitized error instead of being
+  trusted as a seed. The startup re-encryption migration is unchanged.
+- **Step-up token bound to `auth_version`.** Step-up tokens (kept short-lived,
+  purpose-bound, single-use) now also carry the account security version and are
+  rejected on consume once it changes (password change, forgot/admin reset, MFA
+  replacement).
+- **Network diagnostics CIDR hardening.** Diagnostics to a private/internal
+  address now require an explicit allow-list
+  (`NETWORK_DIAGNOSTIC_ALLOWED_CIDRS`, optional `NETWORK_DIAGNOSTIC_DENY_CIDRS`);
+  with no allow-list all private targets are denied (fail-closed). Sensitive
+  destinations (loopback, link-local + cloud metadata, multicast, broadcast) are
+  always denied, scans must be fully contained in an allowed CIDR, hostnames are
+  resolved once and validated (DNS-rebinding safe) with the audit recording both
+  the requested host and the resolved IP. The `network:diagnose` permission
+  (super_admin/admin) is unchanged.
+
 ## [Unreleased] — Full security remediation program (SEC-RESET/TENANT/SESSION/MFA/SSRF/NET/AUDIT/INFRA/DEP)
 
 Ten-finding remediation delivered in controlled phases with tests after every

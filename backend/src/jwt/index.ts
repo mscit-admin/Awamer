@@ -10,6 +10,13 @@ export interface StepUpClaims {
   purpose: string;
   jti: string;
   exp: number;
+  /**
+   * Focused fix — account security version the step-up was bound to. A step-up
+   * issued before a password/MFA change (which increments auth_version) is
+   * invalidated on consume. `NaN` when absent, so a token minted without `av`
+   * can never satisfy the `claims.av === live.authVersion` check (fail-closed).
+   */
+  av: number;
 }
 
 export interface IssuedToken {
@@ -53,8 +60,12 @@ export interface JwtService {
   issueOne(userId: string, role: string, type: TokenType, ttlSec: number): Promise<IssuedToken>;
   verifyAccess(token: string): Promise<VerifiedClaims>;
   verifyRefresh(token: string): Promise<VerifiedClaims>;
-  /** SEC-MFA-002 — short-lived, single-purpose step-up token (signed w/ access key). */
-  issueStepUp(userId: string, purpose: string, ttlSec: number): Promise<IssuedToken>;
+  /**
+   * SEC-MFA-002 — short-lived, single-purpose step-up token (signed w/ access
+   * key). `authVersion` (focused fix) is pinned as claim `av` so a change to the
+   * account's security version invalidates any outstanding step-up token.
+   */
+  issueStepUp(userId: string, purpose: string, ttlSec: number, authVersion?: number): Promise<IssuedToken>;
   verifyStepUp(token: string): Promise<StepUpClaims>;
 }
 
@@ -118,11 +129,13 @@ export function createJwt(cfg: Config): JwtService {
     },
     verifyAccess(token) { return verify(token, accessKey, "access"); },
     verifyRefresh(token) { return verify(token, refreshKey, "refresh"); },
-    async issueStepUp(userId, purpose, ttlSec) {
+    async issueStepUp(userId, purpose, ttlSec, authVersion) {
       const jti = uuid();
       const now = Math.floor(Date.now() / 1000);
       const exp = now + ttlSec;
-      const token = await new SignJWT({ typ: "step_up", purpose })
+      const claims: Record<string, unknown> = { typ: "step_up", purpose };
+      if (authVersion !== undefined) claims.av = authVersion;
+      const token = await new SignJWT(claims)
         .setProtectedHeader({ alg: "HS256" })
         .setIssuer(issuer).setSubject(userId).setJti(jti)
         .setIssuedAt(now).setNotBefore(now).setExpirationTime(exp)
@@ -143,6 +156,9 @@ export function createJwt(cfg: Config): JwtService {
         purpose: String(payload["purpose"] ?? ""),
         jti: String(payload.jti ?? ""),
         exp: Number(payload.exp ?? 0),
+        // Absent `av` → NaN, which never equals a real auth_version, so a
+        // token minted without version binding fails the consume-time check.
+        av: "av" in payload ? Number(payload["av"]) : Number.NaN,
       };
     },
   };

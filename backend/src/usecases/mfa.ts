@@ -13,6 +13,21 @@ import type { SessionRevoker } from "../session/activeSessions.js";
 // 30-second window, 6 digits — RFC 6238 defaults.
 authenticator.options = { window: 1, step: 30, digits: 6 };
 
+/**
+ * MFA fail-closed hardening — a stored TOTP secret that is NOT in the expected
+ * encrypted envelope (legacy plaintext, corruption, tampering, or a wrong key)
+ * must never be interpreted as a seed. It is surfaced as this sanitized error
+ * (no secret material in the message) so callers deny authentication instead of
+ * trusting an unexpected value.
+ */
+export class MfaSecretError extends Error {
+  readonly code = "mfa_secret_unreadable";
+  constructor() {
+    super("stored MFA secret is not in the expected encrypted format");
+    this.name = "MfaSecretError";
+  }
+}
+
 export interface EnrollResult {
   deviceId: string;
   secret: string;       // base32, displayed to user
@@ -39,16 +54,20 @@ export class MFAUseCase {
   }
 
   /**
-   * Decrypt a stored TOTP secret. Encrypted rows are opened with the data key;
-   * legacy plaintext rows (pre-encryption) are read as-is until the startup
-   * migration re-seals them. In production the key is mandatory, so a wrong/
-   * missing key fails closed (openBytes throws) rather than accepting plaintext.
+   * Decrypt a stored TOTP secret, FAIL-CLOSED. After the startup migration
+   * (`reencryptLegacyMfaSecrets`, which runs before the service accepts traffic)
+   * every secret is an AES-256-GCM envelope. A value that is NOT a sealed
+   * envelope — legacy plaintext that somehow survived, corruption, or tampering
+   * — is rejected with a sanitized `MfaSecretError` rather than being trusted as
+   * a plaintext seed. A malformed/tampered envelope, or the wrong key, makes
+   * `openBytes` throw (GCM auth failure), which is equally fail-closed. The
+   * secret is never logged or echoed.
    */
   private openSecret(secretEnc: Buffer): string {
-    if (this.secretBox.isSealedBytes(secretEnc)) {
-      return this.secretBox.openBytes(secretEnc).toString("utf8");
+    if (!this.secretBox.isSealedBytes(secretEnc)) {
+      throw new MfaSecretError();
     }
-    return secretEnc.toString("utf8"); // legacy plaintext (migrated on startup)
+    return this.secretBox.openBytes(secretEnc).toString("utf8");
   }
 
   /**

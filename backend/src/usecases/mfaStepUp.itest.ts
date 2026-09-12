@@ -50,7 +50,7 @@ before(async () => {
   const secretBox = createSecretBox(resolveSecretKey(cfg, noopLog));
   mfa = new MFAUseCase(users, new MFADeviceRepository(pool), audit, cfg, argon2, secretBox, new AppSettingsRepository(pool), new RefreshRepository(pool));
   const changePassword = new ChangePasswordUseCase(users, new RefreshRepository(pool), audit, argon2);
-  stepUp = new StepUpService(jwt);
+  stepUp = new StepUpService(jwt, users);
   app = Fastify();
   await app.register(makeAuthedRoutes({ users, mfa, changePassword, jwt, stepUp }), { prefix: "/api/v1" });
   await app.ready();

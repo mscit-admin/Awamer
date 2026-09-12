@@ -28,7 +28,7 @@ import { Client } from "ssh2";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
-import { assertAuthState } from "../middleware/auth.js";
+import { verifyCurrentAccessToken } from "../middleware/auth.js";
 import { v4 as uuid } from "uuid";
 import type { Logger } from "../logger/index.js";
 import type {
@@ -134,11 +134,11 @@ export function makeSshGateway(deps: SshGatewayDeps) {
       // 1. Authenticate + authorize.
       let userId: string;
       try {
-        const claims = await deps.jwt.verifyAccess(token);
+        // SEC-SESSION-002: the shared check verifies the token AND the live
+        // account state AND the auth_version — a stale token issued before a
+        // password/MFA change cannot open a NEW session.
+        const { claims, live } = await verifyCurrentAccessToken(deps.jwt, deps.users, token);
         userId = claims.sub;
-        // AWM-SEC-021: authorize on the LIVE account state, not the stale token —
-        // a deleted/disabled/locked/downgraded user is rejected immediately.
-        const live = await assertAuthState(deps.users, claims.sub);
         if (!can(live.role, "sessions:connect")) {
           return fail("forbidden", "your role cannot open sessions");
         }

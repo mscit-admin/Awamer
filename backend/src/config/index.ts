@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isSafePublicBaseUrl, normalizeBaseUrl } from "../usecases/publicBaseUrl.js";
+import { parseCidrList, type NetworkDiagnosticPolicy } from "../usecases/networkPolicy.js";
 
 /**
  * Development-only default bootstrap password. Never accepted in production
@@ -90,6 +91,15 @@ const envSchema = z.object({
   // are built ONLY from this (or a valid app_base_url setting), never headers.
   APP_PUBLIC_BASE_URL: z.string().optional(),
 
+  // Network diagnostics allow/deny lists (focused fix — Network CIDR
+  // hardening). Comma/space separated IPv4 CIDRs. Diagnostics to a private /
+  // internal address are permitted ONLY when the address is inside an ALLOWED
+  // CIDR; with no allow list, all private targets are denied (fail-closed).
+  // DENY takes precedence and is for the app's own infra (Docker/PG/Redis).
+  // Example: NETWORK_DIAGNOSTIC_ALLOWED_CIDRS=192.168.10.0/24,192.168.20.0/24
+  NETWORK_DIAGNOSTIC_ALLOWED_CIDRS: z.string().optional(),
+  NETWORK_DIAGNOSTIC_DENY_CIDRS: z.string().optional(),
+
   // Bootstrap admin (created on first startup if no users exist).
   // The password default below is a DEVELOPMENT convenience only; production
   // rejects it (and other weak/placeholder values) — see loadConfig (AWM-CFG-001).
@@ -118,6 +128,8 @@ export interface Config {
   corsOrigins: string[];
   /** SEC-RESET-001: validated trusted public base URL (or null if unset). */
   publicBaseUrl: string | null;
+  /** Network CIDR hardening: parsed allow/deny lists for network diagnostics. */
+  networkDiagnostic: NetworkDiagnosticPolicy;
 }
 
 export function loadConfig(): Config {
@@ -165,5 +177,9 @@ export function loadConfig(): Config {
     jwtRefreshTtlSec: parseDuration(env.JWT_REFRESH_TTL),
     corsOrigins: env.CORS_ALLOWED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean),
     publicBaseUrl,
+    networkDiagnostic: {
+      allowed: parseCidrList(env.NETWORK_DIAGNOSTIC_ALLOWED_CIDRS),
+      deny: parseCidrList(env.NETWORK_DIAGNOSTIC_DENY_CIDRS),
+    },
   };
 }

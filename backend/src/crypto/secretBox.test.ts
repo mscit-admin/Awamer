@@ -109,6 +109,7 @@ function fakeCfg(over: Partial<Config["env"]> & { isProd?: boolean }): Config {
     jwtRefreshTtlSec: 3600,
     corsOrigins: [],
     publicBaseUrl: null,
+    networkDiagnostic: { allowed: [], deny: [] },
   };
 }
 
