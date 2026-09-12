@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Deployment port preflight cleanup (DEPLOY-PORT-002)
+
+### Fixed
+- **DEPLOY-PORT-002 — obsolete hardcoded HTTPS port removed from early
+  preflight.** The Step-0 preflight loop hardcoded `6655` (`for _p in 80 6655
+  8081`) and ran before the operator's HTTPS port was resolved, so it could warn
+  about port 6655 even when 443/8443/9443 was selected. The early preflight now
+  checks only genuinely static ports (80 for ACME, 8081 host-bound backend); the
+  production HTTPS port is checked dynamically in Step 5 against the resolved
+  `AWAMER_HTTPS_PORT` (single source of truth). No other behavior changed. New
+  `DEPLOY-PORT-002-TEST-001..005` cover ports 443/6655/8443, non-interactive
+  9443, and update-mode preservation.
+
 ## [Unreleased] — Installation evidence security + selectable HTTPS port
 
 ### Security / Fixed

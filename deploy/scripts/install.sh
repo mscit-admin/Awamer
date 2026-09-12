@@ -138,8 +138,11 @@ if [[ "$_arch" == "x86_64" || "$_arch" == "aarch64" || "$_arch" == "arm64" ]]; t
 else
     preflight_check "CPU architecture supported" WARN "$_arch (untested)"
 fi
-# Required local ports free (informational): 80, 6655, 8081
-for _p in 80 6655 8081; do
+# DEPLOY-PORT-002: only check STATIC ports here — ACME HTTP-01 (80) and the
+# host-bound backend (8081). The production HTTPS port is NOT static: it is
+# chosen by the operator later (Step 5), so it is checked there against the
+# resolved AWAMER_HTTPS_PORT — never assumed to be 6655/443 at this stage.
+for _p in 80 8081; do
     if ss -tlnH "( sport = :$_p )" 2>/dev/null | grep -q .; then
         preflight_check "Port $_p available" WARN "already in use"
     else

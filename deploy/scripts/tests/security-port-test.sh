@@ -259,6 +259,43 @@ ERUN="$(ls -1dt "${EEV}"/*/ 2>/dev/null | head -n1)"
 [[ "$ECRC" == "0" && "$(mval "$ERUN" status)" == "SUCCESS" ]] && ok "STATE-004 existing cert → SUCCESS" || bad "STATE-004 rc=$ECRC status=$(mval "$ERUN" status)"
 grep -qi "skipping issuance" "${SANDBOX}/out-existcert.log" && ok "STATE-004 no unnecessary reissuance" || bad "STATE-004 reissued cert"
 
+echo "======== Obsolete 6655 preflight removed (DEPLOY-PORT-002) ========"
+# The early static preflight must check only 80 + 8081, never a hardcoded HTTPS
+# port; the SELECTED port is checked dynamically. So "Port 6655 available" must
+# never appear, and "HTTPS port <selected> free" must appear.
+dp2() { # name selected_port
+    local name="$1" port="$2" pf
+    _install "$name" "Y" AWAMER_HTTPS_PORT="$port"
+    pf="${RUNDIR}01-preflight.log"
+    grep -q "Port 80 available" "$pf"   && ok "$name static port 80 checked"   || bad "$name missing 80 check"
+    grep -q "Port 8081 available" "$pf" && ok "$name static port 8081 checked" || bad "$name missing 8081 check"
+    grep -q "HTTPS port ${port} free" "$pf" && ok "$name selected port ${port} checked" || bad "$name selected ${port} NOT checked"
+    grep -q "Port 6655 available" "$pf" && bad "$name obsolete 'Port 6655 available' present" || ok "$name no obsolete 6655 static check"
+    # never a warning about an unrelated historical HTTPS port
+    if [[ "$port" != "6655" ]]; then
+        grep -qE "6655" "$pf" && bad "$name references 6655 for a non-6655 install" || ok "$name no 6655 reference at all"
+    fi
+    # 443 is only ever checked when it IS the selection
+    if [[ "$port" != "443" ]]; then
+        grep -q "Port 443 available" "$pf" && bad "$name checks 443 as a static port" || ok "$name 443 not checked as Awamer HTTPS"
+    fi
+}
+dp2 "DP2-TEST-001" 443
+dp2 "DP2-TEST-002" 6655
+dp2 "DP2-TEST-003" 8443
+# DEPLOY-PORT-002-TEST-004: non-interactive AWAMER_HTTPS_PORT=9443
+_install dp2ni "" AWAMER_HTTPS_PORT=9443
+grep -q "HTTPS port 9443 free" "${RUNDIR}01-preflight.log" && ok "DP2-TEST-004 non-interactive 9443 checked" || bad "DP2-TEST-004 9443 not checked"
+grep -qE "Port (6655|443) available" "${RUNDIR}01-preflight.log" && bad "DP2-TEST-004 obsolete HTTPS-port checks present" || ok "DP2-TEST-004 no obsolete HTTPS-port checks"
+# DEPLOY-PORT-002-TEST-005: update preserves + uses 6655 (no reset to 443)
+UPFR2="${SANDBOX}/upfr2"; mkdir -p "$UPFR2/etc/awamer"
+printf 'AWAMER_DOMAIN=sim.example.com\nAWAMER_HTTPS_PORT=6655\n' > "$UPFR2/etc/awamer/deployment.conf"
+DP2_PORT="$(cd "$REPO_ROOT" && env AWAMER_DEPLOYMENT_CONF="$UPFR2/etc/awamer/deployment.conf" bash -c '
+    source deploy/scripts/lib/evidence.sh
+    CUR_PORT="$(sh -c ". \"$AWAMER_DEPLOYMENT_CONF\"; printf %s \"\$AWAMER_HTTPS_PORT\"")"
+    printf %s "${AWAMER_HTTPS_PORT:-$CUR_PORT}"')"
+[[ "$DP2_PORT" == "6655" ]] && ok "DP2-TEST-005 update preserves+checks 6655 (not 443)" || bad "DP2-TEST-005 got '$DP2_PORT'"
+
 echo "======== Rendered nginx config passes nginx -t (PORT §64) ========"
 if command -v nginx >/dev/null 2>&1; then
     NGT="${SANDBOX}/ngt"; mkdir -p "$NGT"
