@@ -183,6 +183,7 @@ const VALID_ACTIONS = new Set([
   "folder_create", "folder_update", "folder_delete",
   "tag_create", "tag_update", "tag_delete",
   "company_create", "company_delete", "user_assign_org",
+  "network_diagnose",
 ]);
 
 function mapAction(action: string, success: boolean): string {

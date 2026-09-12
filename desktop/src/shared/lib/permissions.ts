@@ -26,6 +26,7 @@ export const PERMISSIONS = [
   "vpn:manage",
   "vpn:reveal",
   "vpn_server:manage",
+  "network:diagnose",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

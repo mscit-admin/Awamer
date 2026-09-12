@@ -175,3 +175,30 @@ Per-finding record of the remediation program. Baseline in
 - **Operational impact:** custom AI providers must be https public endpoints
   (loopback only via the dev option); redirects to internal targets are refused.
 - **Remaining risk:** none for the covered vectors.
+
+---
+
+## SEC-NET-001 — Network diagnostics scoped + restricted  (Phase 6)
+
+- **Files modified:** `backend/src/domain/permissions.ts` (+`network:diagnose`
+  permission + label; granted to super_admin & admin via ALL/ADMIN_ALL, NOT the
+  user/readonly/auditor roles); `desktop/src/shared/lib/permissions.ts` (mirror);
+  `backend/src/routes/network.ts` (gate on `network:diagnose`; block
+  infra-sensitive targets; per-user rate limit; audit each op);
+  `backend/src/repos/otherRepos.ts` (`network_diagnose` valid action);
+  `backend/src/server.ts` (pass audit); `desktop/.../DashboardLayout.tsx`
+  (nav gated on `network:diagnose`).
+- **Root cause:** ping/traceroute/DNS/port-check/scan were gated only by
+  `sessions:connect` (held by every standard user) with no target restriction.
+- **Fix:** a dedicated `network:diagnose` permission (Super Admin + Admin only);
+  loopback, unspecified, link-local + cloud-metadata (169.254.169.254), and
+  multicast/reserved targets are refused by default (RFC1918 LAN still allowed
+  as the tool's purpose); CIDR (≤/24) and port (≤12) caps retained; a per-user
+  request-frequency limit added; every diagnostic action is audited.
+- **Tests added:** NET-SCOPE-001..010 — 9 tests, `backend/src/routes/netScope.itest.ts`.
+- **Test result:** PASS. Backend integration 144→153; desktop tsc + tests green.
+- **Migration required:** none (built-in roles reconciled from code at startup).
+- **Operational impact:** standard users lose ad-hoc network scanning; grant a
+  role with `network:diagnose` where needed.
+- **Remaining risk:** per-tenant target allowlists (beyond infra-block) remain a
+  future enhancement.
