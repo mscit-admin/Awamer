@@ -56,6 +56,10 @@ if ! command -v nginx >/dev/null 2>&1; then
     sudo apt-get update -qq
     sudo apt-get install -y nginx
 fi
+# DEPLOY-001: report the nginx version. The shipped config uses the
+# `listen … ssl http2` syntax, which is compatible with the distro nginx on
+# Ubuntu 22.04/24.04 (no third-party nginx repo required).
+say "  nginx version: $(nginx -v 2>&1 | sed 's/^nginx version: //')"
 
 if ! command -v certbot >/dev/null 2>&1; then
     say "  Installing certbot (for Let's Encrypt)"
@@ -131,32 +135,92 @@ fi
 if [[ "$NETSPHERE_DOMAIN" == "skip" ]]; then
     warn "Skipping nginx setup. Backend listens on 127.0.0.1:8081"
 else
-    NGINX_CONF=/etc/nginx/sites-available/netsphere
-    sudo cp deploy/nginx/netsphere.conf "$NGINX_CONF"
-    sudo sed -i "s/netsphere\\.example\\.com/${NETSPHERE_DOMAIN}/g" "$NGINX_CONF"
-    sudo ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/netsphere
-    # Remove default site if it's interfering
-    sudo rm -f /etc/nginx/sites-enabled/default
-
-    if sudo nginx -t 2>&1 | grep -q "successful"; then
-        sudo systemctl reload nginx
-        ok "nginx reloaded with config for $NETSPHERE_DOMAIN"
-    else
-        err "nginx config test failed. Check: sudo nginx -t"
+    # DEPLOY-009: sanity-check the domain before involving Let's Encrypt.
+    if [[ ! "$NETSPHERE_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]; then
+        err "'$NETSPHERE_DOMAIN' does not look like a valid fully-qualified domain name."
     fi
 
+    NGINX_CONF=/etc/nginx/sites-available/netsphere      # final HTTPS config
+    BOOTSTRAP_CONF=/etc/nginx/sites-available/netsphere-bootstrap
+    WEBROOT=/var/www/certbot
+    LE_LIVE="/etc/letsencrypt/live/${NETSPHERE_DOMAIN}"
+    LE_EMAIL="${LE_EMAIL:-admin@${NETSPHERE_DOMAIN#*.}}"
+    sudo mkdir -p "$WEBROOT"
+
+    # Prepare the FINAL HTTPS config (domain substituted) but do NOT enable it
+    # yet — it references cert files that may not exist on a fresh host.
+    sudo cp deploy/nginx/netsphere.conf "$NGINX_CONF"
+    sudo sed -i "s/netsphere\\.example\\.com/${NETSPHERE_DOMAIN}/g" "$NGINX_CONF"
+    sudo rm -f /etc/nginx/sites-enabled/default
+
+    # enable_final(): point sites-enabled at the HTTPS config, validate, reload.
+    # NEVER reloads on a failed `nginx -t` (keeps the running config intact).
+    enable_final() {
+        sudo ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/netsphere
+        sudo rm -f /etc/nginx/sites-enabled/netsphere-bootstrap
+        if sudo nginx -t; then
+            sudo systemctl reload nginx
+            ok "HTTPS nginx config active for $NETSPHERE_DOMAIN"
+        else
+            # Roll back to whatever was serving before (bootstrap, if present).
+            sudo rm -f /etc/nginx/sites-enabled/netsphere
+            [[ -f "$BOOTSTRAP_CONF" ]] && sudo ln -sf "$BOOTSTRAP_CONF" /etc/nginx/sites-enabled/netsphere-bootstrap
+            sudo nginx -t >/dev/null 2>&1 && sudo systemctl reload nginx || true
+            err "Final nginx config failed 'nginx -t' — HTTPS NOT activated. Check: sudo nginx -t"
+        fi
+    }
+
     # ----- Step 6: TLS via Let's Encrypt -----------------------------
-    say "Step 6/7: Issuing TLS certificate via Let's Encrypt"
-    echo
-    echo "certbot will now ask you a few questions and issue a certificate."
-    echo "Make sure your DNS A record for $NETSPHERE_DOMAIN points to this server!"
-    read -rp "Continue with certbot? [Y/n]: " ANS
-    if [[ "$ANS" != "n" && "$ANS" != "N" ]]; then
-        sudo certbot --nginx -d "$NETSPHERE_DOMAIN" --redirect --agree-tos --no-eff-email \
-            -m "admin@${NETSPHERE_DOMAIN#*.}"
-        ok "TLS certificate installed; nginx reloaded"
+    say "Step 6/7: TLS certificate (Let's Encrypt)"
+
+    if sudo test -f "${LE_LIVE}/fullchain.pem" && sudo test -f "${LE_LIVE}/privkey.pem"; then
+        # DEPLOY-005/§15: a certificate already exists — do NOT reissue it.
+        ok "Existing certificate found for $NETSPHERE_DOMAIN — skipping issuance"
+        enable_final
     else
-        warn "Skipped certbot. Run later: sudo certbot --nginx -d $NETSPHERE_DOMAIN"
+        # DEPLOY-002/§4: fresh host with no certificate. Serve an HTTP-only
+        # bootstrap vhost first (ACME webroot on :80), obtain the cert, then
+        # enable the final HTTPS config. The HTTPS config is NEVER activated
+        # before its certificate exists.
+        say "  No certificate yet — installing a temporary HTTP-only bootstrap vhost"
+        sudo tee "$BOOTSTRAP_CONF" >/dev/null <<BOOT
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${NETSPHERE_DOMAIN};
+    # ACME HTTP-01 challenge (Let's Encrypt writes tokens here).
+    location /.well-known/acme-challenge/ { root ${WEBROOT}; }
+    # Nothing else is exposed during bootstrap.
+    location / { return 404; }
+}
+BOOT
+        sudo ln -sf "$BOOTSTRAP_CONF" /etc/nginx/sites-enabled/netsphere-bootstrap
+        sudo rm -f /etc/nginx/sites-enabled/netsphere
+        if ! sudo nginx -t; then
+            err "Bootstrap nginx config failed 'nginx -t'. Check: sudo nginx -t"
+        fi
+        sudo systemctl reload nginx
+        ok "Bootstrap HTTP vhost live on port 80 (ACME webroot: $WEBROOT)"
+
+        echo
+        echo "Let's Encrypt needs TCP 80 reachable and DNS for '$NETSPHERE_DOMAIN'"
+        echo "to resolve to THIS server before issuing a certificate."
+        read -rp "Continue with certbot certificate issuance? [Y/n]: " ANS
+        if [[ "$ANS" == "n" || "$ANS" == "N" ]]; then
+            warn "Skipped certbot. HTTP bootstrap vhost left in place."
+            warn "Issue later, then enable HTTPS:"
+            warn "  sudo certbot certonly --webroot -w $WEBROOT -d $NETSPHERE_DOMAIN --agree-tos --no-eff-email -m $LE_EMAIL"
+            warn "  sudo ln -sf $NGINX_CONF /etc/nginx/sites-enabled/netsphere && sudo rm -f /etc/nginx/sites-enabled/netsphere-bootstrap && sudo nginx -t && sudo systemctl reload nginx"
+        else
+            # DEPLOY-008/§8/§16: on certbot failure, exit non-zero and DO NOT
+            # activate the (cert-less) HTTPS config — the bootstrap vhost stays.
+            if ! sudo certbot certonly --webroot -w "$WEBROOT" -d "$NETSPHERE_DOMAIN" \
+                    --agree-tos --no-eff-email --non-interactive -m "$LE_EMAIL"; then
+                err "Certificate issuance FAILED. HTTPS config NOT activated (bootstrap vhost still serving). Verify DNS + inbound TCP 80, then re-run."
+            fi
+            ok "Certificate issued for $NETSPHERE_DOMAIN"
+            enable_final
+        fi
     fi
 fi
 

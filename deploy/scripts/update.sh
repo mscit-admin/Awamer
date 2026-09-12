@@ -90,10 +90,20 @@ mkdir -p "$WEB_ROOT"
 rm -rf "${WEB_ROOT:?}/"*
 cp -r desktop/dist/* "$WEB_ROOT"/
 
-# 4) Reload nginx.
+# 4) Reload nginx. An application update NEVER touches TLS certificates
+#    (DEPLOY-002/§6): the existing certificate is preserved. We only validate
+#    the current nginx config and reload; a failed `nginx -t` must NOT reload
+#    (keeps the running config intact) and fails the update clearly.
 if command -v nginx >/dev/null 2>&1; then
-  say "Reloading nginx…"
-  nginx -t && systemctl reload nginx
+  say "Validating nginx config (certificates are preserved, not reissued)…"
+  if nginx -t; then
+    systemctl reload nginx
+    say "nginx reloaded."
+  else
+    echo "nginx -t FAILED — not reloading. The previously running nginx config is unchanged." >&2
+    echo "If a certificate is unexpectedly missing, (re)issue it with the bootstrap flow in deploy/scripts/install.sh, then re-run." >&2
+    exit 1
+  fi
 fi
 
 # 5) Open the VPN-server port(s) on the host firewall (best-effort). The compose
