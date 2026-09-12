@@ -150,3 +150,28 @@ Per-finding record of the remediation program. Baseline in
   `step_up_token` (header `x-step-up-token` or body) — a follow-up UI change.
 - **Remaining risk:** step-up single-use is per-instance (matches the documented
   single-instance deployment); a shared store would be needed for multi-instance.
+
+---
+
+## SEC-SSRF-001 — AI provider SSRF (redirect / DNS rebinding)  (Phase 5)
+
+- **Files modified:** `backend/src/ai/safeFetch.ts` (new — SSRF-safe client);
+  `backend/src/ai/providers.ts` (use `safeFetch` for all three provider calls).
+- **Root cause:** provider calls used global `fetch()` with `redirect: follow`,
+  no timeout, no size cap; the store-time `isPublicHttpUrl` guard validated only
+  the literal string and allowed DNS names (rebinding) and followed redirects to
+  internal targets.
+- **Fix:** a central `safeFetch` on node:http/https with a custom socket
+  `lookup` as the single resolution point (rebinding-safe): protocol allowlist
+  (https; http only in dev), DNS-resolve + validate EVERY candidate address
+  (loopback/private/link-local/metadata/CGNAT/reserved/multicast + IPv4-mapped
+  IPv6), pin the connection to the validated IP while preserving Host/SNI,
+  manual redirects re-validated per hop with a cap, connect/request timeouts,
+  and a response-size limit. An explicit off-by-default `allowLoopback` permits
+  only localhost for local-dev AI (e.g. Ollama).
+- **Tests added:** AI-SSRF-001..015 — 16 tests, `backend/src/ai/safeFetch.test.ts`.
+- **Test result:** PASS (16/16). Backend unit 106→122.
+- **Migration required:** none.
+- **Operational impact:** custom AI providers must be https public endpoints
+  (loopback only via the dev option); redirects to internal targets are refused.
+- **Remaining risk:** none for the covered vectors.
