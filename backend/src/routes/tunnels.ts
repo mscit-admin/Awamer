@@ -18,6 +18,7 @@ import { TunnelManager, TunnelError } from "../ssh/tunnelManager.js";
 interface Deps {
   tunnels: TunnelManager;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 const ADMIN_ROLES = new Set(["admin", "super_admin"]);
@@ -25,7 +26,7 @@ const DST_HOST_RE = /^[a-zA-Z0-9._-]+$/;
 
 export function makeTunnelRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requirePermission("tunnels:manage"));
 
     app.get("/", async (req, reply) => {

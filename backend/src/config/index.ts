@@ -1,5 +1,44 @@
 import { z } from "zod";
 
+/**
+ * Development-only default bootstrap password. Never accepted in production
+ * (AWM-CFG-001) — production must supply an explicit strong secret.
+ */
+export const DEV_BOOTSTRAP_PASSWORD = "ChangeMe!2026";
+
+/** Minimum length required of a production bootstrap admin password. */
+export const PROD_BOOTSTRAP_MIN_LEN = 16;
+
+/**
+ * Known weak / placeholder bootstrap passwords rejected in production. Compared
+ * case-insensitively; the substring guard below also catches "change me"
+ * variants. This is a reasonable deny policy, not an exhaustive dictionary.
+ */
+const BOOTSTRAP_PLACEHOLDERS = new Set([
+  "changeme!2026", "changeme", "change_me", "change-me", "change_me_in_production",
+  "password", "password123", "passw0rd", "admin", "admin123", "administrator",
+  "default", "secret", "letmein", "root", "toor", "welcome", "welcome1",
+]);
+
+/**
+ * Validate a production bootstrap admin password. Throws (fail-closed) when the
+ * value is missing/empty, too short, or a known placeholder. NEVER includes the
+ * password itself in the error message or logs (AWM-CFG-001 §19).
+ */
+export function assertProductionBootstrapPassword(pw: string): void {
+  const trimmed = (pw ?? "").trim();
+  if (trimmed.length === 0) {
+    throw new Error("BOOTSTRAP_ADMIN_PASSWORD must be set to a strong secret in production");
+  }
+  if (trimmed.length < PROD_BOOTSTRAP_MIN_LEN) {
+    throw new Error(`BOOTSTRAP_ADMIN_PASSWORD must be at least ${PROD_BOOTSTRAP_MIN_LEN} characters in production`);
+  }
+  const lower = trimmed.toLowerCase();
+  if (BOOTSTRAP_PLACEHOLDERS.has(lower) || lower.includes("changeme") || lower.includes("change_me") || lower.includes("change-me")) {
+    throw new Error("BOOTSTRAP_ADMIN_PASSWORD is a known/placeholder value; set a unique strong secret in production");
+  }
+}
+
 const envSchema = z.object({
   // App
   APP_ENV: z.enum(["development", "staging", "production"]).default("development"),
@@ -44,9 +83,11 @@ const envSchema = z.object({
   // CORS
   CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:1420,tauri://localhost,https://tauri.localhost"),
 
-  // Bootstrap admin (created on first startup if no users exist)
+  // Bootstrap admin (created on first startup if no users exist).
+  // The password default below is a DEVELOPMENT convenience only; production
+  // rejects it (and other weak/placeholder values) — see loadConfig (AWM-CFG-001).
   BOOTSTRAP_ADMIN_USERNAME: z.string().default("admin"),
-  BOOTSTRAP_ADMIN_PASSWORD: z.string().min(8).default("ChangeMe!2026"),
+  BOOTSTRAP_ADMIN_PASSWORD: z.string().min(8).default(DEV_BOOTSTRAP_PASSWORD),
   BOOTSTRAP_ADMIN_EMAIL: z.string().email().default("admin@netsphere.local"),
 });
 
@@ -86,6 +127,9 @@ export function loadConfig(): Config {
     if (lower(env.JWT_ACCESS_SECRET).includes("dev") || lower(env.JWT_REFRESH_SECRET).includes("dev")) {
       throw new Error("Dev-only JWT secrets detected in production");
     }
+    // AWM-CFG-001: never let production bootstrap a Super Admin with the dev
+    // default or any weak/placeholder password. Fail closed before startup.
+    assertProductionBootstrapPassword(env.BOOTSTRAP_ADMIN_PASSWORD);
   }
 
   return {

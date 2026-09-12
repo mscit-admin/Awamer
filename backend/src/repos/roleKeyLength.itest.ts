@@ -37,6 +37,7 @@ let admin: Pool;
 let pool: Pool;
 let migUrl = "";
 let app: FastifyInstance;
+const sessions = { register() {}, unregister() {}, revokeUser() { return 0; }, revalidateUser: async () => {}, count() { return 0; }, countForUser() { return 0; }, startPeriodic() {}, stop() {} } as never;
 let jwt: JwtService;
 const ids: Record<string, string> = {};
 // role keys captured at various points
@@ -129,7 +130,7 @@ before(async () => {
   k.superTok = (await jwt.issuePair(ids.superU, "super_admin")).access.token;
 
   app = Fastify();
-  await app.register(makeOrganizationRoutes({
+  await app.register(makeOrganizationRoutes({ sessions,
     companies: new CompanyRepository(pool), units: new OrgUnitRepository(pool),
     users, audit: new AuditRepository(pool), jwt, roleService,
   }), { prefix: "/api/v1/org" });

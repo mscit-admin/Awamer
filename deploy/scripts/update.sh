@@ -65,11 +65,14 @@ if [ "$BACKEND_CHANGED" -eq 1 ]; then
   say "Backend changed — rebuilding the auth-service container…"
   "${DC[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build auth-service
   "${DC[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
-  say "Waiting for backend health…"
+  # AWM-STAB-002: rollout success requires READINESS (process + PostgreSQL),
+  # not just liveness. /readyz returns 200 only when the DB is reachable, so a
+  # backend that is up but cannot serve does NOT count as a successful deploy.
+  say "Waiting for backend readiness (/readyz)…"
   for i in $(seq 1 30); do
-    if curl -fsS http://127.0.0.1:8081/healthz >/dev/null 2>&1; then say "Backend healthy."; break; fi
+    if curl -fsS http://127.0.0.1:8081/readyz >/dev/null 2>&1; then say "Backend ready."; break; fi
     sleep 2
-    [ "$i" -eq 30 ] && { echo "Backend did not become healthy in time"; exit 1; }
+    [ "$i" -eq 30 ] && { echo "Backend did not become READY in time (/readyz not 200 — check DB connectivity)"; exit 1; }
   done
 else
   say "No backend changes — skipping container rebuild."

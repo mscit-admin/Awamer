@@ -41,7 +41,7 @@ const catalog = () => PERMISSIONS.map((p) => ({ key: p, label: PERMISSION_META[p
 
 export function makeRoleRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
 
     // Resolve the acting admin's tenant + permission ceiling. A super-admin
     // (holds companies:manage) is tenant-unbounded; everyone else is confined

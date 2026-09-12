@@ -20,11 +20,12 @@ interface Deps {
   roleService: RoleService;
   jwt: JwtService;
   refresh: RefreshRepository;
+  sessions: import("../session/activeSessions.js").ActiveSessionManager;
 }
 
 export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requireRole("super_admin", "admin"));
 
     // Tenant scope: a Super Admin (companies:manage) sees/manages every
@@ -193,6 +194,10 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         const roleChanged = bodyP.data.role !== undefined && bodyP.data.role !== prevRole;
         if (disabled || locked || roleChanged) {
           await deps.refresh.revokeAllForUser(u.id);
+          // AWM-SEC-022: terminate already-established remote sessions too — the
+          // DB change is committed above, so revalidate against live state now
+          // (closes all on disable/lock, permission-aware on a role change).
+          await deps.sessions.revalidateUser(u.id);
         }
         return reply.send(userView(u));
       } catch (e) {
@@ -212,6 +217,8 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         const s = await scope(req);
         if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
         await deps.users.delete(parsed.data.id);
+        // AWM-SEC-022: no active remote session may survive deletion.
+        deps.sessions.revokeUser(parsed.data.id, "USER_DELETED");
         return reply.code(204).send();
       } catch (e) {
         if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });

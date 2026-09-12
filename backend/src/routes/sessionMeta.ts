@@ -32,6 +32,7 @@ interface FolderDeps {
   folders: FolderRepository;
   audit: AuditRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 function serializeFolder(f: Folder) {
@@ -50,7 +51,7 @@ function serializeFolder(f: Folder) {
 
 export function makeFolderRoutes(deps: FolderDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requireWrite());
 
     app.get("/", async (req, reply) => {
@@ -162,11 +163,12 @@ interface TagDeps {
   tags: TagRepository;
   audit: AuditRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 export function makeTagRoutes(deps: TagDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requireWrite());
 
     app.get("/", async (req, reply) => {
@@ -244,6 +246,7 @@ interface CredDeps {
   attachments: CredentialAttachmentRepository;
   audit: AuditRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 const credentialTypeEnum = z.enum(CREDENTIAL_TYPES as unknown as [string, ...string[]]);
@@ -268,7 +271,7 @@ function mapFields(fields: z.infer<typeof fieldsSchema>) {
 
 export function makeCredentialRoutes(deps: CredDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requireWrite());
 
     app.get("/", async (req, reply) => {

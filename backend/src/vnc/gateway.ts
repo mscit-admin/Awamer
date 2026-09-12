@@ -15,13 +15,16 @@ import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
-import { makeAuthMiddleware } from "../middleware/auth.js";
+import { makeAuthMiddleware, assertAuthState } from "../middleware/auth.js";
+import { v4 as uuid } from "uuid";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, ConnectionHistoryRepository } from "../repos/sessionRepos.js";
 import { VncTicketStore } from "./ticketStore.js";
 
 export interface VncGatewayDeps {
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
+  sessions: import("../session/activeSessions.js").ActiveSessionManager;
   hosts: HostRepository;
   history: ConnectionHistoryRepository;
   log: Logger;
@@ -34,7 +37,7 @@ export function makeVncGateway(deps: VncGatewayDeps) {
     // authenticated). The browser then opens the WS with ?ticket=… — no JWT in
     // the URL. Access to the host is verified here, before any ticket is issued.
     const ticketSchema = z.object({ host_id: z.string().min(1) });
-    app.post("/ticket", { preHandler: makeAuthMiddleware(deps.jwt) }, async (req, reply) => {
+    app.post("/ticket", { preHandler: makeAuthMiddleware(deps.jwt, deps.users) }, async (req, reply) => {
       const parsed = ticketSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: "host_id required" } });
       if (!can(req.auth!.role, "sessions:connect")) return reply.code(403).send({ error: { code: "forbidden", message: "your role cannot open sessions" } });
@@ -61,6 +64,15 @@ export function makeVncGateway(deps: VncGatewayDeps) {
       const userId = claimed.userId;
       const hostId = claimed.hostId;
 
+      // AWM-SEC-021: a ticket is minted only after a live auth-state check, but
+      // re-validate at redemption so a user disabled/locked/deleted between issue
+      // and connect cannot ride an outstanding ticket into a session.
+      try {
+        await assertAuthState(deps.users, userId);
+      } catch {
+        return closeWs(4401, "session no longer valid");
+      }
+
       // Resolve the host (honors ownership + sharing).
       let host: Awaited<ReturnType<HostRepository["getById"]>>;
       try {
@@ -76,6 +88,18 @@ export function makeVncGateway(deps: VncGatewayDeps) {
 
       const sock = net.connect({ host: host.hostname, port: host.port });
       sock.setTimeout(20_000);
+
+      // AWM-SEC-022: track this session so a later disable/lock/delete/role change
+      // for the user terminates it. Idempotent close of BOTH the WS and the
+      // upstream VNC socket; unregistered when the WS finally closes.
+      const sessionId = uuid();
+      let revoked = false;
+      const closeSession = () => {
+        if (revoked) return; revoked = true;
+        try { sock.destroy(); } catch { /* ignore */ }
+        try { if (ws.readyState === ws.OPEN) ws.close(4403, "authorization revoked"); else ws.terminate(); } catch { /* ignore */ }
+      };
+      deps.sessions.register({ sessionId, userId, kind: "vnc", requiredPermission: "sessions:connect", close: closeSession });
 
       const endHistory = (status: "closed" | "failed", errorMessage?: string) => {
         if (historyId == null) return;
@@ -110,8 +134,8 @@ export function makeVncGateway(deps: VncGatewayDeps) {
         bytesIn += raw.length;
         sock.write(raw);
       });
-      ws.on("close", () => { endHistory("closed"); sock.destroy(); });
-      ws.on("error", () => sock.destroy());
+      ws.on("close", () => { deps.sessions.unregister(sessionId); endHistory("closed"); sock.destroy(); });
+      ws.on("error", () => { deps.sessions.unregister(sessionId); sock.destroy(); });
     });
   };
 }

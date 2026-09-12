@@ -9,6 +9,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Active remote-session revocation (AWM-SEC-022)
+
+### Security
+- **AWM-SEC-022 (P1) — Security-relevant account changes now terminate
+  already-established remote sessions.** Long-lived channels (SSH/Telnet/
+  TCP-tunnel/VNC) were validated only at connect time, so an open session
+  survived a disable/lock/delete/role-downgrade/company-move until the client
+  disconnected. A new in-memory `ActiveSessionManager` (`session/activeSessions.ts`)
+  tracks active sessions; each gateway registers on connect and unregisters on
+  close, and its close terminates **both** the WebSocket (code 4403 "authorization
+  revoked") and the underlying privileged connection (idempotent). Admin
+  role/disable/lock changes, user deletion, and org company moves emit an
+  immediate revocation after the DB commit (`revalidateUser`/`revokeUser`); a
+  shared periodic loop (15s) revalidates live state as a fallback for missed
+  events, permission-aware for role changes and fail-closed only after repeated
+  DB failures. Existing refresh-session revocation is preserved. Each revocation
+  writes an audit event (`token_revoke`, `{kind, reason}`) with no secrets.
+  Single-instance deployment today; the per-instance periodic revalidation keeps
+  correctness bounded by the interval if replicas are added.
+- **No new permission** and **no RBAC-matrix change** — session-lifecycle security.
+
+### Tests
+- `session/activeSessions.test.ts` (manager logic: idempotency, permission-aware
+  revalidation, fail-closed fallback, other-users-unaffected) and
+  `session/sessionRevocation.itest.ts` (real WS sessions through the real gateways:
+  AUTHZ-STATE-009..016 disable/lock/delete/downgrade/company-move across SSH/
+  Telnet/tunnel/VNC, 018 periodic fallback, 019 multi-session, 020 isolation,
+  022 reconnect-denied) — WS closes 4403, upstream torn down, registry cleaned.
+  Verified against real PostgreSQL.
+
+---
+
+## [Unreleased] — Production acceptance: live authz, bootstrap secret, readiness (AWM-SEC-021, AWM-CFG-001, AWM-STAB-002)
+
+### Security
+- **AWM-SEC-021 (P1) — Authorization now reflects live account state, not the
+  stale access token.** Permission checks used the role embedded in the (up to
+  15-minute) access JWT, so a user moved/downgraded/disabled/locked/deleted kept
+  old privileges until token expiry — on HTTP and every WS channel. A centralized
+  `assertAuthState(users, sub)` now loads the live user, rejects
+  deleted/disabled/locked accounts, and `makeAuthMiddleware` replaces the token
+  role with the **live DB role**; the same guard runs in the SSH/Telnet/TCP-tunnel
+  WS auth paths and at VNC ticket issue **and** redemption. Old tokens are denied
+  immediately (401 `session_invalidated`, or 403 on downgrade). Refresh revocation
+  on admin changes is unchanged. No new permission; no RBAC-matrix change.
+- **AWM-CFG-001 (P1) — Production refuses unsafe bootstrap admin passwords.**
+  `BOOTSTRAP_ADMIN_PASSWORD` defaulted to `ChangeMe!2026` and was accepted in
+  production. `loadConfig` now (when `APP_ENV=production`) requires an explicit
+  secret ≥16 chars that is not a known placeholder, failing closed (non-zero exit)
+  **before** any Super Admin is bootstrapped. Development keeps the convenience
+  default. The password is never logged or echoed in errors.
+
+### Fixed / Deployment
+- **AWM-STAB-002 (P2) — `/readyz` wired into production.** nginx now proxies
+  `location = /readyz` to the backend (previously only `/healthz`, so the SPA
+  fallback masked readiness); `deploy/scripts/{install,update}.sh` gate rollout
+  success on `/readyz` (DB-backed 200/503). Liveness (`/healthz`, Docker
+  healthcheck) and readiness (`/readyz`, reverse proxy + deploy gate) are kept
+  distinct and documented.
+- Corrected the stale nginx comment that implied a WS access token could appear in
+  a `?token=…` query (gateways use first-frame auth + VNC one-time tickets — no
+  session JWT in any WS URL). Added `X-Awamer-Client` to backend CORS
+  `allowedHeaders` so cross-origin browser operation passes preflight (no
+  wildcard-with-credentials).
+
+### Tests
+- `middleware/authState.itest.ts` (AUTHZ-STATE-001..005,008) and
+  `middleware/authStateWs.itest.ts` (AUTHZ-STATE-006/007, SSH/Telnet/tunnel/VNC):
+  old tokens denied immediately after role/company/disable/lock/delete; unchanged
+  users unaffected. `config/bootstrapConfig.test.ts` (CFG-BOOT-001..006).
+  `db/readyDeploy.itest.ts` (READY-DEPLOY-001..006). Verified end-to-end against
+  real PostgreSQL, a production-mode server boot, and real nginx `/readyz` routing.
+
+---
+
 ## [Unreleased] — Migration artifact integrity (AWM-MIG-006)
 
 ### Security

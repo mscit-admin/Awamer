@@ -21,11 +21,12 @@ import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 interface Deps {
   commands: CommandHistoryRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 export function makeCommandHistoryRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requirePermission("command_history:read"));
 
     const listQuery = z.object({

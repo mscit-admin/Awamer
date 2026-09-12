@@ -16,6 +16,8 @@ import { Client } from "ssh2";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
+import { assertAuthState } from "../middleware/auth.js";
+import { v4 as uuid } from "uuid";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
 import { resolveSshConnection, SshResolveError } from "./resolveAuth.js";
@@ -24,6 +26,8 @@ import { awaitAuthFrame } from "./gateway.js";
 
 export interface WsTunnelDeps {
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
+  sessions: import("../session/activeSessions.js").ActiveSessionManager;
   hosts: HostRepository;
   credentials: CredentialRepository;
   log: Logger;
@@ -67,7 +71,9 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
       try {
         const claims = await deps.jwt.verifyAccess(token);
         userId = claims.sub;
-        if (!can(claims.role, "tunnels:manage")) {
+        // AWM-SEC-021: authorize on the LIVE account state, not the stale token.
+        const live = await assertAuthState(deps.users, claims.sub);
+        if (!can(live.role, "tunnels:manage")) {
           return fail("forbidden", "your role cannot open tunnels");
         }
       } catch {
@@ -84,6 +90,19 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
       const { host, username, auth } = resolved;
 
       const conn = new Client();
+
+      // AWM-SEC-022: register for active revocation (revoking tunnels:manage,
+      // disable/lock/delete terminate this live tunnel). Idempotent close of the
+      // WS + the underlying SSH forwarding connection.
+      const sessionId = uuid();
+      let revoked = false;
+      const closeSession = () => {
+        if (revoked) return; revoked = true;
+        try { conn.end(); } catch { /* ignore */ }
+        try { if (ws.readyState === ws.OPEN) ws.close(4403, "authorization revoked"); else ws.terminate(); } catch { /* ignore */ }
+      };
+      deps.sessions.register({ sessionId, userId, kind: "tunnel", requiredPermission: "tunnels:manage", close: closeSession });
+
       conn.on("ready", () => {
         conn.forwardOut("127.0.0.1", 0, dstHost, dstPort, (err, stream) => {
           if (err) {
@@ -106,7 +125,8 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
         fail("ssh_error", err.message);
       });
       conn.on("close", () => { if (ws.readyState === ws.OPEN) ws.close(); });
-      ws.on("close", () => { conn.end(); });
+      ws.on("close", () => { deps.sessions.unregister(sessionId); conn.end(); });
+      ws.on("error", () => { deps.sessions.unregister(sessionId); try { conn.end(); } catch { /* ignore */ } });
 
       sendJson(ws, { type: "status", status: "connecting" });
       conn.connect({

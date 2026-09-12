@@ -15,11 +15,12 @@ import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
 interface Deps {
   mailer: MailService;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 export function makeSmtpRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requireRole("admin", "super_admin"));
 
     app.get("/", async (_req, reply) => {

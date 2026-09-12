@@ -20,6 +20,7 @@ import type { JwtService } from "../jwt/index.js";
 
 interface Deps {
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 const HOST_RE = /^[a-zA-Z0-9._-]+$/;
@@ -140,7 +141,7 @@ function runCommand(cmd: string, args: string[], timeoutMs: number): Promise<{ o
 
 export function makeNetworkRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requirePermission("sessions:connect"));
 
     // ---- ping ---------------------------------------------------------

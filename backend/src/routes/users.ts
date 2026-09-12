@@ -17,7 +17,7 @@ interface Deps {
 
 export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
 
     // ---------- /users/me -----------------------------------------------
     app.get("/users/me", async (req, reply) => {

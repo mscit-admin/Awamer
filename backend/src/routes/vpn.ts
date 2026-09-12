@@ -42,6 +42,7 @@ interface Deps {
   manager: VpnManager;
   audit: AuditRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 const runtimeEnum = z.enum(VPN_RUNTIMES as unknown as [VpnRuntime, ...VpnRuntime[]]);
@@ -90,7 +91,7 @@ function domainStatus(code: string): number {
 
 export function makeVpnRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requirePermission("vpn:manage"));
 
     const fail = (reply: import("fastify").FastifyReply, e: unknown) => {
