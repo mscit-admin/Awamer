@@ -100,6 +100,13 @@ const envSchema = z.object({
   NETWORK_DIAGNOSTIC_ALLOWED_CIDRS: z.string().optional(),
   NETWORK_DIAGNOSTIC_DENY_CIDRS: z.string().optional(),
 
+  // SEC-INFRA-001 — privileged VPN helper IPC. The backend never spawns
+  // OpenVPN; it talks to the isolated awamer-vpn-helper over this Unix socket,
+  // authenticated with a high-entropy shared secret. The secret is REQUIRED in
+  // production (checked in loadConfig); optional in dev where VPN isn't used.
+  VPN_HELPER_SOCKET: z.string().default("/run/awamer/ipc/vpn-helper.sock"),
+  VPN_HELPER_SECRET: z.string().optional(),
+
   // Bootstrap admin (created on first startup if no users exist).
   // The password default below is a DEVELOPMENT convenience only; production
   // rejects it (and other weak/placeholder values) — see loadConfig (AWM-CFG-001).

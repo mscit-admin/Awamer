@@ -1,0 +1,41 @@
+# =====================================================
+# awamer-vpn-helper (SEC-INFRA-001) — the ONLY privileged component.
+#
+# A minimal service whose sole job is the privileged OpenVPN lifecycle. It runs
+# in its own container with NET_ADMIN + /dev/net/tun and NO public port; the
+# unprivileged backend reaches it only over an authenticated Unix socket. It is
+# the ONLY image that contains and executes the openvpn binary.
+# =====================================================
+FROM node:20-alpine AS builder
+
+RUN apk add --no-cache python3 make g++
+WORKDIR /src
+COPY package.json ./
+COPY tsconfig.json ./
+RUN npm install --no-audit --no-fund
+COPY src ./src
+RUN npm run build
+RUN npm prune --omit=dev
+
+# =====================================================
+FROM node:20-alpine
+
+# openvpn + iproute2 (openvpn shells out to `ip` to configure the tun interface).
+# tini reaps the openvpn children. No setuid bit is needed: this container holds
+# NET_ADMIN and the main process runs as root INSIDE this confined container —
+# which is the whole point of the split (root+NET_ADMIN live here, not in the API).
+RUN apk add --no-cache tini openvpn iproute2
+
+WORKDIR /app
+COPY --from=builder /src/node_modules ./node_modules
+COPY --from=builder /src/dist ./dist
+COPY package.json ./
+
+ENV NODE_ENV=production \
+    OPENVPN_PATH=/usr/sbin/openvpn \
+    VPN_HELPER_SOCKET=/run/awamer/vpn-helper.sock \
+    VPN_RUNTIME_DIR=/var/lib/awamer/vpn-runtime
+
+# No EXPOSE / no ports — this service is never reachable over the network.
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "--enable-source-maps", "dist/vpn-helper/main.js"]

@@ -104,7 +104,7 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
     app.delete("/servers/:id", async (req, reply) => {
       const id = (req.params as { id: string }).id;
       try {
-        deps.manager.stop(id);
+        await deps.manager.stop(id);
         await deps.servers.deleteServer(uid(req), id);
         await deps.audit.log({ userId: uid(req), action: "vpn_server_delete", success: true, resourceType: "vpn_server", resourceId: id });
         return reply.code(204).send();
@@ -129,7 +129,7 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       const id = (req.params as { id: string }).id;
       try {
         await deps.servers.getServer(uid(req), id); // ownership
-        deps.manager.stop(id);
+        await deps.manager.stop(id);
         return reply.send({ ok: true });
       } catch (e) { return fail(reply, e); }
     });

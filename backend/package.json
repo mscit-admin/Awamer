@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node --enable-source-maps dist/server.js",
+    "vpn-helper": "node --enable-source-maps dist/vpn-helper/main.js",
     "dev": "tsx watch src/server.ts",
     "migrate:up": "tsx src/migrate.ts up",
     "migrate:down": "tsx src/migrate.ts down",

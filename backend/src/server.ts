@@ -73,6 +73,7 @@ import { makeTunnelRoutes } from "./routes/tunnels.js";
 import { makeWsTunnelGateway } from "./ssh/wsTunnelGateway.js";
 import { VpnProfileRepository } from "./repos/vpnRepo.js";
 import { VpnManager } from "./vpn/vpnManager.js";
+import { VpnHelperClient } from "./vpn/helperClient.js";
 import { makeVpnRoutes } from "./routes/vpn.js";
 import { VpnServerRepository } from "./repos/vpnServerRepo.js";
 import { VpnServerManager } from "./vpn/vpnServerManager.js";
@@ -122,12 +123,19 @@ async function main() {
   const hostKeys = new HostKeyRepository(pool);
   // Phase 5 — server-managed SSH local tunnels (in-memory).
   const tunnels = new TunnelManager({ hosts, credentials, log, hostKeys });
+  // SEC-INFRA-001 — the backend never spawns OpenVPN; it delegates all
+  // privileged VPN lifecycle work to the isolated awamer-vpn-helper over an
+  // authenticated Unix socket. Fail-closed if the helper is unreachable.
+  const vpnHelper = new VpnHelperClient({
+    socketPath: cfg.env.VPN_HELPER_SOCKET,
+    secret: cfg.env.VPN_HELPER_SECRET ?? "",
+  });
   // OpenVPN client profiles (encrypted) + backend-runtime tunnel manager.
   const vpnProfiles = new VpnProfileRepository(pool, secretBox);
-  const vpnManager = new VpnManager(log);
+  const vpnManager = new VpnManager(log, vpnHelper);
   // Awamer-as-OpenVPN-server: PKI-backed server instances + their users.
   const vpnServers = new VpnServerRepository(pool, secretBox, argon2);
-  const vpnServerManager = new VpnServerManager(log);
+  const vpnServerManager = new VpnServerManager(log, vpnHelper);
   // Backup / restore of a user's own session data.
   const backup = new BackupRepository(pool, secretBox);
   // Custom roles — load the DB-backed RBAC resolver before serving traffic.
@@ -305,8 +313,8 @@ async function main() {
     log.info({ sig }, "shutdown signal received");
     try {
       tunnels.stopAll();
-      vpnManager.stopAll();
-      vpnServerManager.stopAll();
+      await vpnManager.stopAll();
+      await vpnServerManager.stopAll();
       await app.close();
       await pool.end();
       log.info("clean shutdown complete");
