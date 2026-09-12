@@ -32,6 +32,8 @@ import { MFAUseCase } from "./usecases/mfa.js";
 import { RegisterUseCase } from "./usecases/register.js";
 import { ChangePasswordUseCase } from "./usecases/changePassword.js";
 import { PasswordResetUseCase } from "./usecases/passwordReset.js";
+import { reencryptLegacyMfaSecrets } from "./usecases/mfaMigration.js";
+import { resolveTrustedBaseUrl, assertResetEmailBaseUrl } from "./usecases/publicBaseUrl.js";
 import { PasswordResetRepository } from "./repos/passwordResetRepo.js";
 import { MailService } from "./email/mailer.js";
 import { makePasswordResetRoutes } from "./routes/passwordReset.js";
@@ -40,6 +42,7 @@ import { makeSessionSettingsRoutes } from "./routes/sessionSettings.js";
 
 import { makeAuthRoutes } from "./routes/auth.js";
 import { makeAuthedRoutes } from "./routes/users.js";
+import { StepUpService } from "./usecases/stepUp.js";
 import { makeAdminRoutes } from "./routes/admin.js";
 import { makeFolderRoutes, makeTagRoutes, makeCredentialRoutes } from "./routes/sessionMeta.js";
 import { makeHostRoutes, makeHistoryRoutes } from "./routes/sessionRoutes.js";
@@ -97,7 +100,7 @@ async function main() {
   const users = new UserRepository(pool);
   const mfaDevices = new MFADeviceRepository(pool);
   const refresh = new RefreshRepository(pool);
-  const audit = new AuditRepository(pool);
+  const audit = new AuditRepository(pool, log);
 
   // Phase 2 repos
   const folders = new FolderRepository(pool);
@@ -135,6 +138,9 @@ async function main() {
   await roleService.syncBuiltins();
   await roleService.reload();
 
+  // SEC-MFA-001: encrypt any legacy plaintext TOTP secrets at rest (idempotent).
+  await reencryptLegacyMfaSecrets(mfaDevices, secretBox, log);
+
   // AWM-SEC-022: registry of active long-lived remote sessions (SSH/Telnet/
   // tunnel/VNC). A security-relevant account change revokes matching sessions
   // immediately; a periodic loop revalidates live state as a fallback.
@@ -144,13 +150,27 @@ async function main() {
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
   const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log);
-  const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, appSettings);
+  const stepUp = new StepUpService(jwt);
+  const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, secretBox, appSettings, refresh, activeSessions);
   const registerUC = new RegisterUseCase(users, audit, argon2);
-  const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2);
+  const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2, activeSessions);
   // Email + forgot/reset password.
   const passwordResets = new PasswordResetRepository(pool);
   const mailer = new MailService(appSettings, secretBox, log);
-  const passwordResetUC = new PasswordResetUseCase(users, passwordResets, refresh, mailer, argon2, audit, log);
+  const passwordResetUC = new PasswordResetUseCase(users, passwordResets, refresh, mailer, argon2, audit, log,
+    { isProd: cfg.isProd, publicBaseUrl: cfg.publicBaseUrl }, activeSessions);
+
+  // SEC-RESET-001 (§5): fail closed at startup if email/reset is enabled in
+  // production but no trusted public base URL is configured (env or setting).
+  {
+    const emailEnabled = await mailer.isConfigured();
+    const trustedBase = resolveTrustedBaseUrl({
+      envBaseUrl: cfg.publicBaseUrl,
+      dbBaseUrl: await mailer.baseUrl(),
+      allowHttp: !cfg.isProd,
+    });
+    assertResetEmailBaseUrl({ isProd: cfg.isProd, emailEnabled, trustedBase });
+  }
 
   // Bootstrap admin (only if there are no users)
   await bootstrapAdmin(users, argon2, cfg, log);
@@ -243,7 +263,7 @@ async function main() {
   // Public forgot/reset password (same prefix as auth).
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });
 
-  await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
+  await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt, stepUp }), { prefix: "/api/v1" });
   await app.register(makeAdminRoutes({ sessions: activeSessions, users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, users, jwt }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeSessionSettingsRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/admin/session-settings" });
@@ -256,7 +276,7 @@ async function main() {
   await app.register(makeHostRoutes({ hosts, audit, users, jwt }), { prefix: "/api/v1/hosts" });
   await app.register(makeHistoryRoutes({ history, hosts, audit, users, jwt }), { prefix: "/api/v1/history" });
   await app.register(makeAuditRoutes({ audit, users, jwt }), { prefix: "/api/v1/audit" });
-  await app.register(makeNetworkRoutes({ users, jwt }), { prefix: "/api/v1/network" });
+  await app.register(makeNetworkRoutes({ users, jwt, audit }), { prefix: "/api/v1/network" });
   await app.register(makeBrandingRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/branding" });
   await app.register(makeOrganizationRoutes({ sessions: activeSessions, companies, units: orgUnits, users, audit, jwt, roleService }), { prefix: "/api/v1/org" });
   await app.register(makeAiRoutes({ ai: aiProviders, users, jwt }), { prefix: "/api/v1/ai" });

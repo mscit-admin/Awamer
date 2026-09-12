@@ -198,21 +198,53 @@ stored credential secret undecryptable, forcing users to re-enter all
 their saved passwords/keys. Only rotate it if you suspect that specific
 key was compromised, and re-save every credential afterward.
 
+### HTTPS port (operator-selectable — DEPLOY-PORT-001)
+
+The public HTTPS port is chosen at install time. **The default is `443`.** The
+installer prompts:
+
+```
+Enter public HTTPS port [443]:
+```
+
+For unattended/automation runs, set it non-interactively:
+
+```bash
+AWAMER_HTTPS_PORT=6655 NETSPHERE_DOMAIN=your.domain ./deploy/scripts/install.sh
+```
+
+Resolution priority: **1)** `AWAMER_HTTPS_PORT` → **2)** interactive prompt →
+**3)** the previously persisted port → **4)** `443`. The selected port is the
+single source of truth: it drives the nginx `listen`/redirect directives, the
+public URL, `VITE_API_BASE_URL`, firewall guidance, and the evidence report.
+It is persisted (non-secret) to **`/etc/awamer/deployment.conf`**
+(`AWAMER_DOMAIN`, `AWAMER_HTTPS_PORT`) and preserved by `update.sh`.
+
+> **ACME uses port 80, always.** Let's Encrypt HTTP-01 validation happens on
+> TCP 80 regardless of the HTTPS port — keep 80 open even when HTTPS is 6655/8443.
+
 ### Firewall
+
+Open exactly the SSH port, **80** (ACME + HTTP→HTTPS redirect), and your
+**selected HTTPS port**. Example for the default (443):
 
 ```bash
 sudo apt install ufw
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
-sudo ufw allow 22/tcp     # SSH
-sudo ufw allow 80/tcp     # HTTP (redirects to HTTPS; also used for cert renewal)
-sudo ufw allow 6655/tcp   # HTTPS (nginx serves the API here)
+sudo ufw allow 22/tcp      # SSH
+sudo ufw allow 80/tcp      # HTTP: ACME HTTP-01 + redirect to HTTPS
+sudo ufw allow 443/tcp     # Awamer HTTPS (use YOUR selected port, e.g. 6655)
 sudo ufw enable
 sudo ufw status
 ```
 
+If you chose a custom port, substitute it (e.g. `sudo ufw allow 6655/tcp`) —
+do **not** open 443 unless Awamer actually listens there. The installer prints
+the exact per-port firewall list for your chosen port at the end of the run.
+
 Port 8081 should NOT be in the firewall rules — Docker binds it
-to 127.0.0.1 only, and nginx reverse-proxies from 443.
+to 127.0.0.1 only, and nginx reverse-proxies from the selected HTTPS port.
 
 ### Resource limits
 
@@ -286,8 +318,12 @@ Before going live:
 - [ ] `.env.production` permissions are `600` and owned by deploying user
 - [ ] `.env.production` is backed up to a secure password manager
 - [ ] TLS certificate active (`curl -I https://YOUR-DOMAIN.com/healthz` shows HSTS)
-- [ ] Bootstrap admin password changed via the desktop UI
-- [ ] Firewall (`ufw`) configured to allow only 22, 80, 443
+- [ ] Bootstrap admin password changed via the desktop UI (the installer never
+      prints or logs it — it lives only in `.env.production`, mode 600)
+- [ ] Firewall (`ufw`) allows only 22, 80, and your selected HTTPS port
+      (default 443; e.g. 6655 if you chose it)
+- [ ] Installer finished with **Status: SUCCESS** (a **PARTIAL** result means
+      TLS was skipped and the production HTTPS endpoint is not active — not ready)
 - [ ] SSH key-based auth on the server (no root login, no password login)
 - [ ] Automated daily backups running (check `/var/log/netsphere-backup.log`)
 - [ ] Log rotation configured (`/etc/logrotate.d/nginx` should already cover

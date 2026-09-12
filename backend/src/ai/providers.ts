@@ -4,6 +4,7 @@
  * Keys never leave the server.
  */
 import type { AiProviderKind } from "../repos/aiRepo.js";
+import { safeFetch, type SafeFetchPolicy } from "./safeFetch.js";
 
 export interface AiCallInput {
   provider: AiProviderKind;
@@ -13,6 +14,8 @@ export interface AiCallInput {
   system: string;
   user: string;
   maxTokens?: number;
+  /** SEC-SSRF-001 — outbound policy (allowHttp in dev, limits). */
+  fetchPolicy?: SafeFetchPolicy;
 }
 
 export class AiError extends Error {
@@ -32,7 +35,7 @@ export async function callAi(input: AiCallInput): Promise<string> {
 
 async function callAnthropic(i: AiCallInput): Promise<string> {
   const base = (i.baseUrl?.replace(/\/$/, "")) || "https://api.anthropic.com";
-  const res = await fetch(`${base}/v1/messages`, {
+  const res = await safeFetch(`${base}/v1/messages`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -45,15 +48,15 @@ async function callAnthropic(i: AiCallInput): Promise<string> {
       system: i.system,
       messages: [{ role: "user", content: i.user }],
     }),
-  });
-  if (!res.ok) throw new AiError(`Anthropic error ${res.status}: ${(await res.text()).slice(0, 300)}`, 502);
-  const data = (await res.json()) as { content?: { type: string; text?: string }[] };
+  }, i.fetchPolicy);
+  if (!res.ok) throw new AiError(`Anthropic error ${res.status}: ${res.text().slice(0, 300)}`, 502);
+  const data = res.json() as { content?: { type: string; text?: string }[] };
   return (data.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
 }
 
 async function callOpenAiCompatible(i: AiCallInput): Promise<string> {
   const base = (i.baseUrl?.replace(/\/$/, "")) || "https://api.openai.com/v1";
-  const res = await fetch(`${base}/chat/completions`, {
+  const res = await safeFetch(`${base}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${i.apiKey}` },
     body: JSON.stringify({
@@ -64,23 +67,23 @@ async function callOpenAiCompatible(i: AiCallInput): Promise<string> {
         { role: "user", content: i.user },
       ],
     }),
-  });
-  if (!res.ok) throw new AiError(`Provider error ${res.status}: ${(await res.text()).slice(0, 300)}`, 502);
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  }, i.fetchPolicy);
+  if (!res.ok) throw new AiError(`Provider error ${res.status}: ${res.text().slice(0, 300)}`, 502);
+  const data = res.json() as { choices?: { message?: { content?: string } }[] };
   return (data.choices?.[0]?.message?.content ?? "").trim();
 }
 
 async function callGoogle(i: AiCallInput): Promise<string> {
   const base = (i.baseUrl?.replace(/\/$/, "")) || "https://generativelanguage.googleapis.com/v1beta";
-  const res = await fetch(`${base}/models/${encodeURIComponent(i.model)}:generateContent?key=${encodeURIComponent(i.apiKey)}`, {
+  const res = await safeFetch(`${base}/models/${encodeURIComponent(i.model)}:generateContent?key=${encodeURIComponent(i.apiKey)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: i.system }] },
       contents: [{ role: "user", parts: [{ text: i.user }] }],
     }),
-  });
-  if (!res.ok) throw new AiError(`Google error ${res.status}: ${(await res.text()).slice(0, 300)}`, 502);
-  const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  }, i.fetchPolicy);
+  if (!res.ok) throw new AiError(`Google error ${res.status}: ${res.text().slice(0, 300)}`, 502);
+  const data = res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
   return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").trim();
 }

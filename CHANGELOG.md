@@ -9,6 +9,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Full security remediation program (SEC-RESET/TENANT/SESSION/MFA/SSRF/NET/AUDIT/INFRA/DEP)
+
+Ten-finding remediation delivered in controlled phases with tests after every
+phase. Full detail in `SECURITY_REMEDIATION_CHANGELOG.md`; verification and the
+production decision in `FINAL_SECURITY_REMEDIATION_REPORT.md`. Decision:
+**CONDITIONALLY PRODUCTION READY** (9 fixed + verified; SEC-INFRA-001 accepted
+as a documented temporary architectural risk).
+
+### Security / Fixed
+- **SEC-RESET-001 (P1) — reset-link host/origin poisoning.** Reset URLs are
+  built from validated config (`APP_PUBLIC_BASE_URL`), never from
+  `Host`/`Origin`/`X-Forwarded-*`; production fails closed when unset.
+- **SEC-TENANT-001 (P0) — null-company tenant escape.** Explicit `TenantScope`
+  (`global | company | none`); a non-super actor with no company fails closed
+  instead of collapsing to global. Null-company sharing rejected.
+- **SEC-SESSION-001 (P1) — security changes invalidate all sessions.** New
+  `auth_version` (migration `027`) in the access-token `av` claim, checked live;
+  password/MFA changes bump it and revoke refresh + live sessions.
+- **SEC-MFA-001 (P1) — TOTP secrets encrypted at rest** (AES-256-GCM envelope);
+  legacy plaintext re-encrypted idempotently at startup.
+- **SEC-MFA-002 (P2) — step-up re-auth required** for enabling/disabling MFA.
+- **SEC-SSRF-001 (P1) — SSRF-safe AI outbound** (`ai/safeFetch.ts`): single DNS
+  resolution point, blocked IP ranges, per-hop redirect re-validation, timeouts,
+  size cap.
+- **SEC-NET-001 (P2) — network diagnostics scoped + restricted.** Added a new
+  **`network:diagnose`** permission (granted to **super_admin** and **admin**
+  only; not user/readonly/auditor), enforced server-side on the network routes
+  and gating the `/network` sidebar entry; target restrictions block
+  loopback/link-local/metadata/multicast (RFC1918 LAN still allowed); per-user
+  rate limit + per-operation audit.
+- **SEC-AUDIT-001 (P2) — audit failures observable, not silent.** Failure metric
+  + structured error (correlation fields only, no secret payload); real action
+  preserved instead of rewritten to `config_change`.
+- **SEC-DEP-001 (P2) — patched `@xmldom/xmldom`** to `0.8.15` via override
+  (KDBX import chain).
+
+### Risk accepted
+- **SEC-INFRA-001 (P2) — API container root + NET_ADMIN.** NOT marked fixed;
+  documented and accepted as a temporary architectural risk with compensating
+  controls pending a dedicated VPN-helper privilege-split cycle
+  (`docs/SECURITY_SEC-INFRA-001.md`).
+
+## [Unreleased] — Deployment port preflight cleanup (DEPLOY-PORT-002)
+
+### Fixed
+- **DEPLOY-PORT-002 — obsolete hardcoded HTTPS port removed from early
+  preflight.** The Step-0 preflight loop hardcoded `6655` (`for _p in 80 6655
+  8081`) and ran before the operator's HTTPS port was resolved, so it could warn
+  about port 6655 even when 443/8443/9443 was selected. The early preflight now
+  checks only genuinely static ports (80 for ACME, 8081 host-bound backend); the
+  production HTTPS port is checked dynamically in Step 5 against the resolved
+  `AWAMER_HTTPS_PORT` (single source of truth). No other behavior changed. New
+  `DEPLOY-PORT-002-TEST-001..005` cover ports 443/6655/8443, non-interactive
+  9443, and update-mode preservation.
+
+## [Unreleased] — Installation evidence security + selectable HTTPS port
+
+### Security / Fixed
+- **EVID-SEC-001 — evidence no longer dumps the full environment.**
+  `collect_system_info` now records an explicit **allowlist** of safe variables
+  (`collect_safe_environment`) instead of `env | sort`, so unknown/secret-bearing
+  variables are never written to evidence.
+- **Redaction hardened (defense-in-depth).** Credential-bearing URLs
+  (`postgres://user:pass@…`, `redis://:pass@…`, etc.) are redacted to
+  `scheme://[REDACTED]@host`; the `AUTHORIZATION=` env form is fully redacted (no
+  trailing token); added `PWD`, `CLIENT_SECRET`, `ACCESS_KEY`, `GITHUB_PAT` and
+  URL coverage. The support-bundle scanner also flags credential URIs, and
+  `RUN_ID` is validated / canonicalized against the evidence root (no path
+  traversal or symlink escape).
+- **EVID-SEC-002 — bootstrap admin password is never displayed.** Removed the
+  `grep BOOTSTRAP_ADMIN` prints from install.sh; the installer shows only the
+  non-secret username/email and `Password: [not displayed]`. The password lives
+  solely in `.env.production` (mode 600).
+- **DEPLOY-PORT-001 — operator-selectable public HTTPS port.** Default **443**;
+  choose another (e.g. 6655/8443) interactively or via `AWAMER_HTTPS_PORT`. The
+  nginx config is now a template rendered with the chosen port (`listen`,
+  IPv4/IPv6, HTTP→HTTPS redirect), and the port propagates to the public URL,
+  `VITE_API_BASE_URL`, firewall guidance, evidence report/manifest, and
+  `update.sh`. The port is validated (1..65535), checked for conflicts, and
+  persisted (non-secret) to `/etc/awamer/deployment.conf`; `update.sh` preserves
+  it and requires explicit confirmation to change it. A centralized
+  `build_public_https_url` removes duplicated URL logic. ACME HTTP-01 stays on
+  port 80 regardless of the HTTPS port.
+- **EVID-STATE-001 — incomplete TLS is no longer reported as SUCCESS.** Skipping
+  certificate issuance (or nginx) now finalizes **PARTIAL** (exit code **2**)
+  with machine-readable `incomplete_gates` in the manifest; a certbot **failure**
+  remains **FAILED** (exit 1). The installer never claims "production ready" for
+  PARTIAL.
+- **EVID-TEST-001 — tests.** New `deploy/scripts/tests/security-port-test.sh`
+  (62 checks: EVID-SEC-TEST-001..007, EVID-BOOT-001/-002, PORT-001..008 +
+  rendered `nginx -t` for 443/6655/8443, INSTALL-STATE-001..004). Existing
+  evidence (31) and installer-sim (33) suites still pass; READY-DEPLOY / CFG-BOOT
+  / AUTHZ-STATE regression gates (43) unchanged and green. No application source,
+  business logic, or schema was modified.
+
 ## [Unreleased] — Installation evidence & diagnostics system
 
 ### Added

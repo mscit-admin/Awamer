@@ -19,21 +19,74 @@
 set -euo pipefail
 
 # --- Config (override via environment) -------------------------------
-BRANCH="${BRANCH:-claude/feature-addition-ygosfh}"
-API_BASE_URL="${API_BASE_URL:-https://161.97.78.116.nip.io:6655}"
+BRANCH="${BRANCH:-main}"
 WEB_ROOT="${WEB_ROOT:-/var/www/awamer}"
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/docker-compose.production.yml}"
 ENV_FILE="${ENV_FILE:-.env.production}"
 # VPN-server listener port(s) to open on the host firewall (VPN Server feature).
 # Set VPN_PORTS="" to skip, or e.g. "1194/udp 1195/udp" for extra servers.
 VPN_PORTS="${VPN_PORTS:-1194/udp 1194/tcp}"
+# Non-secret deployment config that install.sh persists (domain + HTTPS port).
+DEPLOYMENT_CONF="${AWAMER_DEPLOYMENT_CONF:-/etc/awamer/deployment.conf}"
 # ---------------------------------------------------------------------
 
 # Resolve project root (this script lives in deploy/scripts/).
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=lib/evidence.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/evidence.sh"
+
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+err() { printf '\033[0;31m==> ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# --- DEPLOY-PORT-001: preserve the HTTPS port across updates (§25/§50) ---
+# The persisted deployment config is the source of truth for domain + port.
+CUR_DOMAIN=""; CUR_PORT=""
+if [[ -r "$DEPLOYMENT_CONF" ]]; then
+  # shellcheck disable=SC1090
+  CUR_DOMAIN="$(sh -c ". '$DEPLOYMENT_CONF' 2>/dev/null; printf %s \"\${AWAMER_DOMAIN:-}\"")"
+  CUR_PORT="$(sh -c ". '$DEPLOYMENT_CONF' 2>/dev/null; printf %s \"\${AWAMER_HTTPS_PORT:-}\"")"
+fi
+
+# Resolve the effective HTTPS port. An operator may intentionally change it via
+# AWAMER_HTTPS_PORT, but a change MUST be explicitly confirmed (§27/§51).
+HTTPS_PORT=""
+PORT_CHANGE_REQUESTED=0
+if [[ -n "${AWAMER_HTTPS_PORT:-}" ]]; then
+  validate_https_port "$AWAMER_HTTPS_PORT" || err "Invalid AWAMER_HTTPS_PORT '$AWAMER_HTTPS_PORT' (must be 1..65535)."
+  if [[ -n "$CUR_PORT" && "$AWAMER_HTTPS_PORT" != "$CUR_PORT" ]]; then
+    PORT_CHANGE_REQUESTED=1
+    say "Current HTTPS port: $CUR_PORT"
+    say "Requested HTTPS port: $AWAMER_HTTPS_PORT"
+    if [[ "${AWAMER_CONFIRM_PORT_CHANGE:-}" == "1" ]]; then
+      say "Port change confirmed via AWAMER_CONFIRM_PORT_CHANGE=1."
+    elif [[ -t 0 ]]; then
+      read -rp "Change production HTTPS port ${CUR_PORT} -> ${AWAMER_HTTPS_PORT}? [y/N] " _ans
+      [[ "$_ans" == "y" || "$_ans" == "Y" ]] || err "Port change not confirmed — aborting (port preserved: $CUR_PORT)."
+    else
+      err "Refusing to change HTTPS port non-interactively. Set AWAMER_CONFIRM_PORT_CHANGE=1 to confirm."
+    fi
+  fi
+  HTTPS_PORT="$AWAMER_HTTPS_PORT"
+elif [[ -n "$CUR_PORT" ]]; then
+  HTTPS_PORT="$CUR_PORT"          # preserve the persisted port (§50)
+else
+  # Never guess (§25): require the operator to establish the port explicitly.
+  err "Cannot determine the HTTPS port: no $DEPLOYMENT_CONF and no AWAMER_HTTPS_PORT set. Run install.sh (which persists it) or set AWAMER_HTTPS_PORT."
+fi
+
+# Domain: persisted value, or AWAMER_DOMAIN override.
+DOMAIN="${AWAMER_DOMAIN:-$CUR_DOMAIN}"
+
+# API base URL: derive from domain+port unless the operator overrides it.
+if [[ -n "${API_BASE_URL:-}" ]]; then
+  :                                # explicit override respected
+elif [[ -n "$DOMAIN" ]]; then
+  API_BASE_URL="$(build_public_https_url "$DOMAIN" "$HTTPS_PORT")"
+else
+  err "Cannot determine API base URL: set AWAMER_DOMAIN (or API_BASE_URL), or run install.sh first."
+fi
 
 # Pick docker compose flavour.
 if docker compose version >/dev/null 2>&1; then DC=(docker compose); else DC=(docker-compose); fi
@@ -89,6 +142,30 @@ say "Publishing to $WEB_ROOT…"
 mkdir -p "$WEB_ROOT"
 rm -rf "${WEB_ROOT:?}/"*
 cp -r desktop/dist/* "$WEB_ROOT"/
+
+# 4a) If the operator explicitly (and confirmedly) changed the HTTPS port,
+#     re-render the nginx config from the template with the new port, validate,
+#     and only activate after `nginx -t` PASS (§27/§51). Certificates are NOT
+#     touched. The persisted deployment config is updated to the new port.
+if [[ "$PORT_CHANGE_REQUESTED" -eq 1 ]]; then
+  [[ -n "$DOMAIN" ]] || err "Port change requires a known domain (set AWAMER_DOMAIN or run install.sh)."
+  say "Re-rendering nginx config for $DOMAIN on new HTTPS port $HTTPS_PORT…"
+  NGINX_CONF=/etc/nginx/sites-available/netsphere
+  render_nginx_config deploy/nginx/netsphere.conf "$DOMAIN" "$HTTPS_PORT" | sudo tee "${NGINX_CONF}.new" >/dev/null
+  # Stage the new config in place, validate, and roll back on failure.
+  sudo cp "$NGINX_CONF" "${NGINX_CONF}.bak" 2>/dev/null || true
+  sudo mv "${NGINX_CONF}.new" "$NGINX_CONF"
+  if sudo nginx -t; then
+    sudo systemctl reload nginx
+    printf 'AWAMER_DOMAIN=%s\nAWAMER_HTTPS_PORT=%s\n' "$DOMAIN" "$HTTPS_PORT" | sudo tee "$DEPLOYMENT_CONF" >/dev/null
+    say "HTTPS port changed to $HTTPS_PORT and persisted."
+  else
+    [[ -f "${NGINX_CONF}.bak" ]] && sudo mv "${NGINX_CONF}.bak" "$NGINX_CONF"
+    sudo nginx -t >/dev/null 2>&1 && sudo systemctl reload nginx || true
+    err "New nginx config failed 'nginx -t' — port change reverted, running config unchanged."
+  fi
+  sudo rm -f "${NGINX_CONF}.bak" 2>/dev/null || true
+fi
 
 # 4) Reload nginx. An application update NEVER touches TLS certificates
 #    (DEPLOY-002/§6): the existing certificate is preserved. We only validate

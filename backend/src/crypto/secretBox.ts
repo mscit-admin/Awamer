@@ -117,6 +117,13 @@ export interface SecretBox {
   sealBytes(plain: Buffer): Buffer;
   /** Decrypt a binary envelope produced by `sealBytes`. */
   openBytes(stored: Buffer): Buffer;
+  /**
+   * True if the bytes look like a `sealBytes` envelope (version byte 0x01).
+   * Used to distinguish encrypted values from legacy plaintext (e.g. a base32
+   * TOTP secret, whose bytes are ASCII A–Z/2–7 and never start with 0x01)
+   * without attempting decryption.
+   */
+  isSealedBytes(stored: Buffer): boolean;
 }
 
 /** Binary envelope framing for `sealBytes`/`openBytes`. */
@@ -173,6 +180,9 @@ export function createSecretBox(key: Buffer): SecretBox {
       const ct = Buffer.concat([cipher.update(plain), cipher.final()]);
       const tag = cipher.getAuthTag();
       return Buffer.concat([Buffer.from([BIN_VERSION]), iv, tag, ct]);
+    },
+    isSealedBytes(stored: Buffer): boolean {
+      return Buffer.isBuffer(stored) && stored.length >= 1 + IV_BYTES + 16 && stored[0] === BIN_VERSION;
     },
     openBytes(stored: Buffer): Buffer {
       if (stored.length < 1 + IV_BYTES + 16) throw new Error("secretBox: truncated binary envelope");

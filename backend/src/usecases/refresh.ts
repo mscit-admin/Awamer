@@ -74,7 +74,7 @@ export class RefreshUseCase {
       throw user.isActive ? Errors.AccountLocked() : Errors.AccountInactive();
     }
 
-    const { access, refresh: newRefresh } = await this.jwt.issuePair(user.id, user.role);
+    const { access, refresh: newRefresh } = await this.jwt.issuePair(user.id, user.role, user.authVersion);
     await this.refresh.insert({ jti: newRefresh.jti, userId: user.id, expiresAt: newRefresh.expiresAt });
     await this.refresh.markRotated(session.jti, newRefresh.jti);
     await this.audit.log({

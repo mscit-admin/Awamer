@@ -30,6 +30,7 @@ export const PERMISSIONS = [
   "vpn:manage",         // create / edit / attach OpenVPN client profiles
   "vpn:reveal",         // read a VPN profile's decrypted config + credentials
   "vpn_server:manage",  // run OpenVPN server instances + manage their users
+  "network:diagnose",   // SEC-NET-001: ping/traceroute/DNS/port-check/LAN scan
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -52,6 +53,7 @@ export const PERMISSION_META: Record<Permission, { label: string; description: s
   "vpn:manage":         { label: "Manage VPN", description: "Create, edit and attach OpenVPN client profiles to assets and folders" },
   "vpn:reveal":         { label: "Reveal VPN config", description: "Read a VPN profile's decrypted OpenVPN config and credentials (needed to launch a tunnel)" },
   "vpn_server:manage":  { label: "Manage VPN server", description: "Run OpenVPN server instances on this host, manage their users, and issue client profiles" },
+  "network:diagnose":   { label: "Network diagnostics", description: "Run network diagnostics (ping, traceroute, DNS, port check, LAN scan) — Admins only, not standard users" },
 };
 
 const ALL: Permission[] = [...PERMISSIONS];

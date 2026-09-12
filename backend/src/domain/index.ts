@@ -31,6 +31,12 @@ export interface User {
   mfaEnabled: boolean;
   companyId: string | null;
   orgUnitId: string | null;
+  /**
+   * SEC-SESSION-001 — monotonically increasing security version. Embedded in
+   * access tokens (claim `av`) and compared live; a security-sensitive change
+   * (password/MFA) increments it, invalidating every previously issued token.
+   */
+  authVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -76,6 +82,8 @@ export interface AuditEvent {
   userAgent?: string | null;
   details?: Record<string, unknown>;
   success: boolean;
+  /** SEC-AUDIT-001 — optional correlation id, surfaced if the write fails. */
+  requestId?: string | null;
 }
 
 // ----- Domain errors -----

@@ -1,4 +1,5 @@
 import type { Pool } from "../db/index.js";
+import type { TenantScope } from "../domain/tenantScope.js";
 import type { AuditEvent, MFADevice, MFAMethod, RefreshSession } from "../domain/index.js";
 
 // =========================================================================
@@ -80,6 +81,19 @@ export class MFADeviceRepository {
 
   async delete(id: string, userId: string): Promise<void> {
     await this.pool.query(`DELETE FROM mfa_devices WHERE id = $1 AND user_id = $2`, [id, userId]);
+  }
+
+  /** SEC-MFA-001 migration support: every device's id + raw secret bytes. */
+  async listAllSecrets(): Promise<{ id: string; secretEnc: Buffer }[]> {
+    const { rows } = await this.pool.query<{ id: string; secret_enc: Buffer }>(
+      `SELECT id, secret_enc FROM mfa_devices`,
+    );
+    return rows.map((r) => ({ id: r.id, secretEnc: r.secret_enc }));
+  }
+
+  /** SEC-MFA-001 migration support: replace a device's stored secret bytes. */
+  async updateSecret(id: string, secretEnc: Buffer): Promise<void> {
+    await this.pool.query(`UPDATE mfa_devices SET secret_enc = $2 WHERE id = $1`, [id, secretEnc]);
   }
 }
 
@@ -169,16 +183,25 @@ const VALID_ACTIONS = new Set([
   "folder_create", "folder_update", "folder_delete",
   "tag_create", "tag_update", "tag_delete",
   "company_create", "company_delete", "user_assign_org",
+  "network_diagnose",
 ]);
 
 function mapAction(action: string, success: boolean): string {
   if (action === "login") return success ? "login_success" : "login_failed";
-  if (VALID_ACTIONS.has(action)) return action;
-  return "config_change"; // fail-safe; never block the request path
+  // SEC-AUDIT-001: preserve the real action verbatim (the column is free TEXT).
+  // Previously unknown actions were silently rewritten to "config_change",
+  // erasing the true action. `VALID_ACTIONS` is kept only as documentation.
+  void VALID_ACTIONS;
+  return action && action.trim() !== "" ? action : "unknown_action";
 }
 
+// SEC-AUDIT-001 §37: observable audit-write failure counter.
+let auditWriteFailuresTotal = 0;
+/** Total audit-log write failures since process start (health/monitoring). */
+export function getAuditWriteFailuresTotal(): number { return auditWriteFailuresTotal; }
+
 export class AuditRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly pool: Pool, private readonly logger?: import("../logger/index.js").Logger) {}
 
   async log(evt: AuditEvent): Promise<void> {
     const action = mapAction(evt.action, evt.success);
@@ -198,13 +221,36 @@ export class AuditRepository {
           evt.success,
         ],
       );
-    } catch {
-      // Audit failures must never crash the request path. Errors are handled
-      // by the caller's logger; we just swallow here.
+    } catch (e) {
+      // SEC-AUDIT-001: an audit write NEVER crashes the request path (fail-open
+      // for availability), but the failure is NO LONGER silent — increment a
+      // metric and emit an application error with correlation fields ONLY. The
+      // event details payload is deliberately NOT logged (may carry sensitive
+      // context); we log identifiers + an error category, no secrets.
+      auditWriteFailuresTotal++;
+      const errorCategory = (e as { code?: string })?.code
+        ?? (e instanceof Error ? e.name : "unknown");
+      this.logger?.error(
+        {
+          event: "audit_write_failed",
+          requestId: evt.requestId ?? null,
+          userId: evt.userId,
+          action,
+          resourceType: evt.resourceType ?? null,
+          resourceId: evt.resourceId ?? null,
+          success: evt.success,
+          errorCategory,
+          failuresTotal: auditWriteFailuresTotal,
+        },
+        "audit log write failed",
+      );
     }
   }
 
-  async list(opts: { limit?: number; offset?: number; action?: string; success?: boolean; userId?: string; companyId?: string } = {}): Promise<{ entries: AuditLogEntry[]; total: number }> {
+  async list(opts: { limit?: number; offset?: number; action?: string; success?: boolean; userId?: string; scope: TenantScope }): Promise<{ entries: AuditLogEntry[]; total: number }> {
+    // SEC-TENANT-001: a non-super actor with no company (scope "none") must NOT
+    // read the global audit log. Fail closed to an empty result.
+    if (opts.scope.kind === "none") return { entries: [], total: 0 };
     const limit = Math.max(1, Math.min(200, opts.limit ?? 50));
     const offset = Math.max(0, opts.offset ?? 0);
 
@@ -213,8 +259,9 @@ export class AuditRepository {
     if (opts.action) { params.push(opts.action); where.push(`a.action = $${params.length}`); }
     if (opts.success !== undefined) { params.push(opts.success); where.push(`a.success = $${params.length}`); }
     if (opts.userId) { params.push(opts.userId); where.push(`a.user_id = $${params.length}`); }
-    // Tenant scope: only events by users of this company (isolation).
-    if (opts.companyId) { params.push(opts.companyId); where.push(`u.company_id = $${params.length}`); }
+    // Tenant scope: only events by users of this company (isolation). Global
+    // scope (Super Admin) applies no company filter.
+    if (opts.scope.kind === "company") { params.push(opts.scope.companyId); where.push(`u.company_id = $${params.length}`); }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const countParams = [...params];

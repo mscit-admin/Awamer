@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isSafePublicBaseUrl, normalizeBaseUrl } from "../usecases/publicBaseUrl.js";
 
 /**
  * Development-only default bootstrap password. Never accepted in production
@@ -83,6 +84,12 @@ const envSchema = z.object({
   // CORS
   CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:1420,tauri://localhost,https://tauri.localhost"),
 
+  // SEC-RESET-001: trusted public base URL for security-sensitive links
+  // (password reset). MUST be the real public origin, e.g.
+  // https://awamer.example.com or https://awamer.example.com:6655. Reset links
+  // are built ONLY from this (or a valid app_base_url setting), never headers.
+  APP_PUBLIC_BASE_URL: z.string().optional(),
+
   // Bootstrap admin (created on first startup if no users exist).
   // The password default below is a DEVELOPMENT convenience only; production
   // rejects it (and other weak/placeholder values) — see loadConfig (AWM-CFG-001).
@@ -109,6 +116,8 @@ export interface Config {
   jwtAccessTtlSec: number;
   jwtRefreshTtlSec: number;
   corsOrigins: string[];
+  /** SEC-RESET-001: validated trusted public base URL (or null if unset). */
+  publicBaseUrl: string | null;
 }
 
 export function loadConfig(): Config {
@@ -132,12 +141,29 @@ export function loadConfig(): Config {
     assertProductionBootstrapPassword(env.BOOTSTRAP_ADMIN_PASSWORD);
   }
 
+  // SEC-RESET-001: if a public base URL is provided, it MUST be a valid, safe
+  // URL (https in production; no embedded credentials; no non-http schemes).
+  // An invalid value fails startup rather than silently degrading.
+  const isProd = env.APP_ENV === "production";
+  let publicBaseUrl: string | null = null;
+  if (env.APP_PUBLIC_BASE_URL && env.APP_PUBLIC_BASE_URL.trim() !== "") {
+    if (!isSafePublicBaseUrl(env.APP_PUBLIC_BASE_URL, { allowHttp: !isProd })) {
+      throw new Error(
+        "APP_PUBLIC_BASE_URL must be a valid " +
+          (isProd ? "https" : "http(s)") +
+          " URL with a hostname and no embedded credentials",
+      );
+    }
+    publicBaseUrl = normalizeBaseUrl(env.APP_PUBLIC_BASE_URL);
+  }
+
   return {
     env,
-    isProd: env.APP_ENV === "production",
+    isProd,
     isDev: env.APP_ENV === "development",
     jwtAccessTtlSec: parseDuration(env.JWT_ACCESS_TTL),
     jwtRefreshTtlSec: parseDuration(env.JWT_REFRESH_TTL),
     corsOrigins: env.CORS_ALLOWED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean),
+    publicBaseUrl,
   };
 }

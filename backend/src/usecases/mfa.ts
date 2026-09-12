@@ -3,10 +3,12 @@ import { authenticator } from "otplib";
 import qrcode from "qrcode";
 import { Errors } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
-import type { MFADeviceRepository, AuditRepository } from "../repos/otherRepos.js";
+import type { MFADeviceRepository, AuditRepository, RefreshRepository } from "../repos/otherRepos.js";
 import type { AppSettingsRepository } from "../repos/appSettings.js";
 import type { Config } from "../config/index.js";
 import type { Argon2Service } from "../crypto/argon2.js";
+import type { SecretBox } from "../crypto/secretBox.js";
+import type { SessionRevoker } from "../session/activeSessions.js";
 
 // 30-second window, 6 digits — RFC 6238 defaults.
 authenticator.options = { window: 1, step: 30, digits: 6 };
@@ -25,8 +27,40 @@ export class MFAUseCase {
     private readonly audit: AuditRepository,
     private readonly cfg: Config,
     private readonly argon2: Argon2Service,
+    private readonly secretBox: SecretBox,
     private readonly settings: AppSettingsRepository,
+    private readonly refresh?: RefreshRepository,
+    private readonly sessions?: SessionRevoker,
   ) {}
+
+  /** SEC-MFA-001: encrypt the base32 TOTP secret for `secret_enc` storage. */
+  private sealSecret(secret: string): Buffer {
+    return this.secretBox.sealBytes(Buffer.from(secret, "utf8"));
+  }
+
+  /**
+   * Decrypt a stored TOTP secret. Encrypted rows are opened with the data key;
+   * legacy plaintext rows (pre-encryption) are read as-is until the startup
+   * migration re-seals them. In production the key is mandatory, so a wrong/
+   * missing key fails closed (openBytes throws) rather than accepting plaintext.
+   */
+  private openSecret(secretEnc: Buffer): string {
+    if (this.secretBox.isSealedBytes(secretEnc)) {
+      return this.secretBox.openBytes(secretEnc).toString("utf8");
+    }
+    return secretEnc.toString("utf8"); // legacy plaintext (migrated on startup)
+  }
+
+  /**
+   * SEC-SESSION-001 — an MFA security change (activation/replacement/disable)
+   * invalidates prior authenticated state: bump auth_version (old access tokens
+   * fail), revoke refresh sessions, and close live remote sessions.
+   */
+  private async invalidateAllSessions(userId: string): Promise<void> {
+    await this.users.incrementAuthVersion(userId);
+    await this.refresh?.revokeAllForUser(userId);
+    this.sessions?.revokeUser(userId, "CREDENTIALS_CHANGED");
+  }
 
   /**
    * The label shown at the top of the entry in authenticator apps (Google
@@ -58,7 +92,7 @@ export class MFAUseCase {
       userId,
       deviceName,
       deviceType: "totp",
-      secretEnc: Buffer.from(secret, "utf8"),
+      secretEnc: this.sealSecret(secret),
       isPrimary: false,
     });
     return { deviceId, secret, otpauthUrl, qrPngBase64 };
@@ -69,7 +103,7 @@ export class MFAUseCase {
     const all = await this.devices.listByUser(userId);
     const device = all.find((d) => d.id === deviceId);
     if (!device) throw Errors.InvalidMFACode();
-    const secret = device.secretEnc.toString("utf8");
+    const secret = this.openSecret(device.secretEnc);
 
     if (!authenticator.check(code, secret)) {
       await this.audit.log({
@@ -84,6 +118,7 @@ export class MFAUseCase {
     const user = await this.users.getById(userId);
     user.mfaEnabled = true;
     await this.users.update(user);
+    await this.invalidateAllSessions(userId);
 
     await this.audit.log({
       userId, action: "mfa_enroll", success: true,
@@ -99,7 +134,7 @@ export class MFAUseCase {
       device = all[0] ?? null;
     }
     if (!device) throw Errors.InvalidMFACode();
-    const secret = device.secretEnc.toString("utf8");
+    const secret = this.openSecret(device.secretEnc);
     if (!authenticator.check(code, secret)) throw Errors.InvalidMFACode();
     await this.devices.updateLastUsed(device.id);
   }
@@ -115,6 +150,7 @@ export class MFAUseCase {
     for (const d of devices) await this.devices.delete(d.id, userId);
     user.mfaEnabled = false;
     await this.users.update(user);
+    await this.invalidateAllSessions(userId);
     await this.audit.log({
       userId: adminId, action: "mfa_disable", success: true,
       resourceType: "user", resourceId: userId, details: { admin_disable: true, devices_removed: devices.length },
@@ -140,18 +176,27 @@ export class MFAUseCase {
       });
       throw Errors.InvalidCredentials();
     }
+    await this.removeAllDevices(userId);
+  }
 
-    // Remove every MFA device (we keep DELETE atomic per device but that
-    // keeps the audit trail simpler than a bulk DELETE).
+  /**
+   * SEC-MFA-002 — disable MFA after a step-up token has already re-authenticated
+   * the user (password + current MFA). No password argument is needed here.
+   */
+  async disableAfterStepUp(userId: string): Promise<void> {
+    await this.removeAllDevices(userId);
+  }
+
+  /** Shared teardown: delete devices, clear flag, invalidate sessions, audit. */
+  private async removeAllDevices(userId: string): Promise<void> {
+    const user = await this.users.getById(userId);
     const devices = await this.devices.listByUser(userId);
     for (const d of devices) {
       await this.devices.delete(d.id, userId);
     }
-
-    // Clear the flag on the user record.
     user.mfaEnabled = false;
     await this.users.update(user);
-
+    await this.invalidateAllSessions(userId);
     await this.audit.log({
       userId, action: "mfa_disable", success: true,
       details: { devices_removed: devices.length },

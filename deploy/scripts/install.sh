@@ -38,6 +38,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/evidence.sh"
 evidence_init >/dev/null
 RUN_DIR="$(evidence_dir)"
 
+# Overall installation outcome — flipped to PARTIAL when a mandatory production
+# gate (e.g. TLS) is intentionally left incomplete (EVID-STATE-001).
+INSTALL_OUTCOME="SUCCESS"
+# Selected public HTTPS port (DEPLOY-PORT-001); resolved in Step 5. Default 443.
+HTTPS_PORT="443"
+DEPLOYMENT_CONF="${AWAMER_DEPLOYMENT_CONF:-/etc/awamer/deployment.conf}"
+
 # Evidence-aware output helpers: console output is unchanged for the operator,
 # but every message is ALSO recorded (sanitized) into the evidence run.
 say() { echo -e "${BOLD}==>${NC} $*"; ev_action "$*"; }
@@ -131,8 +138,11 @@ if [[ "$_arch" == "x86_64" || "$_arch" == "aarch64" || "$_arch" == "arm64" ]]; t
 else
     preflight_check "CPU architecture supported" WARN "$_arch (untested)"
 fi
-# Required local ports free (informational): 80, 6655, 8081
-for _p in 80 6655 8081; do
+# DEPLOY-PORT-002: only check STATIC ports here — ACME HTTP-01 (80) and the
+# host-bound backend (8081). The production HTTPS port is NOT static: it is
+# chosen by the operator later (Step 5), so it is checked there against the
+# resolved AWAMER_HTTPS_PORT — never assumed to be 6655/443 at this stage.
+for _p in 80 8081; do
     if ss -tlnH "( sport = :$_p )" 2>/dev/null | grep -q .; then
         preflight_check "Port $_p available" WARN "already in use"
     else
@@ -211,9 +221,16 @@ if [[ ! -f .env.production ]]; then
     ok "Generated .env.production (mode 600)"
     warn "BACK THIS FILE UP TO A SAFE PLACE — losing it means losing all sessions and MFA secrets!"
 
-    # Auto-fill BOOTSTRAP_ADMIN credentials in a confirmation prompt
+    # EVID-SEC-002: NEVER display the bootstrap password. Show only the
+    # non-secret username/email so the operator knows which account to use;
+    # the password stays in the mode-600 .env.production and is never printed.
+    _boot_user="$(grep -E '^BOOTSTRAP_ADMIN_USERNAME=' .env.production | cut -d= -f2- || true)"
+    _boot_email="$(grep -E '^BOOTSTRAP_ADMIN_EMAIL=' .env.production | cut -d= -f2- || true)"
     echo
-    grep "BOOTSTRAP_ADMIN" .env.production
+    echo "  Bootstrap administrator:"
+    echo "    Username: ${_boot_user:-admin}"
+    echo "    Email:    ${_boot_email:-<in .env.production>}"
+    echo "    Password: [configured securely — not displayed]"
     echo
     echo "Press Enter to continue with the generated admin credentials, or"
     echo "Ctrl-C to abort and edit them in .env.production first."
@@ -312,14 +329,57 @@ fi
 _ev_kv_set tls_domain "$NETSPHERE_DOMAIN"
 
 if [[ "$NETSPHERE_DOMAIN" == "skip" ]]; then
+    # EVID-STATE-001: no nginx/TLS was configured, so the production HTTPS
+    # endpoint is not active → PARTIAL, not SUCCESS.
     warn "Skipping nginx setup. Backend listens on 127.0.0.1:8081"
     _ev_kv_set nginx_service "skipped"
     _ev_kv_set tls_issuance "skipped"
+    INSTALL_OUTCOME="PARTIAL"
+    _ev_kv_set partial_reason "nginx/TLS setup was skipped; no public HTTPS endpoint was configured."
+    ev_incomplete_gate "NGINX_HTTPS" "operator chose to skip nginx setup"
+    ev_incomplete_gate "TLS_CERTIFICATE" "skipped (no nginx)"
 else
     # DEPLOY-009: sanity-check the domain before involving Let's Encrypt.
     if [[ ! "$NETSPHERE_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]; then
         err "'$NETSPHERE_DOMAIN' does not look like a valid fully-qualified domain name."
     fi
+
+    # ---- DEPLOY-PORT-001: operator-selected public HTTPS port -----------
+    # Priority: 1) AWAMER_HTTPS_PORT (env/automation)  2) interactive prompt
+    #           3) existing persisted port  4) default 443.
+    # ACME HTTP-01 validation always uses TCP 80, independent of this port (§19).
+    _existing_port=""
+    if [[ -r "$DEPLOYMENT_CONF" ]]; then
+        _existing_port="$(sudo sh -c ". '$DEPLOYMENT_CONF' 2>/dev/null; printf %s \"\${AWAMER_HTTPS_PORT:-}\"" 2>/dev/null || true)"
+    fi
+    if [[ -n "${AWAMER_HTTPS_PORT:-}" ]]; then
+        HTTPS_PORT="$AWAMER_HTTPS_PORT"
+        say "  Using HTTPS port from AWAMER_HTTPS_PORT: $HTTPS_PORT"
+    elif [[ -t 0 ]]; then
+        read -rp "Enter public HTTPS port [${_existing_port:-443}]: " _pin
+        HTTPS_PORT="${_pin:-${_existing_port:-443}}"
+    else
+        HTTPS_PORT="${_existing_port:-443}"
+        say "  Non-interactive: HTTPS port = $HTTPS_PORT (set AWAMER_HTTPS_PORT to override)"
+    fi
+    if ! validate_https_port "$HTTPS_PORT"; then
+        preflight_check "HTTPS port valid" FAIL "$HTTPS_PORT"
+        err "Invalid HTTPS port '$HTTPS_PORT' — must be an integer in 1..65535." "AW-INSTALL-PORT-001"
+    fi
+    preflight_check "HTTPS port valid" PASS "$HTTPS_PORT"
+    if [[ "$HTTPS_PORT" -lt 1024 ]]; then
+        say "  Note: $HTTPS_PORT is a privileged port; nginx binds it via its root master process."
+    fi
+    # Port conflict (§15/§28): FAIL if a NON-nginx process already owns it.
+    _port_owner="$(ss -tlnpH "( sport = :$HTTPS_PORT )" 2>/dev/null \
+        | grep -oE 'users:\(\("[^"]+"' | head -1 | sed 's/.*(("//' || true)"
+    if [[ -n "$_port_owner" && "$_port_owner" != "nginx" ]]; then
+        preflight_check "HTTPS port $HTTPS_PORT free" FAIL "in use by $_port_owner"
+        err "Port $HTTPS_PORT is already in use by '$_port_owner' (not nginx). Free it or choose another port." "AW-INSTALL-PORT-002"
+    fi
+    preflight_check "HTTPS port $HTTPS_PORT free" PASS "available (or already served by nginx)"
+    _ev_kv_set https_port "$HTTPS_PORT"
+    _ev_kv_set public_url "$(build_public_https_url "$NETSPHERE_DOMAIN" "$HTTPS_PORT")"
 
     NGINX_CONF=/etc/nginx/sites-available/netsphere      # final HTTPS config
     BOOTSTRAP_CONF=/etc/nginx/sites-available/netsphere-bootstrap
@@ -328,11 +388,31 @@ else
     LE_EMAIL="${LE_EMAIL:-admin@${NETSPHERE_DOMAIN#*.}}"
     sudo mkdir -p "$WEBROOT"
 
-    # Prepare the FINAL HTTPS config (domain substituted) but do NOT enable it
-    # yet — it references cert files that may not exist on a fresh host.
-    sudo cp deploy/nginx/netsphere.conf "$NGINX_CONF"
-    sudo sed -i "s/netsphere\\.example\\.com/${NETSPHERE_DOMAIN}/g" "$NGINX_CONF"
+    # Render the FINAL HTTPS config from the template (domain + selected port)
+    # but do NOT enable it yet — it references cert files that may not exist on
+    # a fresh host. The port is already strictly numeric (validate_https_port).
+    render_nginx_config deploy/nginx/netsphere.conf "$NETSPHERE_DOMAIN" "$HTTPS_PORT" \
+        | sudo tee "$NGINX_CONF" >/dev/null
     sudo rm -f /etc/nginx/sites-enabled/default
+
+    # Persist NON-SECRET deployment config (§26) so update.sh preserves the port.
+    sudo mkdir -p "$(dirname "$DEPLOYMENT_CONF")"
+    printf 'AWAMER_DOMAIN=%s\nAWAMER_HTTPS_PORT=%s\n' "$NETSPHERE_DOMAIN" "$HTTPS_PORT" \
+        | sudo tee "$DEPLOYMENT_CONF" >/dev/null
+    ev_action "Persisted deployment config $DEPLOYMENT_CONF (AWAMER_HTTPS_PORT=$HTTPS_PORT)"
+
+    # SEC-RESET-001: record the trusted public base URL so the backend builds
+    # password-reset links from it (never from request headers). Written to the
+    # secrets env (.env.production) since the backend reads it as APP_PUBLIC_BASE_URL.
+    _pub_base="$(build_public_https_url "$NETSPHERE_DOMAIN" "$HTTPS_PORT")"
+    if [[ -f .env.production ]]; then
+        if grep -q '^APP_PUBLIC_BASE_URL=' .env.production; then
+            sed -i "s#^APP_PUBLIC_BASE_URL=.*#APP_PUBLIC_BASE_URL=${_pub_base}#" .env.production
+        else
+            printf 'APP_PUBLIC_BASE_URL=%s\n' "$_pub_base" >> .env.production
+        fi
+        ev_action "Set APP_PUBLIC_BASE_URL=${_pub_base} in .env.production (SEC-RESET-001 trusted reset link base)"
+    fi
 
     # enable_final(): point sites-enabled at the HTTPS config, validate, reload.
     # NEVER reloads on a failed `nginx -t` (keeps the running config intact).
@@ -397,7 +477,14 @@ BOOT
         echo "to resolve to THIS server before issuing a certificate."
         read -rp "Continue with certbot certificate issuance? [Y/n]: " ANS
         if [[ "$ANS" == "n" || "$ANS" == "N" ]]; then
+            # EVID-STATE-001: operator SKIPPED TLS. The production HTTPS endpoint
+            # is NOT active, so this is PARTIAL — never SUCCESS. (A certbot
+            # *failure*, handled below, remains FAILED.)
             _ev_kv_set tls_issuance "SKIPPED (operator declined)"
+            INSTALL_OUTCOME="PARTIAL"
+            _ev_kv_set partial_reason "TLS certificate issuance was skipped by the operator; the production HTTPS endpoint is not active."
+            ev_incomplete_gate "TLS_CERTIFICATE" "operator declined certbot issuance"
+            ev_incomplete_gate "HTTPS_ACTIVATION" "final HTTPS config not enabled (no certificate)"
             warn "Skipped certbot. HTTP bootstrap vhost left in place."
             warn "Issue later, then enable HTTPS:"
             warn "  sudo certbot certonly --webroot -w $WEBROOT -d $NETSPHERE_DOMAIN --agree-tos --no-eff-email -m $LE_EMAIL"
@@ -434,9 +521,10 @@ fi
 ev_phase "FINALIZE" "Finalize + generate evidence"
 say "Step 7/7: Summary"
 
-# Mandatory phases succeeded → record SUCCESS (installation only; NOT a
-# production-approval decision, §24/§49) and generate the report + manifest.
-_finalize_once SUCCESS
+# Finalize with the actual outcome. SUCCESS only when every mandatory production
+# gate completed; PARTIAL when TLS/HTTPS was intentionally left incomplete
+# (EVID-STATE-001). Neither is a production-approval decision (§24/§49).
+_finalize_once "$INSTALL_OUTCOME"
 
 cat <<EOF
 
@@ -450,25 +538,37 @@ ${GREEN}════════════════════════
 EOF
 
 if [[ "${NETSPHERE_DOMAIN:-}" != "skip" && -n "${NETSPHERE_DOMAIN:-}" ]]; then
+    _pub_url="$(build_public_https_url "$NETSPHERE_DOMAIN" "$HTTPS_PORT")"
     cat <<EOF
-  Public URL:         https://${NETSPHERE_DOMAIN}
-  Health check:       https://${NETSPHERE_DOMAIN}/healthz
+  HTTPS Port:         ${HTTPS_PORT}
+  Public URL:         ${_pub_url}
+  Health check:       ${_pub_url}/healthz
 
   Desktop clients should be configured with:
-    VITE_API_BASE_URL=https://${NETSPHERE_DOMAIN}
+    VITE_API_BASE_URL=${_pub_url}
+
+  Required inbound ports (open in host firewall AND cloud security group):
+    22/tcp    SSH administration
+    80/tcp    Let's Encrypt HTTP-01 validation / HTTP→HTTPS redirect
+    ${HTTPS_PORT}/tcp  Awamer HTTPS
 EOF
 fi
 
+# EVID-SEC-002/§11/§43: never display or grep the bootstrap password.
+_boot_user="$(grep -E '^BOOTSTRAP_ADMIN_USERNAME=' .env.production | cut -d= -f2- 2>/dev/null || true)"
+_boot_email="$(grep -E '^BOOTSTRAP_ADMIN_EMAIL=' .env.production | cut -d= -f2- 2>/dev/null || true)"
 cat <<EOF
 
-  Bootstrap admin credentials (in .env.production):
-$(grep BOOTSTRAP_ADMIN .env.production | sed 's/^/    /')
+  Bootstrap administrator (credentials are in .env.production, mode 600):
+    Username: ${_boot_user:-admin}
+    Email:    ${_boot_email:-<in .env.production>}
+    Password: [not displayed]
 
   ${YELLOW}IMPORTANT:${NC}
     1. Sign in via a desktop client and CHANGE the bootstrap password.
     2. Back up .env.production to a secure password manager.
     3. Set up automated database backups (see deploy/scripts/backup.sh).
-    4. Configure firewall: allow only 22 (SSH), 80, 443.
+    4. Configure firewall: allow only 22 (SSH), 80, and ${HTTPS_PORT:-443} (Awamer HTTPS).
 
   Useful commands:
     Tail logs:          sudo docker compose -f deploy/docker-compose.production.yml logs -f auth-service
@@ -478,12 +578,41 @@ $(grep BOOTSTRAP_ADMIN .env.production | sed 's/^/    /')
     Database shell:     sudo docker compose -f deploy/docker-compose.production.yml exec postgres psql -U netsphere
 EOF
 
-# ----- Installation evidence summary (§36) --------------------------
+# ----- Installation evidence summary (§36/§60/§61) ------------------
+# Disable the failure trap now that we have cleanly finalized.
+trap - ERR
+
+if [[ "$INSTALL_OUTCOME" == "PARTIAL" ]]; then
+    # §32: automation must NOT read PARTIAL as a successful production install.
+    # §34: never claim "production ready/approved" for PARTIAL.
+    cat <<EOF
+
+${YELLOW}INSTALLATION STATUS: PARTIAL${NC}
+
+  Installation incomplete.
+  TLS setup has not been completed — the production HTTPS endpoint is not active.
+
+  Reason:    $(_ev_kv_get partial_reason)
+$( [[ "${NETSPHERE_DOMAIN:-}" != "skip" && -n "${NETSPHERE_DOMAIN:-}" ]] && echo "  Selected HTTPS Port: ${HTTPS_PORT}" )
+  Evidence:  ${RUN_DIR}/
+  Report:    ${RUN_DIR}/${EV_F_REPORT}
+  Manifest:  ${RUN_DIR}/${EV_F_MANIFEST}  (status: PARTIAL)
+
+  Complete TLS later, then re-run, to reach SUCCESS.
+  Support bundle: ./deploy/scripts/support-bundle.sh $(evidence_run_id)
+EOF
+    exit 2
+fi
+
 cat <<EOF
 
 ${GREEN}INSTALLATION COMPLETED${NC}
 
-  Status:    SUCCESS  (installation validated — this is NOT production approval, §24/§49)
+  Installation Status: SUCCESS  (installation validated — NOT production approval, §24/§49)
+  Domain:    ${NETSPHERE_DOMAIN:-<none>}
+$( [[ "${NETSPHERE_DOMAIN:-}" != "skip" && -n "${NETSPHERE_DOMAIN:-}" ]] && echo "  HTTPS Port: ${HTTPS_PORT}" && echo "  Public URL: $(build_public_https_url "$NETSPHERE_DOMAIN" "$HTTPS_PORT")" )
+  Certificate: $(_ev_kv_get tls_cert_after 2>/dev/null || echo n/a)
+  Nginx:     $(_ev_kv_get nginx_config_test 2>/dev/null || echo n/a)
   Evidence:  ${RUN_DIR}/
   Report:    ${RUN_DIR}/${EV_F_REPORT}
   Manifest:  ${RUN_DIR}/${EV_F_MANIFEST}
@@ -493,7 +622,4 @@ ${GREEN}INSTALLATION COMPLETED${NC}
   Create a sanitized support bundle to send for review:
     ./deploy/scripts/support-bundle.sh $(evidence_run_id)
 EOF
-
-# Disable the failure trap now that we have cleanly finalized.
-trap - ERR
 exit 0

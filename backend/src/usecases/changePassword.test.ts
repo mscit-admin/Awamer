@@ -12,10 +12,11 @@ function makeArgon2() {
 }
 
 function makeDeps(currentPlain: string) {
-  const state = { hash: `hash:${currentPlain}`, revoked: 0, audits: [] as any[] };
+  const state = { hash: `hash:${currentPlain}`, revoked: 0, authBumped: 0, audits: [] as any[] };
   const users = {
     async getById(id: string) { return { id, passwordHash: state.hash }; },
     async updatePasswordHash(_id: string, h: string) { state.hash = h; },
+    async incrementAuthVersion(_id: string) { state.authBumped++; return 2; },
   };
   const refresh = { async revokeAllForUser(_id: string) { state.revoked++; } };
   const audit = { async log(e: any) { state.audits.push(e); } };

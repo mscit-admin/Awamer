@@ -1,5 +1,6 @@
 import type { Pool } from "../db/index.js";
 import { type User, type Role, Errors, isRole } from "../domain/index.js";
+import type { TenantScope } from "../domain/tenantScope.js";
 
 interface UserRow {
   id: string;
@@ -17,6 +18,7 @@ interface UserRow {
   mfa_enabled: boolean;
   company_id: string | null;
   org_unit_id: string | null;
+  auth_version: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -25,7 +27,7 @@ const COLS = `
   id, username, email, password_hash, full_name, role,
   is_active, is_locked, locked_until, failed_attempts,
   last_login_at, last_login_ip::text AS last_login_ip,
-  mfa_enabled, company_id, org_unit_id, created_at, updated_at
+  mfa_enabled, company_id, org_unit_id, auth_version, created_at, updated_at
 `;
 
 function rowToUser(r: UserRow): User {
@@ -46,6 +48,7 @@ function rowToUser(r: UserRow): User {
     mfaEnabled: r.mfa_enabled,
     companyId: r.company_id,
     orgUnitId: r.org_unit_id,
+    authVersion: r.auth_version,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -182,6 +185,21 @@ export class UserRepository {
     if (r.rowCount === 0) throw Errors.UserNotFound();
   }
 
+  /**
+   * SEC-SESSION-001 — bump the account's security version, invalidating every
+   * previously issued access token (their `av` claim no longer matches).
+   * Returns the new version.
+   */
+  async incrementAuthVersion(id: string): Promise<number> {
+    const r = await this.pool.query<{ auth_version: number }>(
+      `UPDATE users SET auth_version = auth_version + 1, updated_at = NOW()
+       WHERE id = $1 RETURNING auth_version`,
+      [id],
+    );
+    if (r.rowCount === 0) throw Errors.UserNotFound();
+    return r.rows[0]!.auth_version;
+  }
+
   async setLocked(id: string, locked: boolean): Promise<void> {
     await this.pool.query(
       `UPDATE users SET is_locked = $2, updated_at = NOW() WHERE id = $1`,
@@ -197,20 +215,23 @@ export class UserRepository {
   }
 
   /**
-   * List users. When `companyId` is given, only that company's users are
-   * returned (tenant isolation for company admins); omit it for a global list
-   * (Super Admin).
+   * List users within an EXPLICIT tenant scope (SEC-TENANT-001):
+   *   - global         → all users (Super Admin only)
+   *   - { company }    → only that company's users
+   *   - none           → EMPTY (a non-super actor with no company is not global)
    */
-  async list(limit: number, offset: number, companyId?: string | null): Promise<{ users: User[]; total: number }> {
-    const scoped = companyId != null;
+  async list(limit: number, offset: number, scope: TenantScope): Promise<{ users: User[]; total: number }> {
+    if (scope.kind === "none") return { users: [], total: 0 };
+    const company = scope.kind === "company" ? scope.companyId : null;
+    const scoped = company != null;
     const where = scoped ? `WHERE company_id = $3` : ``;
     const totalP = this.pool.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM users ${scoped ? "WHERE company_id = $1" : ""}`,
-      scoped ? [companyId] : [],
+      scoped ? [company] : [],
     );
     const usersP = this.pool.query<UserRow>(
       `SELECT ${COLS} FROM users ${where} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
-      scoped ? [limit, offset, companyId] : [limit, offset],
+      scoped ? [limit, offset, company] : [limit, offset],
     );
     const [tRes, uRes] = await Promise.all([totalP, usersP]);
     return {

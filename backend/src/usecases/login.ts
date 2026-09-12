@@ -100,7 +100,7 @@ export class LoginUseCase {
   }
 
   async completeLogin(user: User, ip: string | null, ua: string | null): Promise<LoginResult> {
-    const { access, refresh } = await this.jwt.issuePair(user.id, user.role);
+    const { access, refresh } = await this.jwt.issuePair(user.id, user.role, user.authVersion);
     await this.refresh.insert({ jti: refresh.jti, userId: user.id, expiresAt: refresh.expiresAt });
     await this.users.recordLogin(user.id, ip);
     await this.audit.log({

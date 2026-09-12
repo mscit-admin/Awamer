@@ -1,4 +1,5 @@
 import type { Pool } from "../db/index.js";
+import type { TenantScope } from "../domain/tenantScope.js";
 
 export interface RoleRecord {
   id: string;
@@ -43,18 +44,25 @@ export class RoleRepository {
   }
 
   /**
-   * Roles visible to a tenant: all built-ins (global) plus the caller's own
-   * company's custom roles. A `null` companyId (super-admin / no-company view)
-   * sees everything. SEC-016: prevents leaking or touching another tenant's
-   * custom roles.
+   * Roles visible within an EXPLICIT tenant scope (SEC-TENANT-001 / SEC-016):
+   *   - global      → every role, including all companies' custom roles (Super Admin)
+   *   - { company } → all built-ins + that company's custom roles
+   *   - none        → built-in roles ONLY (a non-super actor with no company must
+   *                   not see any tenant's custom roles)
    */
-  async listForCompany(companyId: string | null): Promise<RoleRecord[]> {
-    if (companyId == null) return this.listAll();
+  async listForScope(scope: TenantScope): Promise<RoleRecord[]> {
+    if (scope.kind === "global") return this.listAll();
+    if (scope.kind === "none") {
+      const { rows } = await this.pool.query<RoleRow>(
+        `SELECT ${COLS} FROM roles WHERE is_builtin = TRUE ORDER BY is_builtin DESC, name`,
+      );
+      return rows.map(rowToRole);
+    }
     const { rows } = await this.pool.query<RoleRow>(
       `SELECT ${COLS} FROM roles
         WHERE is_builtin = TRUE OR company_id = $1
         ORDER BY is_builtin DESC, name`,
-      [companyId],
+      [scope.companyId],
     );
     return rows.map(rowToRole);
   }

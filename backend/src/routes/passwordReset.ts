@@ -4,7 +4,7 @@
  *   POST /api/v1/auth/forgot-password  { email }            → always 200
  *   POST /api/v1/auth/reset-password   { token, password }  → set new password
  */
-import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import type { PasswordResetUseCase } from "../usecases/passwordReset.js";
 import { DomainError } from "../domain/index.js";
@@ -13,19 +13,9 @@ interface Deps {
   reset: PasswordResetUseCase;
 }
 
-function originOf(req: FastifyRequest): string {
-  // The Origin header (sent on this POST) carries the full scheme+host+port the
-  // user actually loaded — the most reliable source behind a proxy on a
-  // non-default port. Referer is the next best. Forwarded host (often portless)
-  // is the last resort.
-  const origin = req.headers.origin;
-  if (origin && /^https?:\/\//.test(origin)) return origin;
-  const ref = req.headers.referer;
-  if (ref) { try { return new URL(ref).origin; } catch { /* ignore */ } }
-  const proto = (req.headers["x-forwarded-proto"] as string)?.split(",")[0] || req.protocol || "https";
-  const host = (req.headers["x-forwarded-host"] as string) || req.headers.host || "";
-  return host ? `${proto}://${host}` : "";
-}
+// SEC-RESET-001: request headers (Origin/Referer/Host/X-Forwarded-*) are
+// deliberately NOT used to build reset links. The trusted base URL is resolved
+// inside the usecase from APP_PUBLIC_BASE_URL / app_base_url only.
 
 export function makePasswordResetRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
@@ -33,9 +23,10 @@ export function makePasswordResetRoutes(deps: Deps): FastifyPluginAsync {
 
     app.post("/forgot-password", async (req, reply) => {
       const parsed = forgotSchema.safeParse(req.body);
-      // Always respond 200 — never reveal whether the email exists.
+      // Always respond 200 — never reveal whether the email exists (and never
+      // reveal whether reset is unavailable). Errors are swallowed here.
       if (parsed.success) {
-        try { await deps.reset.requestReset(parsed.data.email, originOf(req)); } catch { /* swallow */ }
+        try { await deps.reset.requestReset(parsed.data.email); } catch { /* swallow */ }
       }
       return reply.send({ ok: true });
     });
