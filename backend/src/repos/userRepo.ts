@@ -18,6 +18,7 @@ interface UserRow {
   mfa_enabled: boolean;
   company_id: string | null;
   org_unit_id: string | null;
+  auth_version: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -26,7 +27,7 @@ const COLS = `
   id, username, email, password_hash, full_name, role,
   is_active, is_locked, locked_until, failed_attempts,
   last_login_at, last_login_ip::text AS last_login_ip,
-  mfa_enabled, company_id, org_unit_id, created_at, updated_at
+  mfa_enabled, company_id, org_unit_id, auth_version, created_at, updated_at
 `;
 
 function rowToUser(r: UserRow): User {
@@ -47,6 +48,7 @@ function rowToUser(r: UserRow): User {
     mfaEnabled: r.mfa_enabled,
     companyId: r.company_id,
     orgUnitId: r.org_unit_id,
+    authVersion: r.auth_version,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -181,6 +183,21 @@ export class UserRepository {
       [id, passwordHash],
     );
     if (r.rowCount === 0) throw Errors.UserNotFound();
+  }
+
+  /**
+   * SEC-SESSION-001 — bump the account's security version, invalidating every
+   * previously issued access token (their `av` claim no longer matches).
+   * Returns the new version.
+   */
+  async incrementAuthVersion(id: string): Promise<number> {
+    const r = await this.pool.query<{ auth_version: number }>(
+      `UPDATE users SET auth_version = auth_version + 1, updated_at = NOW()
+       WHERE id = $1 RETURNING auth_version`,
+      [id],
+    );
+    if (r.rowCount === 0) throw Errors.UserNotFound();
+    return r.rows[0]!.auth_version;
   }
 
   async setLocked(id: string, locked: boolean): Promise<void> {

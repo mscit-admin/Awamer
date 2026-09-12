@@ -3,10 +3,11 @@ import { authenticator } from "otplib";
 import qrcode from "qrcode";
 import { Errors } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
-import type { MFADeviceRepository, AuditRepository } from "../repos/otherRepos.js";
+import type { MFADeviceRepository, AuditRepository, RefreshRepository } from "../repos/otherRepos.js";
 import type { AppSettingsRepository } from "../repos/appSettings.js";
 import type { Config } from "../config/index.js";
 import type { Argon2Service } from "../crypto/argon2.js";
+import type { SessionRevoker } from "../session/activeSessions.js";
 
 // 30-second window, 6 digits — RFC 6238 defaults.
 authenticator.options = { window: 1, step: 30, digits: 6 };
@@ -26,7 +27,20 @@ export class MFAUseCase {
     private readonly cfg: Config,
     private readonly argon2: Argon2Service,
     private readonly settings: AppSettingsRepository,
+    private readonly refresh?: RefreshRepository,
+    private readonly sessions?: SessionRevoker,
   ) {}
+
+  /**
+   * SEC-SESSION-001 — an MFA security change (activation/replacement/disable)
+   * invalidates prior authenticated state: bump auth_version (old access tokens
+   * fail), revoke refresh sessions, and close live remote sessions.
+   */
+  private async invalidateAllSessions(userId: string): Promise<void> {
+    await this.users.incrementAuthVersion(userId);
+    await this.refresh?.revokeAllForUser(userId);
+    this.sessions?.revokeUser(userId, "CREDENTIALS_CHANGED");
+  }
 
   /**
    * The label shown at the top of the entry in authenticator apps (Google
@@ -84,6 +98,7 @@ export class MFAUseCase {
     const user = await this.users.getById(userId);
     user.mfaEnabled = true;
     await this.users.update(user);
+    await this.invalidateAllSessions(userId);
 
     await this.audit.log({
       userId, action: "mfa_enroll", success: true,
@@ -115,6 +130,7 @@ export class MFAUseCase {
     for (const d of devices) await this.devices.delete(d.id, userId);
     user.mfaEnabled = false;
     await this.users.update(user);
+    await this.invalidateAllSessions(userId);
     await this.audit.log({
       userId: adminId, action: "mfa_disable", success: true,
       resourceType: "user", resourceId: userId, details: { admin_disable: true, devices_removed: devices.length },
@@ -151,6 +167,7 @@ export class MFAUseCase {
     // Clear the flag on the user record.
     user.mfaEnabled = false;
     await this.users.update(user);
+    await this.invalidateAllSessions(userId);
 
     await this.audit.log({
       userId, action: "mfa_disable", success: true,

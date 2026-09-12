@@ -18,6 +18,7 @@ import type { Logger } from "../logger/index.js";
 import { Errors, DomainError } from "../domain/index.js";
 import { validatePassword } from "./register.js";
 import { resolveTrustedBaseUrl } from "./publicBaseUrl.js";
+import type { SessionRevoker } from "../session/activeSessions.js";
 
 function hashToken(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
@@ -40,6 +41,7 @@ export class PasswordResetUseCase {
     private readonly audit: AuditRepository,
     private readonly log: Logger,
     private readonly cfg: ResetBaseUrlConfig,
+    private readonly sessions?: SessionRevoker,
   ) {}
 
   /**
@@ -115,7 +117,12 @@ export class PasswordResetUseCase {
     const hash = await this.argon2.hash(newPassword);
     await this.users.updatePasswordHash(rec.userId, hash);
     await this.resets.markUsed(rec.id);
+    // SEC-SESSION-001: a reset invalidates ALL prior state — bump auth_version
+    // (old access tokens fail), revoke refresh sessions, close live remote
+    // sessions (SSH/Telnet/Tunnel/VNC).
+    await this.users.incrementAuthVersion(rec.userId);
     await this.refresh.revokeAllForUser(rec.userId);
+    this.sessions?.revokeUser(rec.userId, "CREDENTIALS_CHANGED");
     await this.audit.log({ userId: rec.userId, action: "password_change", success: true, details: { stage: "reset_completed" } });
   }
 }

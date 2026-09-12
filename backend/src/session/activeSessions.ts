@@ -23,7 +23,17 @@ export type RevokeReason =
   | "COMPANY_CHANGED"
   | "PERMISSION_REVOKED"
   | "PERIODIC_REVALIDATION_FAILED"
-  | "AUTHORIZATION_CHANGED";
+  | "AUTHORIZATION_CHANGED"
+  | "CREDENTIALS_CHANGED";
+
+/**
+ * SEC-SESSION-001 — minimal capability the credential-change usecases need to
+ * terminate a user's live SSH/Telnet/Tunnel/VNC sessions. Satisfied by
+ * ActiveSessionManager.
+ */
+export interface SessionRevoker {
+  revokeUser(userId: string, reason: RevokeReason): number;
+}
 
 export interface ActiveRemoteSession {
   sessionId: string;

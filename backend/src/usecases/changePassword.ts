@@ -8,6 +8,7 @@
 import type { UserRepository } from "../repos/userRepo.js";
 import type { RefreshRepository, AuditRepository } from "../repos/otherRepos.js";
 import type { Argon2Service } from "../crypto/argon2.js";
+import type { SessionRevoker } from "../session/activeSessions.js";
 import { Errors, DomainError } from "../domain/index.js";
 import { validatePassword } from "./register.js";
 
@@ -17,7 +18,20 @@ export class ChangePasswordUseCase {
     private readonly refresh: RefreshRepository,
     private readonly audit: AuditRepository,
     private readonly argon2: Argon2Service,
+    private readonly sessions?: SessionRevoker,
   ) {}
+
+  /**
+   * SEC-SESSION-001 — after a security-sensitive credential change, invalidate
+   * EVERY previously authenticated state for the user: bump auth_version (old
+   * access tokens fail the middleware check), revoke all refresh sessions, and
+   * terminate live SSH/Telnet/Tunnel/VNC sessions.
+   */
+  private async invalidateAllSessions(userId: string): Promise<void> {
+    await this.users.incrementAuthVersion(userId);
+    await this.refresh.revokeAllForUser(userId);
+    this.sessions?.revokeUser(userId, "CREDENTIALS_CHANGED");
+  }
 
   /**
    * Admin reset: set another user's password without their current password.
@@ -33,7 +47,7 @@ export class ChangePasswordUseCase {
     user.isLocked = false;
     user.failedAttempts = 0;
     await this.users.update(user);
-    await this.refresh.revokeAllForUser(userId);
+    await this.invalidateAllSessions(userId);
     await this.audit.log({
       userId: adminId, action: "password_change", success: true,
       resourceType: "user", resourceId: userId, details: { admin_reset: true },
@@ -72,8 +86,8 @@ export class ChangePasswordUseCase {
     const passwordHash = await this.argon2.hash(newPassword);
     await this.users.updatePasswordHash(userId, passwordHash);
 
-    // Force re-login everywhere else.
-    await this.refresh.revokeAllForUser(userId);
+    // Force re-login everywhere else + terminate live sessions (SEC-SESSION-001).
+    await this.invalidateAllSessions(userId);
 
     await this.audit.log({
       userId, action: "password_change", success: true,

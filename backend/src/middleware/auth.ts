@@ -19,6 +19,8 @@ export interface AuthUserState {
   isLocked: boolean;
   lockedUntil: Date | null;
   companyId: string | null;
+  /** SEC-SESSION-001 — live account security version. */
+  authVersion: number;
 }
 export interface AuthUserSource {
   getById(id: string): Promise<AuthUserState>;
@@ -75,6 +77,12 @@ export function makeAuthMiddleware(jwt: JwtService, users: AuthUserSource) {
     // a downgraded/moved user cannot exercise an old privilege until token expiry.
     try {
       const live = await assertAuthState(users, req.auth.sub);
+      // SEC-SESSION-001: reject tokens minted before a security-sensitive change
+      // (password/MFA). The live auth_version is the source of truth; a client
+      // cannot forge or downgrade `av` (it is inside the signed token).
+      if (req.auth.av !== live.authVersion) {
+        throw new AuthStateError("session_invalidated", "credentials changed; please sign in again");
+      }
       req.auth.role = live.role;
     } catch {
       return reply.code(401).send({ error: { code: "session_invalidated", message: "your session is no longer valid" } });

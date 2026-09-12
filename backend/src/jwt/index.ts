@@ -22,6 +22,8 @@ export interface VerifiedClaims {
   jti: string;
   iat: number;
   exp: number;
+  /** SEC-SESSION-001 — account security version pinned into access tokens. */
+  av: number;
 }
 
 export class JwtError extends Error {}
@@ -33,7 +35,13 @@ export class JwtInvalid extends JwtError {
 }
 
 export interface JwtService {
-  issuePair(userId: string, role: string): Promise<TokenPair>;
+  /**
+   * Issue an access+refresh pair. `authVersion` (SEC-SESSION-001) is pinned into
+   * the access token as claim `av`; it defaults to 1 (a freshly-created user's
+   * version) so callers that don't track it still mint currently-valid tokens.
+   * Real flows (login/refresh) pass the account's live version.
+   */
+  issuePair(userId: string, role: string, authVersion?: number): Promise<TokenPair>;
   issueOne(userId: string, role: string, type: TokenType, ttlSec: number): Promise<IssuedToken>;
   verifyAccess(token: string): Promise<VerifiedClaims>;
   verifyRefresh(token: string): Promise<VerifiedClaims>;
@@ -44,11 +52,13 @@ export function createJwt(cfg: Config): JwtService {
   const refreshKey = new TextEncoder().encode(cfg.env.JWT_REFRESH_SECRET);
   const issuer = cfg.env.JWT_ISSUER;
 
-  async function sign(userId: string, role: string, type: TokenType, key: Uint8Array, ttlSec: number): Promise<IssuedToken> {
+  async function sign(userId: string, role: string, type: TokenType, key: Uint8Array, ttlSec: number, authVersion?: number): Promise<IssuedToken> {
     const jti = uuid();
     const now = Math.floor(Date.now() / 1000);
     const exp = now + ttlSec;
-    const token = await new SignJWT({ typ: type, role })
+    const claims: Record<string, unknown> = { typ: type, role };
+    if (authVersion !== undefined) claims.av = authVersion;
+    const token = await new SignJWT(claims)
       .setProtectedHeader({ alg: "HS256" })
       .setIssuer(issuer)
       .setSubject(userId)
@@ -78,13 +88,16 @@ export function createJwt(cfg: Config): JwtService {
       jti: String(payload.jti ?? ""),
       iat: Number(payload.iat ?? 0),
       exp: Number(payload.exp ?? 0),
+      // Legacy tokens without `av` map to 1 (the fresh-user version) so an
+      // account that never changed its credentials keeps working until expiry.
+      av: Number(payload["av"] ?? 1),
     };
   }
 
   return {
-    issuePair(userId, role) {
+    issuePair(userId, role, authVersion = 1) {
       return Promise.all([
-        sign(userId, role, "access", accessKey, cfg.jwtAccessTtlSec),
+        sign(userId, role, "access", accessKey, cfg.jwtAccessTtlSec, authVersion),
         sign(userId, role, "refresh", refreshKey, cfg.jwtRefreshTtlSec),
       ]).then(([access, refresh]) => ({ access, refresh }));
     },

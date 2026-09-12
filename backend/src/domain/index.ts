@@ -31,6 +31,12 @@ export interface User {
   mfaEnabled: boolean;
   companyId: string | null;
   orgUnitId: string | null;
+  /**
+   * SEC-SESSION-001 — monotonically increasing security version. Embedded in
+   * access tokens (claim `av`) and compared live; a security-sensitive change
+   * (password/MFA) increments it, invalidating every previously issued token.
+   */
+  authVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -145,14 +145,14 @@ async function main() {
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
   const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log);
-  const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, appSettings);
+  const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, appSettings, refresh, activeSessions);
   const registerUC = new RegisterUseCase(users, audit, argon2);
-  const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2);
+  const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2, activeSessions);
   // Email + forgot/reset password.
   const passwordResets = new PasswordResetRepository(pool);
   const mailer = new MailService(appSettings, secretBox, log);
   const passwordResetUC = new PasswordResetUseCase(users, passwordResets, refresh, mailer, argon2, audit, log,
-    { isProd: cfg.isProd, publicBaseUrl: cfg.publicBaseUrl });
+    { isProd: cfg.isProd, publicBaseUrl: cfg.publicBaseUrl }, activeSessions);
 
   // SEC-RESET-001 (§5): fail closed at startup if email/reset is enabled in
   // production but no trusted public base URL is configured (env or setting).

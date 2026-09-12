@@ -71,3 +71,36 @@ Per-finding record of the remediation program. Baseline in
   tenant-scoped (previously it saw everything). Assign such accounts a company.
 - **Remaining risk:** none for the null-company escape; global access requires an
   explicit permission-derived scope.
+
+---
+
+## SEC-SESSION-001 — Security changes invalidate all sessions  (Phase 3)
+
+- **Files modified:** migration `027_auth_version.{up,down}.sql` (new);
+  `backend/src/domain/index.ts` (User.authVersion); `backend/src/repos/userRepo.ts`
+  (auth_version column + `incrementAuthVersion`); `backend/src/jwt/index.ts`
+  (access-token `av` claim; `issuePair(..,authVersion)`); `backend/src/middleware/auth.ts`
+  (AuthUserState.authVersion + live `av` comparison → session_invalidated);
+  `backend/src/usecases/{login,refresh}.ts` (thread live authVersion);
+  `backend/src/usecases/changePassword.ts`, `passwordReset.ts`, `mfa.ts`
+  (increment auth_version + revoke refresh + `ActiveSessionManager.revokeUser`);
+  `backend/src/session/activeSessions.ts` (`SessionRevoker` iface +
+  `CREDENTIALS_CHANGED` reason); `server.ts` wiring; test mocks updated.
+- **Root cause:** password change / forgot-reset / admin reset revoked refresh
+  tokens only — old access tokens stayed valid up to 15m and live
+  SSH/Telnet/Tunnel/VNC sessions survived; MFA changes did neither.
+- **Fix:** per-user `auth_version` pinned into access tokens (`av`) and compared
+  live on every request; a security-sensitive change (password change/reset/
+  admin reset, MFA activation/replacement/disable) increments it, revokes all
+  refresh sessions, and terminates live remote sessions. `av` is signed →
+  cannot be forged or downgraded by the client.
+- **Tests added:** AUTH-INVALIDATE-001..015 — 12 tests,
+  `backend/src/usecases/authInvalidate.itest.ts` (real DB + real
+  ActiveSessionManager + real auth middleware).
+- **Test result:** PASS (12/12). Backend unit 106, integration 118→130.
+- **Migration required:** yes — `027_auth_version` adds `users.auth_version`
+  (default 1; safe/idempotent). On deploy, tokens issued before the change keep
+  working (legacy tokens map to av=1) until the next credential change.
+- **Operational impact:** after any credential/MFA change users must re-login
+  everywhere; live remote sessions drop immediately.
+- **Remaining risk:** none for this vector.
