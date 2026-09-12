@@ -82,6 +82,8 @@ export interface AuditEvent {
   userAgent?: string | null;
   details?: Record<string, unknown>;
   success: boolean;
+  /** SEC-AUDIT-001 — optional correlation id, surfaced if the write fails. */
+  requestId?: string | null;
 }
 
 // ----- Domain errors -----

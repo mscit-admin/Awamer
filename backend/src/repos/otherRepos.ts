@@ -188,12 +188,20 @@ const VALID_ACTIONS = new Set([
 
 function mapAction(action: string, success: boolean): string {
   if (action === "login") return success ? "login_success" : "login_failed";
-  if (VALID_ACTIONS.has(action)) return action;
-  return "config_change"; // fail-safe; never block the request path
+  // SEC-AUDIT-001: preserve the real action verbatim (the column is free TEXT).
+  // Previously unknown actions were silently rewritten to "config_change",
+  // erasing the true action. `VALID_ACTIONS` is kept only as documentation.
+  void VALID_ACTIONS;
+  return action && action.trim() !== "" ? action : "unknown_action";
 }
 
+// SEC-AUDIT-001 §37: observable audit-write failure counter.
+let auditWriteFailuresTotal = 0;
+/** Total audit-log write failures since process start (health/monitoring). */
+export function getAuditWriteFailuresTotal(): number { return auditWriteFailuresTotal; }
+
 export class AuditRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly pool: Pool, private readonly logger?: import("../logger/index.js").Logger) {}
 
   async log(evt: AuditEvent): Promise<void> {
     const action = mapAction(evt.action, evt.success);
@@ -213,9 +221,29 @@ export class AuditRepository {
           evt.success,
         ],
       );
-    } catch {
-      // Audit failures must never crash the request path. Errors are handled
-      // by the caller's logger; we just swallow here.
+    } catch (e) {
+      // SEC-AUDIT-001: an audit write NEVER crashes the request path (fail-open
+      // for availability), but the failure is NO LONGER silent — increment a
+      // metric and emit an application error with correlation fields ONLY. The
+      // event details payload is deliberately NOT logged (may carry sensitive
+      // context); we log identifiers + an error category, no secrets.
+      auditWriteFailuresTotal++;
+      const errorCategory = (e as { code?: string })?.code
+        ?? (e instanceof Error ? e.name : "unknown");
+      this.logger?.error(
+        {
+          event: "audit_write_failed",
+          requestId: evt.requestId ?? null,
+          userId: evt.userId,
+          action,
+          resourceType: evt.resourceType ?? null,
+          resourceId: evt.resourceId ?? null,
+          success: evt.success,
+          errorCategory,
+          failuresTotal: auditWriteFailuresTotal,
+        },
+        "audit log write failed",
+      );
     }
   }
 

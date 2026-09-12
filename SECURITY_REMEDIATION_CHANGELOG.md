@@ -202,3 +202,29 @@ Per-finding record of the remediation program. Baseline in
   role with `network:diagnose` where needed.
 - **Remaining risk:** per-tenant target allowlists (beyond infra-block) remain a
   future enhancement.
+
+---
+
+## SEC-AUDIT-001 — Audit failures observable, not silent  (Phase 7)
+
+- **Files modified:** `backend/src/repos/otherRepos.ts` (AuditRepository: failure
+  metric + non-secret error log; `mapAction` preserves real actions);
+  `backend/src/domain/index.ts` (`AuditEvent.requestId`); `backend/src/server.ts`
+  (inject logger).
+- **Root cause:** `AuditRepository.log` swallowed all write errors (`catch {}`)
+  with no log or metric; `mapAction` silently rewrote unknown actions to
+  `config_change`, erasing the true action.
+- **Fix:** an audit-write failure still never crashes the request path
+  (fail-open for availability) but is now observable: it increments
+  `getAuditWriteFailuresTotal()` and emits an application error log with
+  correlation fields (requestId, userId, action, resource, error category) and
+  NO secret payload (the `details` object is never logged). `mapAction`
+  preserves the real action verbatim (the column is free TEXT).
+- **Tests added:** AUDIT-DURABILITY-001..006 — 6 tests,
+  `backend/src/repos/auditDurability.test.ts`.
+- **Test result:** PASS. Backend unit 122→128.
+- **Migration required:** none.
+- **Operational impact:** audit-write failures now surface in logs/metrics; wire
+  `getAuditWriteFailuresTotal()` into monitoring.
+- **Remaining risk:** audit remains fail-open by design (documented); a durable
+  outbox for the most sensitive actions is a possible future hardening.

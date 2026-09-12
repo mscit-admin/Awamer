@@ -100,7 +100,7 @@ async function main() {
   const users = new UserRepository(pool);
   const mfaDevices = new MFADeviceRepository(pool);
   const refresh = new RefreshRepository(pool);
-  const audit = new AuditRepository(pool);
+  const audit = new AuditRepository(pool, log);
 
   // Phase 2 repos
   const folders = new FolderRepository(pool);
