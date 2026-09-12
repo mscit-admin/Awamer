@@ -42,6 +42,13 @@ function runDeployGate(migrationsDir: string): { status: number | null; out: str
   });
   return { status: r.status, out: `${r.stdout ?? ""}\n${r.stderr ?? ""}` };
 }
+/** Drive `migrate down` as a subprocess (rollback of the highest applied). */
+function runMigrateDown(migrationsDir: string): { status: number | null; out: string } {
+  const r = spawnSync("npx", ["tsx", "src/migrate.ts", "down"], {
+    cwd: BACKEND, env: migrateEnv(migrationsDir), encoding: "utf8",
+  });
+  return { status: r.status, out: `${r.stdout ?? ""}\n${r.stderr ?? ""}` };
+}
 
 async function q<T extends import("pg").QueryResultRow = import("pg").QueryResultRow>(sql: string, params: unknown[] = []) {
   const p = new Pool({ connectionString: runnerUrl });
@@ -399,6 +406,146 @@ test("MIG-RUNNER-019: a history gap (earlier migration unrecorded, later applied
   assert.match(r.out, /2_second/);
   assert.equal(await tableExists("mr_two"), false, "the missing intermediate must NOT be run out of order");
   assert.deepEqual((await migRows()).map((m) => m.version), ["1", "3"], "schema_migrations unchanged");
+});
+
+// ---------------------------------------------------------------------------
+// MIG-RUNNER-020..028 — migration artifact integrity (AWM-MIG-006)
+// Policy (Option A): every migration MUST ship a real, non-empty .up.sql;
+// .down.sql is optional and `migrate down` fails clearly when it is absent.
+// ---------------------------------------------------------------------------
+
+test("MIG-RUNNER-020: a down-only migration (missing .up.sql) → FAIL, nothing applied", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const dir = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    // 002 ships ONLY a down file — no 002_security_fix.up.sql.
+    "002_security_fix.down.sql": "DROP TABLE IF EXISTS mr_sec2;",
+  });
+  const r = runMigrate(dir);
+  assert.notEqual(r.status, 0, "missing .up.sql must fail closed");
+  assert.match(r.out, /Invalid migration artifact/);
+  assert.match(r.out, /2_security_fix\.up\.sql/);
+  // Discovery fails before ANY migration runs — not even 001 is applied.
+  assert.equal(await tableExists("mr_one"), false, "no migration SQL executed");
+  assert.deepEqual(await migRows(), [], "schema_migrations unchanged (002 not recorded)");
+});
+
+test("MIG-RUNNER-021: normal complete up/down pairs behave normally (no regression)", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const dir = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_second.up.sql": two.up, "002_second.down.sql": two.down,
+  });
+  const r = runMigrate(dir);
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual((await migRows()).map((m) => m.version), ["1", "2"]);
+  assert.equal(await tableExists("mr_one"), true);
+  assert.equal(await tableExists("mr_two"), true);
+});
+
+test("MIG-RUNNER-022: up-only migration is allowed for `migrate up` (Option A: down optional)", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const dir = mkMigDir({ "001_only_up.up.sql": one.up }); // no .down.sql
+  const r = runMigrate(dir);
+  assert.equal(r.status, 0, `up-only should apply cleanly: ${r.out}`);
+  assert.equal(await tableExists("mr_one"), true);
+  assert.deepEqual((await migRows()).map((m) => m.name), ["only_up"]);
+});
+
+test("MIG-RUNNER-023: rolling back an up-only migration fails clearly (never runs an empty down)", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const dir = mkMigDir({ "001_irreversible.up.sql": one.up }); // no .down.sql
+  assert.equal(runMigrate(dir).status, 0);
+  const r = runMigrateDown(dir);
+  assert.notEqual(r.status, 0, "rollback without a down file must fail");
+  assert.match(r.out, /No down migration exists for \d*1_irreversible/);
+  // History untouched — the migration is still recorded (no phantom revert).
+  assert.deepEqual((await migRows()).map((m) => m.name), ["irreversible"], "not deleted by a no-op rollback");
+});
+
+test("MIG-RUNNER-024: an .up.sql with no executable SQL → FAIL; comments+SQL stays valid", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  // Only whitespace + comments → invalid.
+  const empty = mkMigDir({
+    "001_empty.up.sql": "-- just a comment\n/*  block\n   comment */\n   \n",
+    "001_empty.down.sql": "SELECT 1;",
+  });
+  const r = runMigrate(empty);
+  assert.notEqual(r.status, 0, "an empty/comment-only .up.sql must fail");
+  assert.match(r.out, /Invalid migration artifact/);
+  assert.match(r.out, /1_empty\.up\.sql/);
+  assert.deepEqual(await migRows(), [], "empty migration not recorded");
+
+  // §17: a real migration that merely BEGINS with comments must remain valid.
+  await recreateDatabase(admin, RUNNERDB);
+  const commented = mkMigDir({
+    "001_commented.up.sql": "-- Add a marker table\n\nCREATE TABLE mr_commented (id int);",
+    "001_commented.down.sql": "DROP TABLE IF EXISTS mr_commented;",
+  });
+  const r2 = runMigrate(commented);
+  assert.equal(r2.status, 0, `comment-prefixed SQL must be accepted: ${r2.out}`);
+  assert.equal(await tableExists("mr_commented"), true);
+});
+
+test("MIG-RUNNER-025: DB has the migration applied but repo ships only its .down.sql → FAIL (incomplete artifact)", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const base = mkMigDir({ "001_first.up.sql": one.up, "001_first.down.sql": one.down });
+  assert.equal(runMigrate(base).status, 0);
+  // The DB says 002_security_fix is applied…
+  await q(`INSERT INTO schema_migrations (version, name) VALUES (2, 'security_fix')`);
+  // …but the repository ships only its .down.sql (the .up.sql is gone).
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_security_fix.down.sql": "DROP TABLE IF EXISTS mr_sec2;",
+  });
+  const r = runMigrate(repo);
+  assert.notEqual(r.status, 0, "must reject the incomplete artifact, not report 'already applied'");
+  assert.match(r.out, /Invalid migration artifact/);
+  assert.match(r.out, /2_security_fix\.up\.sql/);
+  assert.deepEqual((await migRows()).map((m) => m.version), ["1", "2"], "schema_migrations unchanged");
+});
+
+test("MIG-RUNNER-026: an invalid artifact blocks later valid pending migrations", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const base = mkMigDir({ "001_first.up.sql": one.up, "001_first.down.sql": one.down });
+  assert.equal(runMigrate(base).status, 0);
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_bad.down.sql": "SELECT 1;", // no 002_bad.up.sql
+    "003_good.up.sql": three.up, "003_good.down.sql": three.down,
+  });
+  const r = runMigrate(repo);
+  assert.notEqual(r.status, 0, "invalid 002 artifact must fail");
+  assert.match(r.out, /Invalid migration artifact/);
+  assert.equal(await tableExists("mr_three"), false, "later migration 003 MUST NOT execute");
+  assert.deepEqual((await migRows()).map((m) => m.version), ["1"], "schema_migrations unchanged");
+});
+
+test("MIG-RUNNER-027: an invalid artifact mutates neither schema_migrations nor the schema", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const base = mkMigDir({ "001_first.up.sql": one.up, "001_first.down.sql": one.down });
+  assert.equal(runMigrate(base).status, 0);
+  const before = await migRows();
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_missing_up.down.sql": "SELECT 1;",
+    "003_would_run.up.sql": three.up, "003_would_run.down.sql": three.down,
+  });
+  const r = runMigrate(repo);
+  assert.notEqual(r.status, 0);
+  assert.deepEqual(await migRows(), before, "schema_migrations unchanged");
+  assert.equal(await tableExists("mr_three"), false, "no schema change from pending migrations");
+});
+
+test("MIG-RUNNER-028: the deployment gate stops the server on an invalid artifact", { skip: dbSkip }, async () => {
+  await recreateDatabase(admin, RUNNERDB);
+  const repo = mkMigDir({
+    "001_first.up.sql": one.up, "001_first.down.sql": one.down,
+    "002_missing_up.down.sql": "SELECT 1;",
+  });
+  const r = runDeployGate(repo);
+  assert.notEqual(r.status, 0, "deploy command must fail on an invalid artifact");
+  assert.doesNotMatch(r.out, /SERVER_WOULD_START/, "the server start step must NOT run");
 });
 
 // ---------------------------------------------------------------------------

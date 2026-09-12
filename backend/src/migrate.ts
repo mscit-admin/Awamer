@@ -20,8 +20,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 interface Migration {
   version: number;
   name: string;
-  up: string;
+  // `undefined` = the corresponding file was NOT discovered on disk; a string
+  // (even empty) = the file exists and was read. This distinction is required:
+  // an empty string must never stand in for a missing .up.sql (AWM-MIG-006).
+  up?: string;
   down?: string;
+  // The raw, zero-padded version prefix as written in the filename (e.g. "026"),
+  // used only to name files accurately in error messages.
+  raw: string;
 }
 
 /**
@@ -36,6 +42,36 @@ export class MigrationCollisionError extends Error {
     super(message);
     this.name = "MigrationCollisionError";
   }
+}
+
+/**
+ * Fail-closed artifact error (AWM-MIG-006). Thrown when the migration files
+ * themselves are incomplete for the requested operation — a required `.up.sql`
+ * is missing or contains no executable SQL, or a `.down.sql` needed for a
+ * rollback is missing/empty. The release artifact must be corrected; the runner
+ * never synthesises SQL, records an empty migration, or continues. Exits
+ * non-zero. Carries no secrets.
+ */
+export class MigrationArtifactError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MigrationArtifactError";
+  }
+}
+
+/**
+ * Conservative "does this SQL contain an executable statement?" check. Strips
+ * block comments, line comments and whitespace; anything left counts as
+ * executable content. This intentionally does NOT parse SQL — it only tells a
+ * file that is purely whitespace/comments (no statement) apart from a real
+ * migration, so legitimate SQL that merely BEGINS with comments stays valid.
+ */
+export function hasExecutableSql(sql: string): boolean {
+  const stripped = sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ") // block comments
+    .replace(/--[^\n]*/g, " ") // line comments
+    .trim();
+  return stripped.length > 0;
 }
 
 async function loadMigrations(dir: string): Promise<Migration[]> {
@@ -55,7 +91,9 @@ async function loadMigrations(dir: string): Promise<Migration[]> {
     if (!vStr || !name || !direction) continue;
     const version = Number(vStr);
     const sql = await fs.readFile(path.join(dir, file), "utf8");
-    const existing: Migration = map.get(version) ?? { version, name, up: "" };
+    // Note: `up`/`down` start undefined and are only set when the actual file is
+    // read, so a missing file stays undefined (never a stand-in empty string).
+    const existing: Migration = map.get(version) ?? { version, name, raw: vStr };
     if (direction === "up") existing.up = sql;
     else existing.down = sql;
     existing.name = name;
@@ -81,6 +119,40 @@ async function loadMigrations(dir: string): Promise<Migration[]> {
           `Files: ${files}\n\n` +
           `A numeric migration version must identify exactly one migration. ` +
           `Renumber one of these migrations to a free version before retrying.`,
+      );
+    }
+  }
+
+  // Per-version artifact validation (AWM-MIG-006): every migration MUST ship a
+  // real .up.sql file whose body contains executable SQL. A missing .up.sql
+  // (e.g. only a .down.sql was shipped) or one that is only whitespace/comments
+  // must NEVER be treated as an empty, already-satisfied migration and recorded
+  // as applied without running any SQL. This runs during discovery — before DB
+  // history validation and before any transaction opens — so an incomplete
+  // release artifact fails closed with the schema and schema_migrations intact.
+  // (.down.sql is optional — Option A; a missing/empty down is enforced only
+  // when a rollback actually needs it, in the down path below.)
+  for (const mig of map.values()) {
+    if (mig.up === undefined) {
+      throw new MigrationArtifactError(
+        `Invalid migration artifact.\n\n` +
+          `Version: ${mig.version}\n` +
+          `Migration: ${mig.name}\n` +
+          `Missing required file: ${mig.raw}_${mig.name}.up.sql\n\n` +
+          `Migration execution has been stopped. Every migration must ship a ` +
+          `real .up.sql file — the release artifact is incomplete. Restore the ` +
+          `missing file before retrying (no automatic repair is performed).`,
+      );
+    }
+    if (!hasExecutableSql(mig.up)) {
+      throw new MigrationArtifactError(
+        `Invalid migration artifact.\n\n` +
+          `Version: ${mig.version}\n` +
+          `Migration: ${mig.name}\n` +
+          `File without executable SQL: ${mig.raw}_${mig.name}.up.sql\n\n` +
+          `The .up.sql file contains only whitespace/comments. Migration ` +
+          `execution has been stopped — an empty migration must not be recorded ` +
+          `as applied. Add the intended SQL before retrying (no automatic repair).`,
       );
     }
   }
@@ -209,6 +281,16 @@ async function migrate(direction: "up" | "down") {
       log.info("no pending migrations");
     }
     for (const m of pending) {
+      // Guaranteed present + non-empty by loadMigrations' artifact validation;
+      // this guard keeps the type honest and is a defensive second line so an
+      // empty query can never be recorded as an applied migration.
+      if (m.up === undefined || !hasExecutableSql(m.up)) {
+        throw new MigrationArtifactError(
+          `Invalid migration artifact.\n\nVersion: ${m.version}\nMigration: ${m.name}\n` +
+            `Missing or empty required file: ${m.raw}_${m.name}.up.sql\n\n` +
+            `Migration execution has been stopped before recording it as applied.`,
+        );
+      }
       log.info({ version: m.version, name: m.name }, "applying migration");
       const c = await pool.connect();
       try {
@@ -231,9 +313,19 @@ async function migrate(direction: "up" | "down") {
     if (!target) {
       log.info("nothing to roll back");
     } else {
-      if (!target.down) {
-        log.error({ version: target.version }, "no down migration available");
-        throw new Error("no down migration");
+      // Option A: .down.sql is optional. A rollback that needs a down file which
+      // is missing or contains no executable SQL fails CLEARLY (never runs an
+      // empty query and then deletes the history row, which would record a
+      // rollback that did not revert anything).
+      if (target.down === undefined || !hasExecutableSql(target.down)) {
+        log.error({ version: target.version, name: target.name }, "no down migration available; rollback stopped");
+        throw new MigrationArtifactError(
+          `No down migration exists for ${target.raw}_${target.name}.\n\n` +
+            `This migration ships no reversible .down.sql (or it contains no ` +
+            `executable SQL), so it cannot be rolled back automatically. Roll back ` +
+            `manually or restore from a backup — the runner will not execute an ` +
+            `empty rollback or record a revert that did nothing.`,
+        );
       }
       log.info({ version: target.version, name: target.name }, "reverting migration");
       const c = await pool.connect();

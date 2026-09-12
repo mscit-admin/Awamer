@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Migration artifact integrity (AWM-MIG-006)
+
+### Security
+- **AWM-MIG-006 (P1) — A migration is recorded as applied only when its required
+  `.up.sql` exists and contains executable SQL.** The loader built a migration
+  from whichever of `.up.sql`/`.down.sql` it saw first and initialised `up` to
+  `""`, so a version shipped with only a `.down.sql` had `up === ""`; PostgreSQL
+  accepts an empty query string, so the runner executed nothing and still recorded
+  the migration as applied. `backend/src/migrate.ts` now models `up`/`down` as
+  optional (`undefined` = file absent, never an empty-string stand-in) and, during
+  discovery — before DB history validation and before any transaction — throws
+  `MigrationArtifactError` when a migration's `.up.sql` is missing or contains no
+  executable SQL (whitespace/comments only; comment-prefixed real SQL stays
+  valid). The apply loop re-guards `up` so an empty query can never be recorded.
+  This fails closed with a non-zero exit (stopping the deploy gate), leaving
+  `schema_migrations` and the schema untouched, and blocking later migrations —
+  even when the database already records that version (an incomplete repo artifact
+  is rejected rather than reported "already applied").
+- **`.down.sql` policy (Option A, documented):** `.down.sql` is optional;
+  `migrate down` fails clearly (`No down migration exists for …`, non-zero) when
+  the target migration has no executable down SQL, never running an empty rollback
+  or deleting a history row without reverting.
+- **No new permission** and **no RBAC-matrix change** — migration-runner hardening
+  only.
+
+### Tests
+- `src/migrate.itest.ts` MIG-RUNNER-020..028 (real runner as a subprocess vs real
+  PostgreSQL): down-only migration, empty `.up.sql`, invalid-artifact-blocks-later,
+  no-history-mutation, deploy-gate-stops-server, and applied-but-missing-`.up.sql`
+  all fail closed; complete pairs and up-only `migrate up` pass; rolling back an
+  up-only migration fails clearly.
+
+---
+
 ## [Unreleased] — Bidirectional migration-history validation (AWM-MIG-005)
 
 ### Security
