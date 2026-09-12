@@ -15,6 +15,7 @@ import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
 import { assertAuthState } from "../middleware/auth.js";
+import { v4 as uuid } from "uuid";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, ConnectionHistoryRepository } from "../repos/sessionRepos.js";
 import { awaitAuthFrame } from "../ssh/gateway.js";
@@ -22,6 +23,7 @@ import { awaitAuthFrame } from "../ssh/gateway.js";
 export interface TelnetGatewayDeps {
   jwt: JwtService;
   users: import("../repos/userRepo.js").UserRepository;
+  sessions: import("../session/activeSessions.js").ActiveSessionManager;
   hosts: HostRepository;
   history: ConnectionHistoryRepository;
   log: Logger;
@@ -137,6 +139,17 @@ export function makeTelnetGateway(deps: TelnetGatewayDeps) {
       const sock = net.connect({ host: host.hostname, port: host.port });
       sock.setTimeout(20_000);
 
+      // AWM-SEC-022: register for active revocation (disable/lock/delete/role
+      // change terminate this live Telnet session). Idempotent close of WS + TCP.
+      const sessionId = uuid();
+      let revoked = false;
+      const closeSession = () => {
+        if (revoked) return; revoked = true;
+        try { sock.destroy(); } catch { /* ignore */ }
+        try { if (ws.readyState === ws.OPEN) ws.close(4403, "authorization revoked"); else ws.terminate(); } catch { /* ignore */ }
+      };
+      deps.sessions.register({ sessionId, userId, kind: "telnet", requiredPermission: "sessions:connect", close: closeSession });
+
       sock.on("connect", () => {
         sock.setTimeout(0);
         sendJson(ws, { type: "status", status: "connected" });
@@ -167,8 +180,8 @@ export function makeTelnetGateway(deps: TelnetGatewayDeps) {
         bytesIn += raw.length;
         sock.write(raw);
       });
-      ws.on("close", () => { endHistory("closed"); sock.destroy(); });
-      ws.on("error", () => sock.destroy());
+      ws.on("close", () => { deps.sessions.unregister(sessionId); endHistory("closed"); sock.destroy(); });
+      ws.on("error", () => { deps.sessions.unregister(sessionId); sock.destroy(); });
     });
   };
 }

@@ -16,6 +16,7 @@ import { makeOrganizationRoutes } from "./organization.js";
 import { getPool, closePool, dbSkip } from "../test/db.js";
 
 let app: FastifyInstance;
+const sessions = { register() {}, unregister() {}, revokeUser() { return 0; }, revalidateUser: async () => {}, count() { return 0; }, countForUser() { return 0; }, startPeriodic() {}, stop() {} } as never;
 let jwt: JwtService;
 let users: UserRepository;
 let roleService: RoleService;
@@ -55,7 +56,7 @@ before(async () => {
   tok.admin = (await jwt.issuePair(ids.adminA, "admin")).access.token;
 
   app = Fastify();
-  await app.register(makeOrganizationRoutes({
+  await app.register(makeOrganizationRoutes({ sessions,
     companies: new CompanyRepository(pool), units: new OrgUnitRepository(pool),
     users, audit: new AuditRepository(pool), jwt, roleService,
   }), { prefix: "/api/v1/org" });

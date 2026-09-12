@@ -29,6 +29,7 @@ import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
 import { assertAuthState } from "../middleware/auth.js";
+import { v4 as uuid } from "uuid";
 import type { Logger } from "../logger/index.js";
 import type {
   HostRepository,
@@ -42,6 +43,7 @@ import { STATS_CMD, parseStats, type PrevSample } from "./serverStats.js";
 export interface SshGatewayDeps {
   jwt: JwtService;
   users: import("../repos/userRepo.js").UserRepository;
+  sessions: import("../session/activeSessions.js").ActiveSessionManager;
   hosts: HostRepository;
   credentials: CredentialRepository;
   history: ConnectionHistoryRepository;
@@ -341,7 +343,20 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         if (ws.readyState === ws.OPEN) ws.close();
       });
 
+      // AWM-SEC-022: register for active revocation. Closing terminates BOTH the
+      // WS (code 4403) and the SSH client, and clears every timer (idempotent).
+      const sessionId = uuid();
+      let revoked = false;
+      const closeSession = () => {
+        if (revoked) return; revoked = true;
+        clearIdle(); clearStats(); clearWsPing();
+        try { conn.end(); } catch { /* ignore */ }
+        try { if (ws.readyState === ws.OPEN) ws.close(4403, "authorization revoked"); else ws.terminate(); } catch { /* ignore */ }
+      };
+      deps.sessions.register({ sessionId, userId, kind: "ssh", requiredPermission: "sessions:connect", close: closeSession });
+
       ws.on("close", () => {
+        deps.sessions.unregister(sessionId);
         clearIdle();
         clearStats();
         clearWsPing();
@@ -349,6 +364,7 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         conn.end();
       });
       ws.on("error", () => {
+        deps.sessions.unregister(sessionId);
         clearIdle();
         clearStats();
         clearWsPing();

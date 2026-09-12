@@ -43,6 +43,7 @@ interface Deps {
   audit: AuditRepository;
   jwt: JwtService;
   roleService: RoleService;
+  sessions: import("../session/activeSessions.js").ActiveSessionManager;
 }
 
 const err = (reply: import("fastify").FastifyReply, code: number, k: string, m: string) =>
@@ -236,6 +237,10 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
       }
 
       const user = await deps.users.setOrg(id, destCompany, orgUnitId, newRole);
+      // AWM-SEC-022: a company/security reassignment is a tenant-context change —
+      // terminate the user's active remote sessions (even if the new role keeps
+      // the same permission). The DB move is committed above.
+      deps.sessions.revokeUser(id, "COMPANY_CHANGED");
       await deps.audit.log({
         userId: req.auth!.sub, action: "user_assign_org", success: true,
         resourceType: "user", resourceId: id,

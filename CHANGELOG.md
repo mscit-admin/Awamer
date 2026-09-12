@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Active remote-session revocation (AWM-SEC-022)
+
+### Security
+- **AWM-SEC-022 (P1) — Security-relevant account changes now terminate
+  already-established remote sessions.** Long-lived channels (SSH/Telnet/
+  TCP-tunnel/VNC) were validated only at connect time, so an open session
+  survived a disable/lock/delete/role-downgrade/company-move until the client
+  disconnected. A new in-memory `ActiveSessionManager` (`session/activeSessions.ts`)
+  tracks active sessions; each gateway registers on connect and unregisters on
+  close, and its close terminates **both** the WebSocket (code 4403 "authorization
+  revoked") and the underlying privileged connection (idempotent). Admin
+  role/disable/lock changes, user deletion, and org company moves emit an
+  immediate revocation after the DB commit (`revalidateUser`/`revokeUser`); a
+  shared periodic loop (15s) revalidates live state as a fallback for missed
+  events, permission-aware for role changes and fail-closed only after repeated
+  DB failures. Existing refresh-session revocation is preserved. Each revocation
+  writes an audit event (`token_revoke`, `{kind, reason}`) with no secrets.
+  Single-instance deployment today; the per-instance periodic revalidation keeps
+  correctness bounded by the interval if replicas are added.
+- **No new permission** and **no RBAC-matrix change** — session-lifecycle security.
+
+### Tests
+- `session/activeSessions.test.ts` (manager logic: idempotency, permission-aware
+  revalidation, fail-closed fallback, other-users-unaffected) and
+  `session/sessionRevocation.itest.ts` (real WS sessions through the real gateways:
+  AUTHZ-STATE-009..016 disable/lock/delete/downgrade/company-move across SSH/
+  Telnet/tunnel/VNC, 018 periodic fallback, 019 multi-session, 020 isolation,
+  022 reconnect-denied) — WS closes 4403, upstream torn down, registry cleaned.
+  Verified against real PostgreSQL.
+
+---
+
 ## [Unreleased] — Production acceptance: live authz, bootstrap secret, readiness (AWM-SEC-021, AWM-CFG-001, AWM-STAB-002)
 
 ### Security

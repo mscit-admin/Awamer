@@ -22,6 +22,7 @@ import { makeTelnetGateway } from "./gateway.js";
 const noJwt = process.env.JWT_ACCESS_SECRET ? undefined : "set JWT_ACCESS_SECRET to run";
 
 let app: FastifyInstance;
+const sessions = { register() {}, unregister() {}, revokeUser() { return 0; }, revalidateUser: async () => {}, count() { return 0; }, countForUser() { return 0; }, startPeriodic() {}, stop() {} } as never;
 let jwt: JwtService;
 let base = "";
 let tcpServer: net.Server;
@@ -45,7 +46,7 @@ before(async () => {
   const log = createLogger(cfg);
   app = Fastify();
   await app.register(websocket);
-  await app.register(makeTelnetGateway({ jwt, users: users as never, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/telnet" });
+  await app.register(makeTelnetGateway({ sessions, jwt, users: users as never, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/telnet" });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const addr = app.server.address() as net.AddressInfo;
   base = `ws://127.0.0.1:${addr.port}/api/v1/telnet/connect`;

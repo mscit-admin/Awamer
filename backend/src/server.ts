@@ -18,6 +18,7 @@ import { createSecretBox, resolveSecretKey } from "./crypto/secretBox.js";
 import { createJwt } from "./jwt/index.js";
 
 import { UserRepository } from "./repos/userRepo.js";
+import { ActiveSessionManager } from "./session/activeSessions.js";
 import { MFADeviceRepository, RefreshRepository, AuditRepository } from "./repos/otherRepos.js";
 import {
   FolderRepository, TagRepository, CredentialRepository,
@@ -134,6 +135,12 @@ async function main() {
   await roleService.syncBuiltins();
   await roleService.reload();
 
+  // AWM-SEC-022: registry of active long-lived remote sessions (SSH/Telnet/
+  // tunnel/VNC). A security-relevant account change revokes matching sessions
+  // immediately; a periodic loop revalidates live state as a fallback.
+  const activeSessions = new ActiveSessionManager({ users, log, audit });
+  activeSessions.startPeriodic();
+
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
   const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log);
@@ -237,7 +244,7 @@ async function main() {
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });
 
   await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
-  await app.register(makeAdminRoutes({ users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
+  await app.register(makeAdminRoutes({ sessions: activeSessions, users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, users, jwt }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeSessionSettingsRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/admin/session-settings" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt, users }), { prefix: "/api/v1/roles" });
@@ -251,24 +258,24 @@ async function main() {
   await app.register(makeAuditRoutes({ audit, users, jwt }), { prefix: "/api/v1/audit" });
   await app.register(makeNetworkRoutes({ users, jwt }), { prefix: "/api/v1/network" });
   await app.register(makeBrandingRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/branding" });
-  await app.register(makeOrganizationRoutes({ companies, units: orgUnits, users, audit, jwt, roleService }), { prefix: "/api/v1/org" });
+  await app.register(makeOrganizationRoutes({ sessions: activeSessions, companies, units: orgUnits, users, audit, jwt, roleService }), { prefix: "/api/v1/org" });
   await app.register(makeAiRoutes({ ai: aiProviders, users, jwt }), { prefix: "/api/v1/ai" });
   await app.register(makeCommandHistoryRoutes({ commands, users, jwt }), { prefix: "/api/v1/command-history" });
   await app.register(makeNotesRoutes({ notes, users, jwt }), { prefix: "/api/v1/notes" });
   await app.register(makeBackupRoutes({ backup, users, jwt }), { prefix: "/api/v1/backup" });
 
   // Phase 5 — browser SSH gateway (WebSocket).
-  await app.register(makeSshGateway({ users, jwt, hosts, credentials, history, settings: appSettings, log, hostKeys }), { prefix: "/api/v1/ssh" });
+  await app.register(makeSshGateway({ sessions: activeSessions, users, jwt, hosts, credentials, history, settings: appSettings, log, hostKeys }), { prefix: "/api/v1/ssh" });
   // Phase 4 — browser SFTP gateway (REST, session-based).
   await app.register(makeSftpGateway({ users, jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/sftp" });
   // Phase 6 — browser VNC gateway (WebSocket byte relay).
-  await app.register(makeVncGateway({ users, jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
+  await app.register(makeVncGateway({ sessions: activeSessions, users, jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
   // Browser Telnet gateway (WebSocket ↔ raw TCP relay).
-  await app.register(makeTelnetGateway({ users, jwt, hosts, history, log }), { prefix: "/api/v1/telnet" });
+  await app.register(makeTelnetGateway({ sessions: activeSessions, users, jwt, hosts, history, log }), { prefix: "/api/v1/telnet" });
   // Phase 5 — SSH port forwarding: server-managed local tunnels (REST) and a
   // per-user WebSocket TCP tunnel.
   await app.register(makeTunnelRoutes({ tunnels, users, jwt }), { prefix: "/api/v1/tunnels" });
-  await app.register(makeWsTunnelGateway({ users, jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/tunnel" });
+  await app.register(makeWsTunnelGateway({ sessions: activeSessions, users, jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/tunnel" });
   // OpenVPN client profiles + backend-runtime connections.
   await app.register(makeVpnRoutes({ vpn: vpnProfiles, manager: vpnManager, audit, users, jwt }), { prefix: "/api/v1/vpn" });
   // Built-in OpenVPN server management (PKI, users, .ovpn, start/stop).

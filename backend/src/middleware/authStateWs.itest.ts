@@ -25,6 +25,7 @@ let jwt: JwtService;
 let users: UserRepository;
 let baseWs = "";
 let baseHttp = "";
+const sessions = { register() {}, unregister() {}, revokeUser() { return 0; }, revalidateUser: async () => {}, count() { return 0; }, countForUser() { return 0; }, startPeriodic() {}, stop() {} } as never;
 let tcpPort = 0;
 let tcpServer: net.Server;
 const ids = { active: "", disabled: "" };
@@ -79,10 +80,10 @@ before(async () => {
 
   app = Fastify();
   await app.register(websocket);
-  await app.register(makeSshGateway({ jwt, users, hosts: hosts as never, credentials: stub, history: history as never, settings: stub, log, hostKeys: stub }), { prefix: "/api/v1/ssh" });
-  await app.register(makeTelnetGateway({ jwt, users, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/telnet" });
-  await app.register(makeWsTunnelGateway({ jwt, users, hosts: hosts as never, credentials: stub, log, hostKeys: stub }), { prefix: "/api/v1/tunnel" });
-  await app.register(makeVncGateway({ jwt, users, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/vnc" });
+  await app.register(makeSshGateway({ sessions, jwt, users, hosts: hosts as never, credentials: stub, history: history as never, settings: stub, log, hostKeys: stub }), { prefix: "/api/v1/ssh" });
+  await app.register(makeTelnetGateway({ sessions, jwt, users, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/telnet" });
+  await app.register(makeWsTunnelGateway({ sessions, jwt, users, hosts: hosts as never, credentials: stub, log, hostKeys: stub }), { prefix: "/api/v1/tunnel" });
+  await app.register(makeVncGateway({ sessions, jwt, users, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/vnc" });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const addr = app.server.address() as net.AddressInfo;
   baseWs = `ws://127.0.0.1:${addr.port}`;
