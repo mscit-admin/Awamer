@@ -254,3 +254,30 @@ Per-finding record of the remediation program. Baseline in
 - **Remaining risk:** an API RCE/escape runs as root with NET_ADMIN + TUN;
   mitigated as above; full remediation requires the helper split in a dedicated
   cycle with a real Docker + TUN test host.
+
+---
+
+## SEC-DEP-001 — Vulnerable @xmldom/xmldom in the KDBX import chain  (Phase 9)
+
+- **Dependency path:** `desktop → kdbxweb@2.1.1 → @xmldom/xmldom@0.7.13`.
+- **Advisories:** `@xmldom/xmldom <= 0.8.14` — multiple XML-injection /
+  serialization + uncontrolled-recursion DoS advisories (GHSA-wh4c-j3r5-mjhp,
+  GHSA-2v35-w6hq-6mfw, GHSA-f6ww-3ggp-fr8h, GHSA-x6wf-f3px-wcqx, …), fixed in
+  0.8.13+.
+- **Reachability:** kdbxweb parses the decrypted KDBX inner XML. In the SHIPPED
+  desktop app (Tauri/browser) kdbxweb uses the native `DOMParser`, so
+  @xmldom/xmldom is a Node-only fallback (not executed at runtime there); under
+  Node (incl. the test runner) the xmldom path IS used. Attacker-supplied `.kdbx`
+  files reach the parser after the user's own master password decrypts them.
+- **Fix:** pin `@xmldom/xmldom` to the patched LTS via an npm `overrides` entry
+  (`"@xmldom/xmldom": "^0.8.15"`) — verified compatible with kdbxweb 2.1.1 (not a
+  blind major bump of kdbxweb itself). Both advisories now report CLEARED.
+- **Files modified:** `desktop/package.json` (overrides), `desktop/package-lock.json`,
+  `desktop/src/modules/users/keepassImport.test.ts` (new).
+- **Tests added:** 7 KDBX regression tests (valid import, wrong password,
+  corrupt/truncated, malformed non-KDBX, empty, large 500-entry vault, and an
+  XXE/entity attempt is rejected — never fetched). PASS with xmldom 0.8.15.
+- **Test result:** PASS. Desktop tests 16→23; tsc + build green; `npm audit`
+  no longer flags @xmldom/xmldom or kdbxweb.
+- **Migration required:** none (dependency override; reinstall on deploy).
+- **Remaining risk:** none for this chain at the pinned version.
