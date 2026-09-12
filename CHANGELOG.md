@@ -9,6 +9,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Installation evidence & diagnostics system
+
+### Added
+- **Installation evidence, diagnostics & future-evaluation system.** Every run
+  of the official installer (`deploy/scripts/install.sh`) now automatically
+  produces a structured, **sanitized** evidence package under
+  `/var/log/awamer/installation/<RUN_ID>/` (in-repo `installation-evidence/`
+  fallback), enough to reconstruct the install, diagnose failures, and support a
+  later production-readiness evaluation. No application source, business logic,
+  security architecture, or PostgreSQL business schema was changed.
+  - New sourceable library `deploy/scripts/lib/evidence.sh`: never-overwritten
+    per-run directories (failed runs preserved), **automatic secret redaction**
+    on every write (keyed off sensitive field names + PEM/Authorization/Cookie),
+    command logging with exit codes + durations, system-info/network/preflight
+    collection, before/after component state, health/readiness probes,
+    application-revision + config SHA-256 fingerprints, a machine-readable
+    `installation-manifest.json` (pure-Bash, no runtime deps), and an
+    `INSTALLATION_REPORT.md`. Stable `AW-INSTALL-<PHASE>-NNN` error codes.
+  - `deploy/scripts/deployment-note.sh` records manual operator interventions
+    (stored, never executed); `deploy/scripts/support-bundle.sh` builds a
+    sanitized `awamer-installation-<RUN_ID>.tar.gz` with a denylist,
+    re-redaction, and a **blocking** secret scan (rejects, not warns);
+    `deploy/scripts/validate-after-reboot.sh` verifies the stack after reboot.
+  - Installer exit codes are strict (0 only on success; non-zero on any
+    mandatory-phase failure), evidence is preserved on failure, and success is
+    explicitly **not** a production-approval claim.
+  - Docs: `docs/INSTALLATION_TROUBLESHOOTING.md` (failure knowledge base with
+    DEPLOY-001/DEPLOY-002 and the INSTALL-XXX workflow) and
+    `docs/INSTALLATION_EVIDENCE.md` (how to read/note/bundle/send evidence
+    safely). Tests: `deploy/scripts/tests/evidence-test.sh` (31) and
+    `deploy/scripts/tests/install-sim-test.sh` (33 end-to-end incl. six
+    controlled-failure scenarios) — 64 passing.
+
+## [Unreleased] — Deployment fixes (DEPLOY-001, DEPLOY-002)
+
+### Fixed
+- **DEPLOY-001 — nginx config now works on distro nginx (no third-party repo).**
+  The production reverse-proxy config (`deploy/nginx/netsphere.conf`) used the
+  standalone `http2 on;` directive (nginx ≥ 1.25.1), which fails `nginx -t` with
+  `unknown directive "http2"` on the nginx shipped with Ubuntu 22.04 (1.18) and
+  24.04 (1.24), breaking the official install. HTTP/2 is now enabled via the
+  `listen … ssl http2` parameter form, which is accepted by both distro nginx
+  and newer nginx (1.25+ accepts it with a deprecation notice). All proxy,
+  WebSocket-upgrade, `/healthz`, `/readyz`, SPA-fallback, TLS, security-header
+  and upload-limit behaviour is unchanged. `deploy/scripts/install.sh` now prints
+  the running nginx version as a compatibility preflight.
+- **DEPLOY-002 — fresh-install TLS/certbot bootstrap ordering.** The installer
+  previously enabled the final HTTPS vhost (which references not-yet-issued
+  Let's Encrypt cert files) and ran `nginx -t` *before* obtaining the
+  certificate, aborting every fresh install. `install.sh` now: installs an
+  HTTP-only bootstrap vhost serving the ACME webroot (`/var/www/certbot`) →
+  obtains the cert with `certbot certonly --webroot` → enables the final HTTPS
+  config → `nginx -t` → reload. An existing certificate is preserved (issuance
+  skipped). Certbot failure exits non-zero **without** activating the cert-less
+  HTTPS config (fail-closed; the bootstrap vhost keeps serving). A failed final
+  `nginx -t` rolls back to the bootstrap config. `deploy/scripts/update.sh` never
+  reissues certificates — it validates and reloads only, and never reloads a
+  config that fails `nginx -t` (the running config stays intact, update exits 1).
+  Renewal stays zero-downtime (the port-80 block serves the ACME webroot, so
+  `certbot renew` works with nginx running).
+
+  No application source, database schema, or dependencies were changed. `npm
+  audit` was reviewed for reporting only (see FINAL_DEPLOYMENT_FIX_REPORT.md);
+  the `@xmldom/xmldom`/`kdbxweb` advisory chain was assessed **not
+  runtime-reachable** in the shipped browser SPA (native DOMParser is used;
+  xmldom is a Node-only fallback; the KeePass feature is import/parse-only).
+
 ## [Unreleased] — Active remote-session revocation (AWM-SEC-022)
 
 ### Security
