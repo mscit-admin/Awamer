@@ -24,7 +24,7 @@ interface Deps {
 
 export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requireRole("super_admin", "admin"));
 
     // Tenant scope: a Super Admin (companies:manage) sees/manages every

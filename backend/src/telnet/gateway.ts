@@ -14,12 +14,14 @@ import net from "node:net";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
+import { assertAuthState } from "../middleware/auth.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, ConnectionHistoryRepository } from "../repos/sessionRepos.js";
 import { awaitAuthFrame } from "../ssh/gateway.js";
 
 export interface TelnetGatewayDeps {
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
   hosts: HostRepository;
   history: ConnectionHistoryRepository;
   log: Logger;
@@ -106,7 +108,9 @@ export function makeTelnetGateway(deps: TelnetGatewayDeps) {
       try {
         const claims = await deps.jwt.verifyAccess(token);
         userId = claims.sub;
-        if (!can(claims.role, "sessions:connect")) return fail("forbidden", "your role cannot open sessions");
+        // AWM-SEC-021: authorize on the LIVE account state, not the stale token.
+        const live = await assertAuthState(deps.users, claims.sub);
+        if (!can(live.role, "sessions:connect")) return fail("forbidden", "your role cannot open sessions");
       } catch {
         return fail("invalid_token", "token is invalid or expired");
       }

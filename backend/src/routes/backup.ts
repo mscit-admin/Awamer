@@ -20,6 +20,7 @@ import { encryptBackup, decryptBackup, isEncryptedBackup, BackupDecryptError } f
 interface Deps {
   backup: BackupRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 const BACKUP_FORMAT = "awamer-backup";
@@ -27,7 +28,7 @@ const BACKUP_VERSION = 1;
 
 export function makeBackupRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requirePermission("backup:manage"));
 
     const exportBody = z.object({

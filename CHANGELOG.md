@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Production acceptance: live authz, bootstrap secret, readiness (AWM-SEC-021, AWM-CFG-001, AWM-STAB-002)
+
+### Security
+- **AWM-SEC-021 (P1) — Authorization now reflects live account state, not the
+  stale access token.** Permission checks used the role embedded in the (up to
+  15-minute) access JWT, so a user moved/downgraded/disabled/locked/deleted kept
+  old privileges until token expiry — on HTTP and every WS channel. A centralized
+  `assertAuthState(users, sub)` now loads the live user, rejects
+  deleted/disabled/locked accounts, and `makeAuthMiddleware` replaces the token
+  role with the **live DB role**; the same guard runs in the SSH/Telnet/TCP-tunnel
+  WS auth paths and at VNC ticket issue **and** redemption. Old tokens are denied
+  immediately (401 `session_invalidated`, or 403 on downgrade). Refresh revocation
+  on admin changes is unchanged. No new permission; no RBAC-matrix change.
+- **AWM-CFG-001 (P1) — Production refuses unsafe bootstrap admin passwords.**
+  `BOOTSTRAP_ADMIN_PASSWORD` defaulted to `ChangeMe!2026` and was accepted in
+  production. `loadConfig` now (when `APP_ENV=production`) requires an explicit
+  secret ≥16 chars that is not a known placeholder, failing closed (non-zero exit)
+  **before** any Super Admin is bootstrapped. Development keeps the convenience
+  default. The password is never logged or echoed in errors.
+
+### Fixed / Deployment
+- **AWM-STAB-002 (P2) — `/readyz` wired into production.** nginx now proxies
+  `location = /readyz` to the backend (previously only `/healthz`, so the SPA
+  fallback masked readiness); `deploy/scripts/{install,update}.sh` gate rollout
+  success on `/readyz` (DB-backed 200/503). Liveness (`/healthz`, Docker
+  healthcheck) and readiness (`/readyz`, reverse proxy + deploy gate) are kept
+  distinct and documented.
+- Corrected the stale nginx comment that implied a WS access token could appear in
+  a `?token=…` query (gateways use first-frame auth + VNC one-time tickets — no
+  session JWT in any WS URL). Added `X-Awamer-Client` to backend CORS
+  `allowedHeaders` so cross-origin browser operation passes preflight (no
+  wildcard-with-credentials).
+
+### Tests
+- `middleware/authState.itest.ts` (AUTHZ-STATE-001..005,008) and
+  `middleware/authStateWs.itest.ts` (AUTHZ-STATE-006/007, SSH/Telnet/tunnel/VNC):
+  old tokens denied immediately after role/company/disable/lock/delete; unchanged
+  users unaffected. `config/bootstrapConfig.test.ts` (CFG-BOOT-001..006).
+  `db/readyDeploy.itest.ts` (READY-DEPLOY-001..006). Verified end-to-end against
+  real PostgreSQL, a production-mode server boot, and real nginx `/readyz` routing.
+
+---
+
 ## [Unreleased] — Migration artifact integrity (AWM-MIG-006)
 
 ### Security

@@ -8,7 +8,53 @@ declare module "fastify" {
   }
 }
 
-export function makeAuthMiddleware(jwt: JwtService) {
+/**
+ * The current, security-relevant slice of a user's account. Structurally
+ * satisfied by `UserRepository.getById`'s `User` — declared here so the auth
+ * layer does not depend on the repository's concrete type.
+ */
+export interface AuthUserState {
+  role: string;
+  isActive: boolean;
+  isLocked: boolean;
+  lockedUntil: Date | null;
+  companyId: string | null;
+}
+export interface AuthUserSource {
+  getById(id: string): Promise<AuthUserState>;
+}
+
+/** Raised when the token is valid but the account's LIVE state is not. */
+export class AuthStateError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "AuthStateError";
+    this.code = code;
+  }
+}
+
+/**
+ * AWM-SEC-021 — resolve and validate the CURRENT security state of the token's
+ * subject, so authorization never trusts a stale (up-to-15-minute) access token.
+ * Rejects a deleted, disabled or locked account and returns the live user (whose
+ * live `role` callers use for permission checks). Applied identically by the
+ * HTTP middleware and every long-lived WS channel (SSH/Telnet/tunnel/VNC).
+ */
+export async function assertAuthState(users: AuthUserSource, sub: string): Promise<AuthUserState> {
+  let user: AuthUserState;
+  try {
+    user = await users.getById(sub);
+  } catch {
+    throw new AuthStateError("account_invalid", "account no longer exists");
+  }
+  if (!user.isActive) throw new AuthStateError("account_disabled", "account is disabled");
+  const tempLocked = user.lockedUntil != null && user.lockedUntil.getTime() > Date.now();
+  if (user.isLocked || tempLocked) throw new AuthStateError("account_locked", "account is locked");
+  return user;
+}
+
+export function makeAuthMiddleware(jwt: JwtService, users: AuthUserSource) {
   return async function jwtAuth(req: FastifyRequest, reply: FastifyReply) {
     const header = req.headers.authorization;
     if (!header) {
@@ -22,6 +68,16 @@ export function makeAuthMiddleware(jwt: JwtService) {
       req.auth = await jwt.verifyAccess(token);
     } catch {
       return reply.code(401).send({ error: { code: "invalid_token", message: "token is invalid or expired" } });
+    }
+    // AWM-SEC-021: authorization must reflect the CURRENT account state, never
+    // the stale token. Load the live user, reject deleted/disabled/locked
+    // accounts immediately, and replace the token role with the live DB role so
+    // a downgraded/moved user cannot exercise an old privilege until token expiry.
+    try {
+      const live = await assertAuthState(users, req.auth.sub);
+      req.auth.role = live.role;
+    } catch {
+      return reply.code(401).send({ error: { code: "session_invalidated", message: "your session is no longer valid" } });
     }
   };
 }

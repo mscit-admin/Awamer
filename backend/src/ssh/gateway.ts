@@ -28,6 +28,7 @@ import { Client } from "ssh2";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
+import { assertAuthState } from "../middleware/auth.js";
 import type { Logger } from "../logger/index.js";
 import type {
   HostRepository,
@@ -40,6 +41,7 @@ import { STATS_CMD, parseStats, type PrevSample } from "./serverStats.js";
 
 export interface SshGatewayDeps {
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
   hosts: HostRepository;
   credentials: CredentialRepository;
   history: ConnectionHistoryRepository;
@@ -132,7 +134,10 @@ export function makeSshGateway(deps: SshGatewayDeps) {
       try {
         const claims = await deps.jwt.verifyAccess(token);
         userId = claims.sub;
-        if (!can(claims.role, "sessions:connect")) {
+        // AWM-SEC-021: authorize on the LIVE account state, not the stale token —
+        // a deleted/disabled/locked/downgraded user is rejected immediately.
+        const live = await assertAuthState(deps.users, claims.sub);
+        if (!can(live.role, "sessions:connect")) {
           return fail("forbidden", "your role cannot open sessions");
         }
       } catch {

@@ -15,7 +15,7 @@ interface Deps {
 /** Audit-log read API. Requires the `audit:read` permission (admin / auditor). */
 export function makeAuditRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requirePermission("audit:read"));
 
     const query = z.object({

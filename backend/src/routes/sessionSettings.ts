@@ -14,13 +14,14 @@ import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
 interface Deps {
   settings: AppSettingsRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 const KEY_IDLE = "ssh_idle_timeout_minutes";
 
 export function makeSessionSettingsRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requireRole("admin", "super_admin"));
 
     app.get("/", async (_req, reply) => {

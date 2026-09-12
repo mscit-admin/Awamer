@@ -106,16 +106,18 @@ sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.prod
 
 ok "Backend stack started"
 
-# ----- Step 4: health check -----------------------------------------
-say "Step 4/7: Waiting for backend to become healthy"
+# ----- Step 4: readiness check --------------------------------------
+# AWM-STAB-002: gate rollout on READINESS (process + PostgreSQL), not just
+# liveness. /readyz is 200 only when the DB is reachable.
+say "Step 4/7: Waiting for backend to become ready (/readyz)"
 
 for i in {1..30}; do
-    if curl -sf http://127.0.0.1:8081/healthz >/dev/null 2>&1; then
-        ok "Backend is healthy after ${i}s"
+    if curl -sf http://127.0.0.1:8081/readyz >/dev/null 2>&1; then
+        ok "Backend is ready after ${i}s"
         break
     fi
     sleep 1
-    [[ $i -eq 30 ]] && err "Backend did not become healthy within 30 seconds. Check logs: docker compose -f deploy/docker-compose.production.yml logs auth-service"
+    [[ $i -eq 30 ]] && err "Backend did not become READY within 30 seconds (/readyz not 200 — check DB connectivity). Check logs: docker compose -f deploy/docker-compose.production.yml logs auth-service"
 done
 
 # ----- Step 5: domain prompt ----------------------------------------

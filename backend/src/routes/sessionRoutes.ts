@@ -47,11 +47,12 @@ interface HostDeps {
   hosts: HostRepository;
   audit: AuditRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 export function makeHostRoutes(deps: HostDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("preHandler", requireWrite());
 
     // --- List ----------------------------------------------------------
@@ -286,11 +287,12 @@ interface HistoryDeps {
   hosts: HostRepository;
   audit: AuditRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 export function makeHistoryRoutes(deps: HistoryDeps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
 
     const listQuery = z.object({
       host_id: z.string().uuid().optional(),

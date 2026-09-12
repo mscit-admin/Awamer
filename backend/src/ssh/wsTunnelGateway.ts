@@ -16,6 +16,7 @@ import { Client } from "ssh2";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
+import { assertAuthState } from "../middleware/auth.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
 import { resolveSshConnection, SshResolveError } from "./resolveAuth.js";
@@ -24,6 +25,7 @@ import { awaitAuthFrame } from "./gateway.js";
 
 export interface WsTunnelDeps {
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
   hosts: HostRepository;
   credentials: CredentialRepository;
   log: Logger;
@@ -67,7 +69,9 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
       try {
         const claims = await deps.jwt.verifyAccess(token);
         userId = claims.sub;
-        if (!can(claims.role, "tunnels:manage")) {
+        // AWM-SEC-021: authorize on the LIVE account state, not the stale token.
+        const live = await assertAuthState(deps.users, claims.sub);
+        if (!can(live.role, "tunnels:manage")) {
           return fail("forbidden", "your role cannot open tunnels");
         }
       } catch {

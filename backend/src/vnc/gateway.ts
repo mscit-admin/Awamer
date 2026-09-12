@@ -15,13 +15,14 @@ import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
-import { makeAuthMiddleware } from "../middleware/auth.js";
+import { makeAuthMiddleware, assertAuthState } from "../middleware/auth.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, ConnectionHistoryRepository } from "../repos/sessionRepos.js";
 import { VncTicketStore } from "./ticketStore.js";
 
 export interface VncGatewayDeps {
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
   hosts: HostRepository;
   history: ConnectionHistoryRepository;
   log: Logger;
@@ -34,7 +35,7 @@ export function makeVncGateway(deps: VncGatewayDeps) {
     // authenticated). The browser then opens the WS with ?ticket=… — no JWT in
     // the URL. Access to the host is verified here, before any ticket is issued.
     const ticketSchema = z.object({ host_id: z.string().min(1) });
-    app.post("/ticket", { preHandler: makeAuthMiddleware(deps.jwt) }, async (req, reply) => {
+    app.post("/ticket", { preHandler: makeAuthMiddleware(deps.jwt, deps.users) }, async (req, reply) => {
       const parsed = ticketSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: "host_id required" } });
       if (!can(req.auth!.role, "sessions:connect")) return reply.code(403).send({ error: { code: "forbidden", message: "your role cannot open sessions" } });
@@ -60,6 +61,15 @@ export function makeVncGateway(deps: VncGatewayDeps) {
       if (!claimed) return closeWs(4401, "invalid or expired ticket");
       const userId = claimed.userId;
       const hostId = claimed.hostId;
+
+      // AWM-SEC-021: a ticket is minted only after a live auth-state check, but
+      // re-validate at redemption so a user disabled/locked/deleted between issue
+      // and connect cannot ride an outstanding ticket into a session.
+      try {
+        await assertAuthState(deps.users, userId);
+      } catch {
+        return closeWs(4401, "session no longer valid");
+      }
 
       // Resolve the host (honors ownership + sharing).
       let host: Awaited<ReturnType<HostRepository["getById"]>>;

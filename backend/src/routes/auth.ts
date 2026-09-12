@@ -176,7 +176,7 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
 
     // ----- POST /logout-all --------------------------------------------
     // Revoke every active session for the authenticated user.
-    app.post("/logout-all", { preHandler: makeAuthMiddleware(deps.jwt) }, async (req, reply) => {
+    app.post("/logout-all", { preHandler: makeAuthMiddleware(deps.jwt, deps.users) }, async (req, reply) => {
       await deps.refresh.logoutAll(req.auth!.sub, req.ip, String(req.headers["user-agent"] ?? ""));
       clearRefreshCookie(reply);
       return reply.code(204).send();

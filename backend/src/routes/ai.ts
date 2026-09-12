@@ -88,7 +88,7 @@ function systemPrompt(mode: string, os: string): string {
 
 export function makeAiRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
 
     const scope = async (req: FastifyRequest) => {
       const me = await deps.users.getById(req.auth!.sub);

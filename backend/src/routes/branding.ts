@@ -13,6 +13,7 @@ import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
 interface Deps {
   settings: AppSettingsRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 const KEY_NAME = "app_name";
@@ -54,7 +55,7 @@ export function makeBrandingRoutes(deps: Deps): FastifyPluginAsync {
 
     app.put(
       "/",
-      { bodyLimit: MAX_BODY, preHandler: [makeAuthMiddleware(deps.jwt), requireRole("admin", "super_admin")] },
+      { bodyLimit: MAX_BODY, preHandler: [makeAuthMiddleware(deps.jwt, deps.users), requireRole("admin", "super_admin")] },
       async (req, reply) => {
         const parsed = putSchema.safeParse(req.body);
         if (!parsed.success) {

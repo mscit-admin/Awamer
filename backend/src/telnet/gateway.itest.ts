@@ -39,10 +39,13 @@ before(async () => {
 
   const hosts = { async getById(_u: string, id: string) { return { id, name: "t", hostname: "127.0.0.1", port: tcpPort }; } };
   const history = { async start() { return 1; }, async end() {} };
+  // AWM-SEC-021: the gateway now validates live account state; a valid token
+  // maps to an active "user" (which holds sessions:connect).
+  const users = { async getById() { return { role: "user", isActive: true, isLocked: false, lockedUntil: null, companyId: null }; } };
   const log = createLogger(cfg);
   app = Fastify();
   await app.register(websocket);
-  await app.register(makeTelnetGateway({ jwt, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/telnet" });
+  await app.register(makeTelnetGateway({ jwt, users: users as never, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/telnet" });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const addr = app.server.address() as net.AddressInfo;
   base = `ws://127.0.0.1:${addr.port}/api/v1/telnet/connect`;

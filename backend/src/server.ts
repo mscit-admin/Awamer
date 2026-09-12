@@ -167,7 +167,11 @@ async function main() {
     origin: cfg.corsOrigins,
     credentials: true,
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "X-Request-ID"],
+    // X-Awamer-Client is sent by the web build on every request (api.ts); it must
+    // be allow-listed so cross-origin browser operation (e.g. the Vite dev origin
+    // in CORS_ALLOWED_ORIGINS) passes preflight. Same-origin prod needs no CORS,
+    // but listing it is harmless and keeps dev/cross-origin working (AWM §30).
+    allowedHeaders: ["Authorization", "Content-Type", "X-Request-ID", "X-Awamer-Client"],
     maxAge: 600,
   });
   await app.register(rateLimit, {
@@ -234,41 +238,41 @@ async function main() {
 
   await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt }), { prefix: "/api/v1" });
   await app.register(makeAdminRoutes({ users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
-  await app.register(makeSmtpRoutes({ mailer, jwt }), { prefix: "/api/v1/admin/smtp" });
-  await app.register(makeSessionSettingsRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/admin/session-settings" });
+  await app.register(makeSmtpRoutes({ mailer, users, jwt }), { prefix: "/api/v1/admin/smtp" });
+  await app.register(makeSessionSettingsRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/admin/session-settings" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt, users }), { prefix: "/api/v1/roles" });
 
   // Phase 2 — Session Management routes
-  await app.register(makeFolderRoutes({ folders, audit, jwt }), { prefix: "/api/v1/folders" });
-  await app.register(makeTagRoutes({ tags, audit, jwt }), { prefix: "/api/v1/tags" });
-  await app.register(makeCredentialRoutes({ credentials, totp: credentialTotp, attachments: credentialAttachments, audit, jwt }), { prefix: "/api/v1/credentials" });
-  await app.register(makeHostRoutes({ hosts, audit, jwt }), { prefix: "/api/v1/hosts" });
-  await app.register(makeHistoryRoutes({ history, hosts, audit, jwt }), { prefix: "/api/v1/history" });
+  await app.register(makeFolderRoutes({ folders, audit, users, jwt }), { prefix: "/api/v1/folders" });
+  await app.register(makeTagRoutes({ tags, audit, users, jwt }), { prefix: "/api/v1/tags" });
+  await app.register(makeCredentialRoutes({ credentials, totp: credentialTotp, attachments: credentialAttachments, audit, users, jwt }), { prefix: "/api/v1/credentials" });
+  await app.register(makeHostRoutes({ hosts, audit, users, jwt }), { prefix: "/api/v1/hosts" });
+  await app.register(makeHistoryRoutes({ history, hosts, audit, users, jwt }), { prefix: "/api/v1/history" });
   await app.register(makeAuditRoutes({ audit, users, jwt }), { prefix: "/api/v1/audit" });
-  await app.register(makeNetworkRoutes({ jwt }), { prefix: "/api/v1/network" });
-  await app.register(makeBrandingRoutes({ settings: appSettings, jwt }), { prefix: "/api/v1/branding" });
+  await app.register(makeNetworkRoutes({ users, jwt }), { prefix: "/api/v1/network" });
+  await app.register(makeBrandingRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/branding" });
   await app.register(makeOrganizationRoutes({ companies, units: orgUnits, users, audit, jwt, roleService }), { prefix: "/api/v1/org" });
   await app.register(makeAiRoutes({ ai: aiProviders, users, jwt }), { prefix: "/api/v1/ai" });
-  await app.register(makeCommandHistoryRoutes({ commands, jwt }), { prefix: "/api/v1/command-history" });
-  await app.register(makeNotesRoutes({ notes, jwt }), { prefix: "/api/v1/notes" });
-  await app.register(makeBackupRoutes({ backup, jwt }), { prefix: "/api/v1/backup" });
+  await app.register(makeCommandHistoryRoutes({ commands, users, jwt }), { prefix: "/api/v1/command-history" });
+  await app.register(makeNotesRoutes({ notes, users, jwt }), { prefix: "/api/v1/notes" });
+  await app.register(makeBackupRoutes({ backup, users, jwt }), { prefix: "/api/v1/backup" });
 
   // Phase 5 — browser SSH gateway (WebSocket).
-  await app.register(makeSshGateway({ jwt, hosts, credentials, history, settings: appSettings, log, hostKeys }), { prefix: "/api/v1/ssh" });
+  await app.register(makeSshGateway({ users, jwt, hosts, credentials, history, settings: appSettings, log, hostKeys }), { prefix: "/api/v1/ssh" });
   // Phase 4 — browser SFTP gateway (REST, session-based).
-  await app.register(makeSftpGateway({ jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/sftp" });
+  await app.register(makeSftpGateway({ users, jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/sftp" });
   // Phase 6 — browser VNC gateway (WebSocket byte relay).
-  await app.register(makeVncGateway({ jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
+  await app.register(makeVncGateway({ users, jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
   // Browser Telnet gateway (WebSocket ↔ raw TCP relay).
-  await app.register(makeTelnetGateway({ jwt, hosts, history, log }), { prefix: "/api/v1/telnet" });
+  await app.register(makeTelnetGateway({ users, jwt, hosts, history, log }), { prefix: "/api/v1/telnet" });
   // Phase 5 — SSH port forwarding: server-managed local tunnels (REST) and a
   // per-user WebSocket TCP tunnel.
-  await app.register(makeTunnelRoutes({ tunnels, jwt }), { prefix: "/api/v1/tunnels" });
-  await app.register(makeWsTunnelGateway({ jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/tunnel" });
+  await app.register(makeTunnelRoutes({ tunnels, users, jwt }), { prefix: "/api/v1/tunnels" });
+  await app.register(makeWsTunnelGateway({ users, jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/tunnel" });
   // OpenVPN client profiles + backend-runtime connections.
-  await app.register(makeVpnRoutes({ vpn: vpnProfiles, manager: vpnManager, audit, jwt }), { prefix: "/api/v1/vpn" });
+  await app.register(makeVpnRoutes({ vpn: vpnProfiles, manager: vpnManager, audit, users, jwt }), { prefix: "/api/v1/vpn" });
   // Built-in OpenVPN server management (PKI, users, .ovpn, start/stop).
-  await app.register(makeVpnServerRoutes({ servers: vpnServers, manager: vpnServerManager, audit, jwt }), { prefix: "/api/v1/vpn-server" });
+  await app.register(makeVpnServerRoutes({ servers: vpnServers, manager: vpnServerManager, audit, users, jwt }), { prefix: "/api/v1/vpn-server" });
 
   const closeOn = (sig: NodeJS.Signals) => async () => {
     log.info({ sig }, "shutdown signal received");

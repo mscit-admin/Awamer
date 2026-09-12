@@ -17,11 +17,12 @@ import type { NotesRepository } from "../repos/notesRepo.js";
 interface Deps {
   notes: NotesRepository;
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
 }
 
 export function makeNotesRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
 
     const listQuery = z.object({
       host_id: z.string().uuid().optional(),

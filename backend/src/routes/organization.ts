@@ -50,7 +50,7 @@ const err = (reply: import("fastify").FastifyReply, code: number, k: string, m: 
 
 export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
 
     // Resolve the caller's company + whether they can manage all companies.
     async function scope(req: import("fastify").FastifyRequest) {

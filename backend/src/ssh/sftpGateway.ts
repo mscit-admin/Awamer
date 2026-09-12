@@ -34,6 +34,7 @@ import { makeHostVerifier, type HostKeyStore } from "./hostKeys.js";
 
 export interface SftpGatewayDeps {
   jwt: JwtService;
+  users: import("../repos/userRepo.js").UserRepository;
   hosts: HostRepository;
   credentials: CredentialRepository;
   log: Logger;
@@ -107,7 +108,7 @@ export function makeSftpGateway(deps: SftpGatewayDeps) {
   }
 
   return async function plugin(app: FastifyInstance) {
-    app.addHook("preHandler", makeAuthMiddleware(deps.jwt));
+    app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("onClose", async () => {
       clearInterval(reaper);
       for (const s of sessions.values()) {
