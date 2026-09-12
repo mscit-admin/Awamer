@@ -181,10 +181,16 @@ services:
       - internal
     volumes:
       - vpn-helper-run:/run/awamer
-    # No `ports:` — the helper never publishes a host port. (If you use the
-    # built-in OpenVPN SERVER for EXTERNAL clients, publish ONLY that server's
-    # data port here, e.g. `- "1194:1194/udp"`; that is the VPN data plane, not
-    # the — always socket-only, never network-exposed — control/IPC surface.)
+    # SEC-INFRA-DEPLOY-002 — OpenVPN SERVER DATA PLANE ONLY. These publish the
+    # OpenVPN listener that EXTERNAL VPN clients dial (default 1194, udp+tcp;
+    # override with OPENVPN_SERVER_PORT to match the port of the VPN server you
+    # create in the app). This is NOT the helper's control/IPC surface — that is
+    # the owner-group-only Unix socket in the shared volume above, which has NO
+    # published port and is never network-exposed. If you do not run the built-in
+    # OpenVPN server you may delete these two lines.
+    ports:
+      - "${OPENVPN_SERVER_PORT:-1194}:${OPENVPN_SERVER_PORT:-1194}/udp"
+      - "${OPENVPN_SERVER_PORT:-1194}:${OPENVPN_SERVER_PORT:-1194}/tcp"
     cap_drop:
       - ALL
     cap_add:

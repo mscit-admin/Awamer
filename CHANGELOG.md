@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — SEC-INFRA-DEPLOY: VPN helper secret provisioning + OpenVPN data-plane port
+
+Two deployment fixes on top of SEC-INFRA-001 (helper architecture unchanged).
+See `FINAL_SEC_INFRA_DEPLOYMENT_FIX_REPORT.md`.
+
+### Fixed
+- **SEC-INFRA-DEPLOY-001 — `VPN_HELPER_SECRET` provisioning.**
+  `deploy/scripts/generate-secrets.sh` now emits `VPN_HELPER_SECRET`
+  (`openssl rand -hex 32`); `install.sh` validates it as a mandatory secret, so
+  a fresh install needs no manual editing. `update.sh` adds it once to a legacy
+  `.env.production` that predates the VPN helper (chmod 600, value never printed)
+  and **preserves an existing secret unchanged** (never rotated on update).
+- **SEC-INFRA-DEPLOY-002 — OpenVPN server data-plane port.** The `vpn-helper`
+  service publishes the OpenVPN SERVER data port (`OPENVPN_SERVER_PORT`, default
+  1194, udp+tcp) so external VPN clients can reach it again after OpenVPN moved
+  into the helper. This is the VPN data plane only — the helper's control/IPC
+  surface remains the owner-group-only Unix socket with **no published port**.
+
 ## [Unreleased] — SEC-INFRA-001: privileged VPN isolation (unprivileged backend + awamer-vpn-helper)
 
 The Internet-facing backend no longer runs privileged. Previously it ran as root

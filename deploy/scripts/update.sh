@@ -40,6 +40,24 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/evidence.sh"
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 err() { printf '\033[0;31m==> ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# --- SEC-INFRA-DEPLOY-001: ensure VPN_HELPER_SECRET exists (legacy upgrade) ---
+# Installations whose .env.production predates the VPN helper have no
+# VPN_HELPER_SECRET, so compose would refuse to start. Generate one ONCE and
+# append it (mode 600). NEVER rotate an existing value (that would break IPC
+# auth on a running deployment), and NEVER print the value.
+ensure_vpn_helper_secret() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  if grep -q '^VPN_HELPER_SECRET=.' "$ENV_FILE"; then
+    say "VPN_HELPER_SECRET already present — preserving it unchanged."
+    return 0
+  fi
+  command -v openssl >/dev/null 2>&1 || err "VPN_HELPER_SECRET is missing from $ENV_FILE and openssl is unavailable to generate it."
+  printf 'VPN_HELPER_SECRET=%s\n' "$(openssl rand -hex 32)" >> "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  say "Added a generated VPN_HELPER_SECRET to $ENV_FILE (value not shown)."
+}
+ensure_vpn_helper_secret
+
 # --- DEPLOY-PORT-001: preserve the HTTPS port across updates (§25/§50) ---
 # The persisted deployment config is the source of truth for domain + port.
 CUR_DOMAIN=""; CUR_PORT=""

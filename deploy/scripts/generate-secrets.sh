@@ -50,6 +50,9 @@ JWT_ACCESS_SECRET=$(generate_hex 64)
 JWT_REFRESH_SECRET=$(generate_hex 64)
 # Phase 10 — AES-256-GCM key for credential secrets at rest (32 bytes, base64).
 CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -base64 32)
+# SEC-INFRA-001 — authenticates backend → awamer-vpn-helper IPC (HMAC). Required.
+# High entropy; keep it stable across updates (do NOT rotate on normal upgrades).
+VPN_HELPER_SECRET=$(generate_hex 32)
 
 BOOTSTRAP_ADMIN_USERNAME=admin
 BOOTSTRAP_ADMIN_PASSWORD=$(generate_b64 24)
@@ -60,6 +63,12 @@ CORS_ALLOWED_ORIGINS=https://netsphere.example.com,tauri://localhost,https://tau
 LOG_LEVEL=info
 RATE_LIMIT_LOGIN_PER_MIN=10
 RATE_LIMIT_API_PER_MIN=120
+
+# SEC-INFRA-DEPLOY-002 — built-in OpenVPN SERVER data-plane port published by
+# the vpn-helper container (udp+tcp). This is the OpenVPN listener external VPN
+# clients dial — NOT the helper control socket. Set it to match the port of the
+# VPN server you create in the app, then re-create the vpn-helper container.
+OPENVPN_SERVER_PORT=1194
 
 APP_VERSION=1.8.0
 EOF
