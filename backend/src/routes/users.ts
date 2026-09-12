@@ -7,6 +7,8 @@ import type { MFAUseCase } from "../usecases/mfa.js";
 import type { ChangePasswordUseCase } from "../usecases/changePassword.js";
 import { makeAuthMiddleware } from "../middleware/auth.js";
 import type { JwtService } from "../jwt/index.js";
+import { can } from "../domain/permissions.js";
+import { tenantScopeForActor } from "../domain/tenantScope.js";
 
 interface Deps {
   users: UserRepository;
@@ -54,7 +56,13 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
     // own organization (tenant isolation).
     app.get("/users/directory", async (req, reply) => {
       const me = await deps.users.getById(req.auth!.sub);
-      const { users } = await deps.users.list(500, 0, me.companyId);
+      // SEC-TENANT-001: explicit scope. A non-super caller with no company sees
+      // an EMPTY directory, not every tenant's users.
+      const tscope = tenantScopeForActor({
+        isSuper: can(req.auth!.role, "companies:manage"),
+        companyId: me.companyId,
+      });
+      const { users } = await deps.users.list(500, 0, tscope);
       return reply.send({
         data: users.map((u) => ({ id: u.id, username: u.username, full_name: u.fullName })),
       });

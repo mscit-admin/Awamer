@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { JwtService } from "../jwt/index.js";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 import { PERMISSIONS, PERMISSION_META, isPermission, permissionsFor } from "../domain/permissions.js";
+import { tenantScopeForActor } from "../domain/tenantScope.js";
 import { isBuiltinRole } from "../domain/index.js";
 import { RoleRepository, RoleNotFound, RoleKeyTaken } from "../repos/roleRepo.js";
 import type { RoleService } from "../domain/roleService.js";
@@ -74,7 +75,9 @@ export function makeRoleRoutes(deps: Deps): FastifyPluginAsync {
     // it) — but scoped: a tenant sees built-ins + only its own custom roles.
     app.get("/", async (req, reply) => {
       const a = await actor(req);
-      const data = await deps.roles.listForCompany(a.isSuper ? null : a.companyId);
+      // SEC-TENANT-001: explicit scope — a non-super actor with no company sees
+      // built-in roles only, never another tenant's custom roles.
+      const data = await deps.roles.listForScope(tenantScopeForActor({ isSuper: a.isSuper, companyId: a.companyId }));
       return reply.send({ data, catalog: catalog() });
     });
 

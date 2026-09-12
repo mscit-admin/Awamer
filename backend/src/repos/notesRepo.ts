@@ -106,11 +106,14 @@ export class NotesRepository {
       if (own.rowCount === 0) { await client.query("ROLLBACK"); return false; }
       const noteCompany = own.rows[0]!.company_id;
       const targets = [...new Set(userIds)].filter((u) => u && u !== ownerId);
-      // SEC-015: every recipient must be in the note's company. Reject the whole
-      // operation (no partial share) if any recipient is foreign or missing.
+      // SEC-015 / SEC-TENANT-001: every recipient must be in the note's company.
+      // A null-company owner has no tenant, so sharing is forbidden entirely
+      // (never `IS NOT DISTINCT FROM NULL`, which would match all null-company
+      // users). Reject the whole operation if any recipient is foreign/missing.
       if (targets.length > 0) {
+        if (noteCompany == null) throw PhaseTwoErrors.CrossCompanyShare();
         const { rows } = await client.query<{ id: string }>(
-          `SELECT id FROM users WHERE id = ANY($1::uuid[]) AND company_id IS NOT DISTINCT FROM $2`,
+          `SELECT id FROM users WHERE id = ANY($1::uuid[]) AND company_id = $2`,
           [targets, noteCompany],
         );
         if (rows.length !== targets.length) throw PhaseTwoErrors.CrossCompanyShare();

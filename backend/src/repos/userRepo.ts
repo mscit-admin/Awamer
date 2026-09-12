@@ -1,5 +1,6 @@
 import type { Pool } from "../db/index.js";
 import { type User, type Role, Errors, isRole } from "../domain/index.js";
+import type { TenantScope } from "../domain/tenantScope.js";
 
 interface UserRow {
   id: string;
@@ -197,20 +198,23 @@ export class UserRepository {
   }
 
   /**
-   * List users. When `companyId` is given, only that company's users are
-   * returned (tenant isolation for company admins); omit it for a global list
-   * (Super Admin).
+   * List users within an EXPLICIT tenant scope (SEC-TENANT-001):
+   *   - global         → all users (Super Admin only)
+   *   - { company }    → only that company's users
+   *   - none           → EMPTY (a non-super actor with no company is not global)
    */
-  async list(limit: number, offset: number, companyId?: string | null): Promise<{ users: User[]; total: number }> {
-    const scoped = companyId != null;
+  async list(limit: number, offset: number, scope: TenantScope): Promise<{ users: User[]; total: number }> {
+    if (scope.kind === "none") return { users: [], total: 0 };
+    const company = scope.kind === "company" ? scope.companyId : null;
+    const scoped = company != null;
     const where = scoped ? `WHERE company_id = $3` : ``;
     const totalP = this.pool.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM users ${scoped ? "WHERE company_id = $1" : ""}`,
-      scoped ? [companyId] : [],
+      scoped ? [company] : [],
     );
     const usersP = this.pool.query<UserRow>(
       `SELECT ${COLS} FROM users ${where} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
-      scoped ? [limit, offset, companyId] : [limit, offset],
+      scoped ? [limit, offset, company] : [limit, offset],
     );
     const [tRes, uRes] = await Promise.all([totalP, usersP]);
     return {

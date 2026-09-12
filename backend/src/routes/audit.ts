@@ -5,6 +5,7 @@ import type { UserRepository } from "../repos/userRepo.js";
 import type { JwtService } from "../jwt/index.js";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 import { can } from "../domain/permissions.js";
+import { tenantScopeForActor } from "../domain/tenantScope.js";
 
 interface Deps {
   audit: AuditRepository;
@@ -32,17 +33,17 @@ export function makeAuditRoutes(deps: Deps): FastifyPluginAsync {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       }
       const { limit, offset, action, success, user_id } = parsed.data;
-      // Company admins see only their own company's events; Super Admin sees all.
-      let companyId: string | undefined;
-      if (!can(req.auth!.role, "companies:manage")) {
-        const me = await deps.users.getById(req.auth!.sub);
-        companyId = me.companyId ?? undefined;
-      }
+      // SEC-TENANT-001: explicit tenant scope. Super Admin → global; a company
+      // auditor/admin → their company; a non-super actor with no company →
+      // EMPTY (never the global audit log).
+      const isSuper = can(req.auth!.role, "companies:manage");
+      const me = isSuper ? null : await deps.users.getById(req.auth!.sub);
+      const scope = tenantScopeForActor({ isSuper, companyId: me?.companyId ?? null });
       const { entries, total } = await deps.audit.list({
         limit, offset, action,
         success: success === undefined ? undefined : success === "true",
         userId: user_id,
-        companyId,
+        scope,
       });
       return reply.send({
         data: entries.map((e) => ({

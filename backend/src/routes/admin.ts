@@ -11,6 +11,7 @@ import type { RoleService } from "../domain/roleService.js";
 import type { JwtService } from "../jwt/index.js";
 import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
 import { can, permissionsFor } from "../domain/permissions.js";
+import { tenantScopeForActor } from "../domain/tenantScope.js";
 
 interface Deps {
   users: UserRepository;
@@ -75,7 +76,10 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       }
       const s = await scope(req);
-      const { users, total } = await deps.users.list(parsed.data.limit, parsed.data.offset, s.isSuper ? undefined : s.companyId);
+      // SEC-TENANT-001: explicit scope — a non-super admin with no company gets
+      // an empty list, never a global one.
+      const tscope = tenantScopeForActor({ isSuper: s.isSuper, companyId: s.companyId });
+      const { users, total } = await deps.users.list(parsed.data.limit, parsed.data.offset, tscope);
       return reply.send({
         data: users.map(userView),
         total,

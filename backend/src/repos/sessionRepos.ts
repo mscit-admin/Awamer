@@ -725,12 +725,15 @@ export class HostRepository {
       const hostCompany = own.rows[0]!.company_id;
       // Never share with the owner themselves; de-dup.
       const targets = [...new Set(userIds)].filter((u) => u && u !== ownerId);
-      // SEC-015: every recipient must belong to the host's company. Reject the
-      // ENTIRE operation (no partial share) if any recipient is foreign or
-      // missing — an explicit share must never cross a tenant boundary.
+      // SEC-015 / SEC-TENANT-001: every recipient must belong to the host's
+      // company. Reject the ENTIRE operation if any recipient is foreign or
+      // missing. A null-company owner has no tenant, so `IS NOT DISTINCT FROM
+      // NULL` (which would match ALL other null-company users) is forbidden:
+      // sharing requires a concrete company on both sides.
       if (targets.length > 0) {
+        if (hostCompany == null) throw PhaseTwoErrors.CrossCompanyShare();
         const { rows } = await client.query<{ id: string }>(
-          `SELECT id FROM users WHERE id = ANY($1::uuid[]) AND company_id IS NOT DISTINCT FROM $2`,
+          `SELECT id FROM users WHERE id = ANY($1::uuid[]) AND company_id = $2`,
           [targets, hostCompany],
         );
         if (rows.length !== targets.length) throw PhaseTwoErrors.CrossCompanyShare();

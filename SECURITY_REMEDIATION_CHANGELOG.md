@@ -39,3 +39,35 @@ Per-finding record of the remediation program. Baseline in
   (the installer now does so automatically from the chosen domain+port). If email
   is enabled in production without it, reset requests fail closed.
 - **Remaining risk:** none for this vector; reset links can no longer be poisoned.
+
+---
+
+## SEC-TENANT-001 — Null-company tenant escape  (Phase 2)
+
+- **Files modified:** `backend/src/domain/tenantScope.ts` (new — explicit
+  `TenantScope` type + `tenantScopeForActor`); `backend/src/repos/userRepo.ts`
+  (`list` takes explicit scope); `backend/src/repos/otherRepos.ts`
+  (`AuditRepository.list` takes explicit scope, fails closed on none);
+  `backend/src/repos/roleRepo.ts` (`listForScope` replaces `listForCompany`;
+  none → built-ins only); `backend/src/repos/sessionRepos.ts` +
+  `backend/src/repos/notesRepo.ts` (`setShares` forbids null-company sharing —
+  no more `IS NOT DISTINCT FROM NULL`); callers `routes/admin.ts`,
+  `routes/users.ts`, `routes/audit.ts`, `routes/roles.ts`.
+- **Root cause:** a non-super user with `company_id=NULL` collapsed onto the
+  same `null`/`undefined` sentinel Super Admins used for "global", so the
+  company filter was dropped and every tenant's rows were returned (users,
+  audit, custom roles); `setShares` `IS NOT DISTINCT FROM NULL` let null-company
+  users share across the "null tenant".
+- **Fix:** global access is now EXPLICIT via `TenantScope` (global | company |
+  none). A non-super actor with no company resolves to `none`, which the
+  repositories treat as an EMPTY/forbidden result — never global. Super Admin
+  global access is preserved; company users remain confined to their company.
+- **Tests added:** TENANT-NULL-001..010 (+ residual null-company share) — 10
+  tests, `backend/src/repos/tenantNullScope.itest.ts`.
+- **Test result:** PASS (10/10). Backend unit 106, integration 108→118. Existing
+  tenant-isolation / RBAC suites unchanged and green.
+- **Migration required:** none.
+- **Operational impact:** a non-super account with no company now sees nothing
+  tenant-scoped (previously it saw everything). Assign such accounts a company.
+- **Remaining risk:** none for the null-company escape; global access requires an
+  explicit permission-derived scope.

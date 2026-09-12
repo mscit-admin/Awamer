@@ -1,4 +1,5 @@
 import type { Pool } from "../db/index.js";
+import type { TenantScope } from "../domain/tenantScope.js";
 import type { AuditEvent, MFADevice, MFAMethod, RefreshSession } from "../domain/index.js";
 
 // =========================================================================
@@ -204,7 +205,10 @@ export class AuditRepository {
     }
   }
 
-  async list(opts: { limit?: number; offset?: number; action?: string; success?: boolean; userId?: string; companyId?: string } = {}): Promise<{ entries: AuditLogEntry[]; total: number }> {
+  async list(opts: { limit?: number; offset?: number; action?: string; success?: boolean; userId?: string; scope: TenantScope }): Promise<{ entries: AuditLogEntry[]; total: number }> {
+    // SEC-TENANT-001: a non-super actor with no company (scope "none") must NOT
+    // read the global audit log. Fail closed to an empty result.
+    if (opts.scope.kind === "none") return { entries: [], total: 0 };
     const limit = Math.max(1, Math.min(200, opts.limit ?? 50));
     const offset = Math.max(0, opts.offset ?? 0);
 
@@ -213,8 +217,9 @@ export class AuditRepository {
     if (opts.action) { params.push(opts.action); where.push(`a.action = $${params.length}`); }
     if (opts.success !== undefined) { params.push(opts.success); where.push(`a.success = $${params.length}`); }
     if (opts.userId) { params.push(opts.userId); where.push(`a.user_id = $${params.length}`); }
-    // Tenant scope: only events by users of this company (isolation).
-    if (opts.companyId) { params.push(opts.companyId); where.push(`u.company_id = $${params.length}`); }
+    // Tenant scope: only events by users of this company (isolation). Global
+    // scope (Super Admin) applies no company filter.
+    if (opts.scope.kind === "company") { params.push(opts.scope.companyId); where.push(`u.company_id = $${params.length}`); }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const countParams = [...params];
