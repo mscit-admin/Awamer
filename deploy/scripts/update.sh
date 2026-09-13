@@ -42,6 +42,13 @@ cd "$ROOT"
 
 # shellcheck source=lib/evidence.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/evidence.sh"
+# shellcheck source=lib/trustproxy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/trustproxy.sh"
+
+# Docker names (see docker-compose.production.yml): the auth-service container and
+# the network it attaches to — used to discover the proxy gateway (PROXY-DEPLOY-001).
+AUTH_CONTAINER="${AUTH_CONTAINER:-netsphere-auth}"
+INTERNAL_NETWORK="${INTERNAL_NETWORK:-netsphere-internal}"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 err() { printf '\033[0;31m==> ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -184,6 +191,26 @@ if [ "$BACKEND_CHANGED" -eq 1 ]; then
   done
 else
   say "No backend changes — skipping container rebuild."
+fi
+
+# 2b) PROXY-DEPLOY-001 — now that the stack is up and the Docker network exists,
+# discover the ACTUAL proxy gateway (the peer Fastify sees behind the host Nginx)
+# and set TRUST_PROXY to an EXACT host route (loopback,<gw>/32[,<gw6>/128]). This
+# fails closed (keeps loopback) if the gateway can't be determined, never trusts a
+# private range, and preserves an administrator-customized value. If it changes the
+# effective value, recreate ONLY auth-service so it reloads (no PG/VPN/secret churn).
+TP_BEFORE="$(tp_env_get "$ENV_FILE")"
+TP_STATUS="$(tp_configure_env "$ENV_FILE" "$AUTH_CONTAINER" "$INTERNAL_NETWORK" say)"
+TP_AFTER="$(tp_env_get "$ENV_FILE")"
+if [ "$TP_BEFORE" != "$TP_AFTER" ]; then
+  say "TRUST_PROXY changed ('${TP_BEFORE}' -> '${TP_AFTER}') — recreating auth-service to apply."
+  "${DC[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d auth-service
+  say "Verifying backend readiness after TRUST_PROXY update…"
+  for i in $(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8081/readyz >/dev/null 2>&1; then say "Backend ready (effective TRUST_PROXY=${TP_AFTER})."; break; fi
+    sleep 2
+    [ "$i" -eq 30 ] && { echo "Backend did not become READY after TRUST_PROXY update"; exit 1; }
+  done
 fi
 
 # 3) Always rebuild + publish the frontend.
