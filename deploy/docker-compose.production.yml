@@ -205,8 +205,11 @@ services:
       OPENVPN_PATH: /usr/sbin/openvpn
       VPN_RUNTIME_DIR: /var/lib/awamer/vpn-runtime
       # Per-server firewall (iptables) + the port window it may touch. Keep these
-      # aligned with the backend's VPN_SERVER_PORT_MIN/MAX.
+      # aligned with the backend's VPN_SERVER_PORT_MIN/MAX. The helper VERIFIES the
+      # backend exists + runs at startup (MULTI-VPN-FW-001) and fails closed
+      # otherwise. On the Alpine helper image `iptables` is at /sbin/iptables.
       VPN_FIREWALL_BACKEND: ${VPN_FIREWALL_BACKEND:-iptables}
+      IPTABLES_PATH: ${IPTABLES_PATH:-/sbin/iptables}
       VPN_SERVER_PORT_MIN: ${VPN_SERVER_PORT_MIN:-20000}
       VPN_SERVER_PORT_MAX: ${VPN_SERVER_PORT_MAX:-30000}
     volumes:

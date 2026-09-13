@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Multi-VPN firewall guarantee + rollback-safe port/protocol changes
+
+Two scoped fixes on the accepted Multi-VPN architecture (unchanged). See
+`FINAL_MULTI_VPN_FIREWALL_ROLLBACK_FIX_REPORT.md`.
+
+### Fixed
+- **MULTI-VPN-FW-001 — firewall backend guaranteed + verified.**
+  `backend/Dockerfile.vpn-helper` now installs `iptables` explicitly (`apk add
+  --no-cache tini openvpn iproute2 iptables`) — the helper never relies on the host
+  having it. At startup the helper **probes** the firewall backend (resolving the
+  binary from a fixed candidate list: configured → `/usr/sbin/iptables` →
+  `/sbin/iptables`, then a `--version` run) and **fails closed** if it is unusable:
+  automatic firewall ops return `action_required` and never claim success.
+  `health` now reports `{ firewallBackend, firewallAvailable }`. Compose sets
+  `IPTABLES_PATH=/sbin/iptables` for the Alpine image.
+- **MULTI-VPN-ROLLBACK-001 — transactionally-safe port/protocol changes.** A new
+  `VpnReconfigurationService` replaces the previous stop→update→move-firewall flow
+  with a rollback-safe state machine: snapshot → validate new → **prepare the new
+  firewall rule while keeping the old** → stop old (if running) → persist → start on
+  the new port → verify the listener → **only then remove the old firewall rule**.
+  Any failure restores the original working state (old DB config, old firewall rule,
+  old OpenVPN restarted); if restoration itself fails it returns
+  `vpn_recovery_required` (audited) instead of a false success. The old rule is never
+  removed before the new listener is healthy; only Awamer-owned (server-tagged) rules
+  are ever touched. A per-server guard makes concurrent changes deterministic
+  (`vpn_reconfiguration_in_progress`). Stopped servers stay stopped; protocol changes
+  (udp↔tcp on the same port) use the same safe path. `PATCH
+  /api/v1/vpn-server/servers/:id` maps outcomes to `vpn_reconfiguration_failed`
+  (rolled back) / `vpn_recovery_required` (needs an operator) / `200` with a
+  `warning` when only the old-rule cleanup is pending.
+
+### Security
+- Firewall execution stays confined to the privileged helper — a fixed `iptables`
+  path + argument array, `shell:false`, built from validated `{serverId, port,
+  proto}`; no generic command API and no rule text over IPC. Backend remains
+  unprivileged (`cap_drop: ALL`, no NET_ADMIN, no `/dev/net/tun`); helper remains
+  NET_ADMIN-only, not privileged, socket-only control plane. Validated in a live
+  Docker runtime with a real `iptables` binary and a real OpenVPN rollback (a failed
+  port change restored the original server and its external client reconnected).
+
 ## [Unreleased] — Multi-VPN-Server dynamic ports (DB-authoritative, no container recreation)
 
 Awamer can now run **multiple** built-in OpenVPN Servers **simultaneously**, each

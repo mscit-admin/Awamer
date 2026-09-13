@@ -77,6 +77,7 @@ import { VpnHelperClient } from "./vpn/helperClient.js";
 import { makeVpnRoutes } from "./routes/vpn.js";
 import { VpnServerRepository } from "./repos/vpnServerRepo.js";
 import { VpnServerManager } from "./vpn/vpnServerManager.js";
+import { VpnReconfigurationService } from "./vpn/vpnReconfigure.js";
 import { makeVpnServerRoutes } from "./routes/vpnServer.js";
 
 /** Map a DomainError code to an HTTP status for the global error handler. */
@@ -136,6 +137,10 @@ async function main() {
   // Awamer-as-OpenVPN-server: PKI-backed server instances + their users.
   const vpnServers = new VpnServerRepository(pool, secretBox, argon2, cfg.vpnPortPolicy);
   const vpnServerManager = new VpnServerManager(log, vpnHelper);
+  // MULTI-VPN-ROLLBACK-001 — rollback-safe port/protocol reconfiguration.
+  const vpnReconfig = new VpnReconfigurationService({
+    servers: vpnServers, manager: vpnServerManager, audit, policy: cfg.vpnPortPolicy, log,
+  });
   // Backup / restore of a user's own session data.
   const backup = new BackupRepository(pool, secretBox);
   // Custom roles — load the DB-backed RBAC resolver before serving traffic.
@@ -307,7 +312,7 @@ async function main() {
   // OpenVPN client profiles + backend-runtime connections.
   await app.register(makeVpnRoutes({ vpn: vpnProfiles, manager: vpnManager, audit, users, jwt }), { prefix: "/api/v1/vpn" });
   // Built-in OpenVPN server management (PKI, users, .ovpn, start/stop).
-  await app.register(makeVpnServerRoutes({ servers: vpnServers, manager: vpnServerManager, audit, users, jwt, portPolicy: { min: cfg.vpnPortPolicy.min, max: cfg.vpnPortPolicy.max } }), { prefix: "/api/v1/vpn-server" });
+  await app.register(makeVpnServerRoutes({ servers: vpnServers, manager: vpnServerManager, reconfig: vpnReconfig, audit, users, jwt, portPolicy: { min: cfg.vpnPortPolicy.min, max: cfg.vpnPortPolicy.max } }), { prefix: "/api/v1/vpn-server" });
 
   const closeOn = (sig: NodeJS.Signals) => async () => {
     log.info({ sig }, "shutdown signal received");

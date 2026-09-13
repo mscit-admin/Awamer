@@ -77,6 +77,61 @@ test("VPN-FW backend=none reports action_required (no command run)", async () =>
   assert.equal(fk.calls.length, 0);
 });
 
+// ---- MULTI-VPN-FW-001: firewall backend availability (fail-closed) ----------
+
+test("VPN-FW-BINARY-003: health reports the firewall backend + availability after a successful probe", async () => {
+  const fk = fakeIptables();
+  // Point at an executable that exists in the test env; --version returns 0 (fake).
+  const c = core({ spawnFn: fk.fn, iptablesPath: process.execPath, iptablesCandidates: [] });
+  const probe = await c.probeFirewall();
+  assert.deepEqual(probe, { firewallBackend: "iptables", firewallAvailable: true });
+  const h = await c.health();
+  assert.equal(h.firewallBackend, "iptables");
+  assert.equal(h.firewallAvailable, true);
+});
+
+test("VPN-FW-BINARY-004: a MISSING firewall executable fails closed (no command run, health=false)", async () => {
+  const fk = fakeIptables();
+  const c = core({ spawnFn: fk.fn, iptablesPath: "/no/such/iptables", iptablesCandidates: ["/also/missing"] });
+  const probe = await c.probeFirewall();
+  assert.equal(probe.firewallAvailable, false);
+  const h = await c.health();
+  assert.equal(h.firewallAvailable, false);
+  // firewall ops now fail closed: action required, and iptables is NEVER invoked.
+  const r = await c.firewallAllow(SID, 20001, "udp");
+  assert.equal(r.applied, false);
+  assert.equal(r.actionRequired, true);
+  assert.equal(fk.calls.length, 0, "no iptables command attempted when backend is unavailable");
+});
+
+test("VPN-FW-BINARY-003b: backend=none reports firewallAvailable=false in health", async () => {
+  const c = core({ firewallBackend: "none" });
+  await c.probeFirewall();
+  const h = await c.health();
+  assert.equal(h.firewallBackend, "none");
+  assert.equal(h.firewallAvailable, false);
+});
+
+test("VPN-FW-BINARY-005: firewall execution is structured (fixed path + arg array, never a shell)", async () => {
+  const seen: { cmd: string; args: string[]; opts: Record<string, unknown> }[] = [];
+  const fn: SpawnFn = (cmd, args, opts) => {
+    seen.push({ cmd, args, opts: opts as Record<string, unknown> });
+    const ee = new EventEmitter() as any; ee.stdout = new EventEmitter(); ee.stderr = new EventEmitter(); ee.kill = () => true;
+    setImmediate(() => ee.emit("exit", args.includes("-C") ? 1 : 0));
+    return ee as ChildLike;
+  };
+  const c = core({ spawnFn: fn });
+  await c.firewallAllow(SID, 20001, "udp");
+  assert.ok(seen.length > 0);
+  for (const s of seen) {
+    assert.equal(s.cmd, "/usr/sbin/iptables", "fixed executable path");
+    assert.ok(Array.isArray(s.args), "arguments are an array");
+    assert.ok(!("shell" in s.opts) || s.opts.shell !== true, "never spawned via a shell");
+    // No single argument is a packed shell string / rule blob.
+    assert.ok(!s.args.some((a) => /[;&|`$]/.test(a)), "no shell metacharacters in any argument");
+  }
+});
+
 test("runtime port-collision: serverStart rejects vpn_port_in_use when the port is occupied", async () => {
   const c = new HelperCore({
     spawnFn: (() => { const ee = new EventEmitter() as any; ee.stdout = new EventEmitter(); ee.stderr = new EventEmitter(); ee.kill = () => true; return ee; }) as unknown as SpawnFn,
