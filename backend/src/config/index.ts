@@ -24,6 +24,20 @@ const BOOTSTRAP_PLACEHOLDERS = new Set([
 ]);
 
 /**
+ * SEC-PROXY-001 — reject a TRUST_PROXY value that would trust every client (which
+ * would let any client spoof X-Forwarded-*). Fail-closed: the config throws rather
+ * than silently falling back to broad trust. A "trust nothing" value ("false"/
+ * empty) is also rejected because an empty trust set is a configuration mistake,
+ * not a safe state — the intended minimum is `loopback`.
+ */
+export function isDangerousTrustProxy(raw: string): boolean {
+  const entries = raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (entries.length === 0) return true; // empty / whitespace only
+  const BROAD = new Set(["true", "false", "*", "0.0.0.0/0", "::/0", "0.0.0.0", "::"]);
+  return entries.some((e) => BROAD.has(e));
+}
+
+/**
  * Validate a production bootstrap admin password. Throws (fail-closed) when the
  * value is missing/empty, too short, or a known placeholder. NEVER includes the
  * password itself in the error message or logs (AWM-CFG-001 §19).
@@ -52,15 +66,17 @@ const envSchema = z.object({
   AUTH_HTTP_HOST: z.string().default("0.0.0.0"),
   AUTH_HTTP_PORT: z.coerce.number().int().positive().default(8081),
   // SEC-PROXY-001 — which upstream hops Fastify may trust for X-Forwarded-*.
-  // Passed straight to Fastify's `trustProxy` (proxy-addr syntax): keywords
-  // ("loopback", "linklocal", "uniquelocal"), IPs, or CIDRs (comma-separated).
-  // Default trusts ONLY the loopback + private/ULA proxy path (the shipped Nginx
-  // reverse proxy on the host / private Docker network) — never an arbitrary
-  // public client — so a direct attacker cannot spoof X-Forwarded-For / X-Real-IP
-  // / Forwarded to choose req.ip. Set to a specific proxy CIDR to tighten further.
-  // The literal "true" is rejected (that would trust every client).
-  TRUST_PROXY: z.string().default("loopback, uniquelocal")
-    .refine((v) => v.trim().toLowerCase() !== "true", "TRUST_PROXY must be a proxy address/CIDR/keyword list, never \"true\""),
+  // Passed straight to Fastify's `trustProxy` (proxy-addr syntax): keywords, IPs,
+  // or CIDRs (comma-separated). The shipped architecture is Nginx → 127.0.0.1:8081,
+  // so the secure DEFAULT trusts ONLY the loopback proxy hop. A private/LAN client
+  // is a CLIENT, not a proxy: `uniquelocal`/`linklocal`/broad private ranges are
+  // NOT trusted by default (that would let a LAN client rotate X-Forwarded-For to
+  // poison req.ip / rate limiting / audit). Add an explicit exact proxy CIDR (e.g.
+  // "loopback,172.20.0.5/32") only for a real reverse proxy / load balancer.
+  // FAIL-CLOSED: values that would trust every client ("true", "*", "0.0.0.0/0",
+  // "::/0", "false") are REJECTED — an invalid trust config never widens silently.
+  TRUST_PROXY: z.string().default("loopback")
+    .refine((v) => !isDangerousTrustProxy(v), "TRUST_PROXY must be a specific proxy address/CIDR/keyword list — never \"true\", \"false\", \"*\", \"0.0.0.0/0\" or \"::/0\" (those trust every client)"),
 
   // Database
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),

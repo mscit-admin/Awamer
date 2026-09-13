@@ -64,6 +64,37 @@ ensure_vpn_helper_secret() {
 }
 ensure_vpn_helper_secret
 
+# --- SEC-PROXY-001: tighten a known-broad TRUST_PROXY default (F1 upgrade) ---
+# An earlier build shipped the generated default `TRUST_PROXY=loopback, uniquelocal`,
+# which trusts private/LAN addresses as proxy hops (a LAN client could spoof
+# X-Forwarded-For). Migrate ONLY that exact generated default down to `loopback`.
+# A value an administrator has explicitly customized is NEVER overwritten — it is
+# left intact and a warning is recorded so the operator can review it. If the key
+# is absent entirely, the code default (loopback) already applies; add it
+# explicitly for clarity. No secrets are involved here.
+ensure_trust_proxy_default() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  local cur
+  cur="$(grep -E '^TRUST_PROXY=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
+  if [[ -z "${cur+x}" || -z "$(grep -E '^TRUST_PROXY=' "$ENV_FILE" || true)" ]]; then
+    printf 'TRUST_PROXY=loopback\n' >> "$ENV_FILE"; chmod 600 "$ENV_FILE"
+    say "Set TRUST_PROXY=loopback in $ENV_FILE (secure default)."
+    return 0
+  fi
+  # Normalize spacing for the comparison ("loopback, uniquelocal" == "loopback,uniquelocal").
+  local norm; norm="$(printf '%s' "$cur" | tr -d '[:space:]' | tr 'A-Z' 'a-z')"
+  if [[ "$norm" == "loopback,uniquelocal" ]]; then
+    # Replace only the old generated broad default with the tightened one.
+    sed -i 's/^TRUST_PROXY=.*/TRUST_PROXY=loopback/' "$ENV_FILE"; chmod 600 "$ENV_FILE"
+    say "Migrated the old broad TRUST_PROXY default ('loopback, uniquelocal') to 'loopback' (SEC-PROXY-001)."
+  elif printf '%s' "$norm" | grep -qE '(true|false|\*|0\.0\.0\.0/0|::/0|uniquelocal|linklocal|10\.0\.0\.0/8|172\.16\.0\.0/12|192\.168\.0\.0/16|/([0-9]|1[0-6])(,|$))'; then
+    say "WARNING: TRUST_PROXY in $ENV_FILE is broad ('${cur}'). Review it — trust ONLY exact reverse-proxy addresses (e.g. 'loopback,172.20.0.1/32'), not whole private ranges. Left unchanged (custom value preserved)."
+  else
+    say "TRUST_PROXY already customized ('${cur}') — preserved unchanged."
+  fi
+}
+ensure_trust_proxy_default
+
 # --- DEPLOY-PORT-001: preserve the HTTPS port across updates (§25/§50) ---
 # The persisted deployment config is the source of truth for domain + port.
 CUR_DOMAIN=""; CUR_PORT=""

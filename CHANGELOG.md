@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — F1 tighten: default TRUST_PROXY=loopback (LAN clients are not proxies)
+
+Follow-up to F1 from independent review. See `FINAL_F1_PROXY_TRUST_FIX_REPORT.md`.
+
+### Fixed
+- **TRUST_PROXY default tightened `loopback, uniquelocal` → `loopback`.** The old
+  default trusted private/LAN addresses as proxy hops, so a LAN client could rotate
+  `X-Forwarded-For` to poison `req.ip` / rate limiting / audit. A private/LAN
+  address is a **client, not a proxy**; extra proxies (a load balancer, a
+  containerized proxy) must be added as **exact** addresses/CIDRs.
+- **Fail-closed TRUST_PROXY validation.** `loadConfig()` now rejects values that
+  trust everyone or nothing (`true`, `false`, `*`, `0.0.0.0/0`, `::/0`, empty) —
+  an invalid trust config throws instead of silently widening to broad trust.
+- **Upgrade migration** (`update.sh`): the exact old generated default
+  `loopback, uniquelocal` is migrated to `loopback`; a missing key is added as
+  `loopback`; an administrator-customized value is preserved (with a WARNING when a
+  broad private range remains). No secrets printed.
+- **Deploy config**: `docker-compose.production.yml` passes
+  `TRUST_PROXY=${TRUST_PROXY:-loopback}`; `.env.production.example` documents the
+  default and the "add only an exact proxy CIDR" rule (incl. the Docker
+  bridge-gateway note).
+
+### Security
+- Verified end-to-end with **real Nginx + real backend**: a non-loopback client
+  (separate netns) rotating `X-Forwarded-For` through nginx could not bypass the
+  login rate limit (429). Regression intact: backend unit 263/0, integration 209/0,
+  SSRF-IPV6-001..012 and JWT-ALG-001..006 green, proxy-trust upgrade test 6/0. No
+  VPN/RBAC/tenant/MFA/session/AI/schema changes.
+
 ## [Unreleased] — F1/F2 + JWT hardening (proxy trust, IPv6 SSRF, HS256 pin)
 
 Three scoped security fixes from the production penetration review. See
