@@ -1,4 +1,4 @@
-# Release Notes — NetSphere Terminal
+# Release Notes — Awamer Terminal
 
 This document records **every issue** found during each release-candidate
 process and the fix applied. Entries are append-only.
@@ -73,7 +73,7 @@ Corrected to `1.7.0` across `Cargo.toml`, `package.json`, and
 
 ## 1.6.0.1 — 2026-05-26 — Production deployment package
 
-This is the **production-ready release** for self-hosting NetSphere on
+This is the **production-ready release** for self-hosting Awamer on
 your own Ubuntu server. It bundles two things:
 
 1. The latest source (1.6.0) with two recurring fixes baked into the
@@ -199,7 +199,7 @@ everything you need to actually manage remote files:
 | Recursive folder download | ❌ deferred to 1.7.0 |
 | Cross-host copy/move | ❌ deferred to 1.7.0 |
 
-Together with 1.5.0, NetSphere is now a complete SFTP client.
+Together with 1.5.0, Awamer is now a complete SFTP client.
 
 ### Added (Rust / Tauri side)
 
@@ -469,7 +469,7 @@ No backend changes in 1.5.0 — no migrations, no API changes.
 
 ### Scope summary
 
-Four quality-of-life additions that wrap up Phase 3 and make NetSphere
+Four quality-of-life additions that wrap up Phase 3 and make Awamer
 suitable for daily use as a real SSH workstation:
 
 1. **Tab persistence** — your tab list survives app restarts
@@ -577,7 +577,7 @@ No backend changes in 1.4.0 — no migrations, no API changes.
 | 1 | Icons no longer need conversion | After extracting, immediately run `npm run tauri dev` without touching icons — should compile clean |
 | 2 | Tabs persist across restart | Open 2 SSH tabs → close the app (X button) → reopen `npm run tauri dev` → sidebar → Terminal — both tabs should be there, both marked as disconnected, with Reconnect buttons |
 | 3 | Reconnect button works | Click Reconnect on a restored tab → password/key flow runs as normal → reach shell |
-| 4 | ssh-agent works | `ssh-add ~/.ssh/id_ed25519` from terminal → Create credential type **SSH Agent** in NetSphere → attach to host → Connect → reach shell with no prompts |
+| 4 | ssh-agent works | `ssh-add ~/.ssh/id_ed25519` from terminal → Create credential type **SSH Agent** in Awamer → attach to host → Connect → reach shell with no prompts |
 | 5 | ssh-agent error path | Same as 4 but with no keys loaded (`ssh-add -D` to clear) → should see `ssh_agent_no_identities` error |
 
 ### Risks
@@ -764,7 +764,7 @@ judgement":
 
 ### Known limitations (deferred to 1.4.0+)
 
-- **No tab persistence across app restarts.** Closing NetSphere kills
+- **No tab persistence across app restarts.** Closing Awamer kills
   the tab list. Restoring sessions on launch is 1.4.0.
 - **No automatic reconnect** when the network drops mid-session.
 - **No SSH agent integration** (gnome-keyring / ssh-agent).

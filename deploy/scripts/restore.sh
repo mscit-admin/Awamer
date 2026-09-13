@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal — Database restore
+# Awamer Terminal — Database restore
 # =====================================================================
 #
 # Restore a backup created by backup.sh. WIPES the existing database

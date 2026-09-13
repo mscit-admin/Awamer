@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal (Awamer) — Post-reboot validation (§43)
+# Awamer Terminal — Post-reboot validation (§43)
 # =====================================================================
 #
 # Run AFTER a server reboot to verify the stack came back up cleanly.

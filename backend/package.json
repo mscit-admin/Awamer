@@ -2,7 +2,7 @@
   "name": "netsphere-auth-service",
   "version": "1.8.0",
   "private": true,
-  "description": "NetSphere Terminal — auth service (Node.js / TypeScript)",
+  "description": "Awamer Terminal — auth service (Node.js / TypeScript)",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {

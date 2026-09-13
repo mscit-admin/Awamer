@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal — Generate cryptographically strong secrets
+# Awamer Terminal — Generate cryptographically strong secrets
 # =====================================================================
 #
 # Run this AT MOST ONCE on a new install. The output is meant to be
@@ -32,7 +32,7 @@ generate_b64() {
 
 cat <<EOF
 # =====================================================================
-# NetSphere production secrets — generated $(date -u +%Y-%m-%dT%H:%M:%SZ)
+# Awamer production secrets — generated $(date -u +%Y-%m-%dT%H:%M:%SZ)
 # Paste into .env.production and KEEP THIS FILE SAFE.
 # =====================================================================
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal — Production install on Ubuntu (22.04+ / 24.04)
+# Awamer Terminal — Production install on Ubuntu (22.04+ / 24.04)
 # =====================================================================
 #
 # This is an INTERACTIVE installer. Run as a user with sudo rights:
@@ -341,7 +341,7 @@ say "Step 5/7: Configuring nginx + TLS"
 
 if [[ -z "${NETSPHERE_DOMAIN:-}" ]]; then
     echo
-    read -rp "Enter your domain name (e.g. netsphere.example.com), or 'skip' to skip nginx setup: " NETSPHERE_DOMAIN
+    read -rp "Enter your domain name (e.g. awamer.example.com), or 'skip' to skip nginx setup: " NETSPHERE_DOMAIN
 fi
 _ev_kv_set tls_domain "$NETSPHERE_DOMAIN"
 
@@ -546,7 +546,7 @@ _finalize_once "$INSTALL_OUTCOME"
 cat <<EOF
 
 ${GREEN}═══════════════════════════════════════════════════════════════${NC}
-${GREEN}  NetSphere Terminal installation complete.${NC}
+${GREEN}  Awamer Terminal installation complete.${NC}
 ${GREEN}═══════════════════════════════════════════════════════════════${NC}
 
   Backend container:  netsphere-auth (port 8081, bound to 127.0.0.1)

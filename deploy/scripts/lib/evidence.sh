@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal (Awamer) — Installation Evidence & Diagnostics library
+# Awamer Terminal — Installation Evidence & Diagnostics library
 # =====================================================================
 #
 # A sourceable Bash library that turns the installer (and its helper

@@ -27,7 +27,7 @@
 //   - We do NOT support negation (`!host`), revocation markers (`@revoked`),
 //     or CA markers (`@cert-authority`). These are 1.4.0+ territory.
 //   - File-locking on writes is best-effort (open-truncate-write). Concurrent
-//     writes from two NetSphere processes would race, but that's not a
+//     writes from two Awamer processes would race, but that's not a
 //     realistic scenario for a desktop app.
 // =====================================================================
 

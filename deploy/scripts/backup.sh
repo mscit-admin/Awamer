@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal — Database backup
+# Awamer Terminal — Database backup
 # =====================================================================
 #
 # Creates a timestamped dump of the postgres database. Compresses with

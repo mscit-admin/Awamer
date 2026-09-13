@@ -1,4 +1,4 @@
-// NetSphere Terminal — Tauri runtime.
+// Awamer Terminal — Tauri runtime.
 //
 // This crate is intentionally thin in Phase 1: it registers the IPC
 // commands the renderer needs (secure token storage, app metadata)
@@ -18,7 +18,7 @@ pub fn run() {
         .compact()
         .init();
 
-    tracing::info!("NetSphere Terminal starting");
+    tracing::info!("Awamer Terminal starting");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())

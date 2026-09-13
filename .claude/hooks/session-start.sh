@@ -1,6 +1,6 @@
 #!/bin/bash
 # =====================================================================
-# NetSphere Terminal — SessionStart hook
+# Awamer Terminal — SessionStart hook
 # =====================================================================
 # Installs dependencies so tests, typechecks, and builds work in
 # Claude Code on the web sessions. Runs synchronously by default so the

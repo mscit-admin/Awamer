@@ -1,5 +1,5 @@
 /**
- * Low-level HTTP client for the NetSphere API.
+ * Low-level HTTP client for the Awamer API.
  *
  * Wraps fetch with:
  *   - Base URL injection

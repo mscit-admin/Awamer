@@ -464,7 +464,7 @@ function HostKeyChangedScreen({
         </div>
         <p className="text-sm text-fg-muted mb-4">
           The server <span className="font-mono">{details.host}:{details.port}</span>{" "}
-          presented a different host key than the one NetSphere has on file.
+          presented a different host key than the one Awamer has on file.
           This <strong className="text-red-400">may indicate a man-in-the-middle attack</strong>{" "}
           — your connection was blocked.
         </p>

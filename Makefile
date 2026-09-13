@@ -1,5 +1,5 @@
 # =====================================================================
-# NetSphere Terminal — Makefile (Node.js backend)
+# Awamer Terminal — Makefile (Node.js backend)
 # =====================================================================
 # Uses relative paths so repos in directories with spaces still work.
 # =====================================================================
@@ -19,7 +19,7 @@ CYAN := \033[36m
 NC := \033[0m
 
 help: ## Show this help
-	@echo "NetSphere Terminal — Make targets:"
+	@echo "Awamer Terminal — Make targets:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-22s$(NC) %s\n", $$1, $$2}'
 

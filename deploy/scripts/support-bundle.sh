@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal (Awamer) — Installation support bundle (§37, §38, §39)
+# Awamer Terminal — Installation support bundle (§37, §38, §39)
 # =====================================================================
 #
 # Packages ONE installation evidence run into a sanitized archive that is
