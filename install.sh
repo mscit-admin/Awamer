@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal — install.sh
+# Awamer Terminal — install.sh
 # =====================================================================
 # One-shot bootstrap for a fresh checkout. Idempotent — safe to re-run.
 # =====================================================================
@@ -132,7 +132,7 @@ fi
 # --- 8. Done ---------------------------------------------------------
 echo
 echo "==============================================================="
-echo "  NetSphere Terminal is ready."
+echo "  Awamer Terminal is ready."
 echo "==============================================================="
 echo
 echo "  Backend:    http://localhost:8081"

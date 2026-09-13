@@ -1,8 +1,8 @@
 [package]
 name = "netsphere-terminal"
 version = "1.7.0"
-description = "NetSphere Terminal — Enterprise Remote Administration"
-authors = ["NetSphere Team"]
+description = "Awamer Terminal — Enterprise Remote Administration"
+authors = ["Awamer Team"]
 edition = "2021"
 rust-version = "1.85"
 

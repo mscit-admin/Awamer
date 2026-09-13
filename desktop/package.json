@@ -2,7 +2,7 @@
   "name": "netsphere-terminal-desktop",
   "private": true,
   "version": "1.7.0",
-  "description": "NetSphere Terminal — desktop client",
+  "description": "Awamer Terminal — desktop client",
   "type": "module",
   "scripts": {
     "dev": "vite",

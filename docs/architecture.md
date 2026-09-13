@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Awamer (NetSphere Terminal) is an enterprise remote-administration platform:
+Awamer Terminal is an enterprise remote-administration platform:
 manage SSH/SFTP/VNC/Telnet sessions, credentials, and OpenVPN tunnels from a
 single client, with dynamic RBAC and encrypted secrets.
 

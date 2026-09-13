@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal (Awamer) — Manual intervention note recorder (§22)
+# Awamer Terminal — Manual intervention note recorder (§22)
 # =====================================================================
 #
 # Records an operator's manual troubleshooting action into the CURRENT (or a

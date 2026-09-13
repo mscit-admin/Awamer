@@ -1,6 +1,6 @@
 # Awamer — project conventions for Claude
 
-Awamer (a.k.a. NetSphere Terminal) is an enterprise remote-administration
+Awamer Terminal is an enterprise remote-administration
 platform: **Tauri + React + TypeScript + Vite + Tailwind** frontend (`desktop/`)
 and a **Fastify + Node + PostgreSQL** backend (`backend/`, raw SQL via `pg`,
 custom migration runner in `backend/migrations/NNN_name.{up,down}.sql`).

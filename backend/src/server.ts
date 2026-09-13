@@ -252,7 +252,7 @@ async function main() {
   if (cfg.env.ENABLE_API_DOCS) {
     await app.register(swagger, {
       openapi: {
-        info: { title: "Awamer / NetSphere Terminal API", version: "1.8.0" },
+        info: { title: "Awamer Terminal API", version: "1.8.0" },
         components: {
           securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
         },

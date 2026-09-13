@@ -1,5 +1,5 @@
 # =====================================================================
-# NetSphere Terminal — Production deployment
+# Awamer Terminal — Production deployment
 # =====================================================================
 #
 # Differences from deployments/docker-compose.yml (which is for development):

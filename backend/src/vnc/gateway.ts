@@ -7,7 +7,7 @@
  * The RFB protocol itself (including VNC auth) runs end-to-end between noVNC
  * and the server — the gateway just shuttles bytes.
  *
- * Auth to *NetSphere* (token + host) is checked before the relay starts; the
+ * Auth to *Awamer* (token + host) is checked before the relay starts; the
  * VNC password is handled by noVNC on the client.
  */
 import net from "node:net";

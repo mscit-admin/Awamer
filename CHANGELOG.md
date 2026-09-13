@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to NetSphere Terminal are recorded in this file.
+All notable changes to Awamer Terminal are recorded in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Policy:** every release appends to this file. Entries are never deleted.
 
 ---
+
+## [Unreleased] — Branding: Awamer Terminal
+
+User-facing and documentation branding is now consistently **"Awamer Terminal"**
+(short name **"Awamer"**). See `FINAL_AWAMER_TERMINAL_BRANDING_CLEANUP_REPORT.md`.
+
+### Changed
+- **Product name rebranded to "Awamer Terminal"** across all user-facing surfaces:
+  browser/window title (`desktop/index.html`, Tauri `productName`/window `title`/
+  `longDescription`), the default app name in `desktop/src/shared/branding.tsx`
+  (`VITE_APP_NAME` fallback), user-facing desktop error/help messages, the Tauri
+  startup log banner, the Swagger/OpenAPI doc title (`Awamer Terminal API`), the
+  systemd unit `Description`, installer/CLI completion banners, `Makefile` help,
+  and active documentation (`README.md`, `deploy/README.md`, `docs/architecture.md`,
+  release-notes/changelog headers). Package/crate `description` fields were updated;
+  package **names** were not.
+- **No permission, role, or access-control change.** This is a text/branding-only
+  change; no RBAC permission was added or altered.
+
+### Retained (intentionally, for compatibility — not branding)
+- Technical identifiers keep their historical `netsphere` spelling to avoid breaking
+  existing installations: JWT issuer default (`JWT_ISSUER=netsphere`, the token `iss`
+  claim), the credential-encryption salt (`netsphere/credential-secret/v1` in
+  `secretBox.ts` — changing it would make existing encrypted secrets undecryptable),
+  the OS keyring service id and bundle identifier (`io.netsphere.terminal`), the
+  `~/.netsphere/known_hosts` path, npm/crate package names and lockfile names, Docker
+  container/network/volume/image names (`netsphere-auth`, `netsphere-internal`, …),
+  the `NETSPHERE_DOMAIN` env var, DB user/name (`netsphere`), nginx site-file paths,
+  backup-file prefixes, the `netsphere.example.com` nginx template substitution token,
+  and browser `localStorage` keys (`netsphere.*`). Historical release-notes/changelog
+  entries and dated engineering reports keep their original wording as records.
 
 ## [Unreleased] — PROXY-DEPLOY-001: dynamic Docker-gateway proxy trust
 

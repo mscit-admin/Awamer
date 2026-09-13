@@ -1,5 +1,5 @@
 # =====================================================================
-# NetSphere Terminal — systemd unit
+# Awamer Terminal — systemd unit
 # =====================================================================
 #
 # Optional: makes the backend stack start automatically on boot.
@@ -21,7 +21,7 @@
 # =====================================================================
 
 [Unit]
-Description=NetSphere Terminal backend stack
+Description=Awamer Terminal backend stack
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target

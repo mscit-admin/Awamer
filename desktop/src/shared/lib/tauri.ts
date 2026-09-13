@@ -11,6 +11,6 @@ export const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export const DESKTOP_ONLY_MESSAGE =
-  "Live SSH/SFTP sessions require the NetSphere desktop app. " +
+  "Live SSH/SFTP sessions require the Awamer desktop app. " +
   "The browser version supports account, host, credential, folder, and " +
   "tag management only.";

@@ -163,7 +163,7 @@ export const vpnClient = {
       const c = await vpnApi.connectBackend(profile.id);
       return { state: c.state, error: c.error };
     }
-    if (!isTauri) return { state: "error", error: "Desktop VPN tunnels require the NetSphere desktop app." };
+    if (!isTauri) return { state: "error", error: "Desktop VPN tunnels require the Awamer desktop app." };
     const payload = await vpnApi.config(profile.id);
     const s = await vpnNative.connect(payload);
     return { state: s.state, error: s.error };

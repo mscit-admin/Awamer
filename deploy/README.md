@@ -1,11 +1,11 @@
-# NetSphere Terminal — Production Deployment Guide
+# Awamer Terminal — Production Deployment Guide
 
-This directory contains everything needed to deploy NetSphere's
+This directory contains everything needed to deploy Awamer's
 **backend server** on a production Ubuntu host.
 
 ## What gets deployed
 
-NetSphere has two parts:
+Awamer has two parts:
 
 | Component | Where it runs | What this guide covers |
 |---|---|---|

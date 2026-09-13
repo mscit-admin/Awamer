@@ -9,12 +9,12 @@
 import { create } from "zustand";
 import { request } from "@/shared/lib/api";
 
-const ENV_NAME = (import.meta.env.VITE_APP_NAME as string | undefined)?.trim() || "NetSphere";
+const ENV_NAME = (import.meta.env.VITE_APP_NAME as string | undefined)?.trim() || "Awamer Terminal";
 const ENV_LOGO = (import.meta.env.VITE_APP_LOGO_URL as string | undefined)?.trim() || "";
 
 // Cache the last-known branding in localStorage and hydrate it synchronously on
 // startup, so returning users see the branded name/logo/watermark on the very
-// first paint instead of a flash of the defaults ("NetSphere" / username).
+// first paint instead of a flash of the defaults ("Awamer Terminal" / username).
 const CACHE_KEY = "netsphere.branding";
 interface BrandingCache { appName: string; logoUrl: string; favicon: string; loginImage: string; terminalWatermark: string }
 function readCache(): BrandingCache | null {

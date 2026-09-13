@@ -1,5 +1,5 @@
 # =============================================================
-# NetSphere Terminal — Development Stack (Node.js backend)
+# Awamer Terminal — Development Stack (Node.js backend)
 # =============================================================
 
 x-restart-policy: &restart-policy

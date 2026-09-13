@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2.0.0",
-  "productName": "NetSphere Terminal",
+  "productName": "Awamer Terminal",
   "version": "1.7.0",
   "identifier": "io.netsphere.terminal",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "NetSphere Terminal",
+        "title": "Awamer Terminal",
         "label": "main",
         "width": 1280,
         "height": 800,
@@ -43,7 +43,7 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Enterprise remote administration & terminal management",
-    "longDescription": "NetSphere Terminal is an enterprise platform for managing SSH, SFTP, RDP, VNC, serial, and other remote sessions from a single secure desktop client."
+    "longDescription": "Awamer Terminal is an enterprise platform for managing SSH, SFTP, RDP, VNC, serial, and other remote sessions from a single secure desktop client."
   },
   "plugins": {}
 }

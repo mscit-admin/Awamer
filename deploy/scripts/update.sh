@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-# NetSphere Terminal — Update / redeploy
+# Awamer Terminal — Update / redeploy
 # =====================================================================
 #
 # Pulls the latest code and redeploys. It rebuilds the FRONTEND every

@@ -1,4 +1,4 @@
-# NetSphere Terminal — v1.7.0
+# Awamer Terminal — v1.7.0
 
 > Enterprise Remote Administration & Terminal Management Platform
 
@@ -6,7 +6,7 @@
 
 ### 🚀 Production deployment (you have a server)
 
-If you're deploying NetSphere on a real Ubuntu server with HTTPS, go
+If you're deploying Awamer on a real Ubuntu server with HTTPS, go
 directly to **[`deploy/README.md`](deploy/README.md)**. The one-shot
 installer handles everything:
 
@@ -19,7 +19,7 @@ chmod +x deploy/scripts/install.sh
 
 ### 🛠️ Local development
 
-Read the section below for working on NetSphere itself.
+Read the section below for working on Awamer itself.
 
 ---
 

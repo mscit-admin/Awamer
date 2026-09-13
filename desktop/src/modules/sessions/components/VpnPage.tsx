@@ -100,7 +100,7 @@ export function VpnPage() {
       if (p.runtime === "backend") {
         await vpnApi.connectBackend(p.id);
       } else {
-        if (!isTauri) throw new Error("Desktop VPN tunnels require the NetSphere desktop app.");
+        if (!isTauri) throw new Error("Desktop VPN tunnels require the Awamer desktop app.");
         const payload = await vpnApi.config(p.id);
         await vpnNative.connect(payload);
       }
