@@ -27,6 +27,10 @@ export const HELPER_OPS = [
   "server_start",
   "server_stop",
   "server_status",
+  // Multi-VPN-Server: per-server host firewall rules, constructed by the helper
+  // from structured {serverId, port, proto} — NOT arbitrary firewall text.
+  "firewall_allow",
+  "firewall_remove",
 ] as const;
 export type HelperOp = (typeof HELPER_OPS)[number];
 export const isHelperOp = (s: unknown): s is HelperOp =>

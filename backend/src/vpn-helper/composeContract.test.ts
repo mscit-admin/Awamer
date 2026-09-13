@@ -61,9 +61,20 @@ test("INFRA-VPN-008b: vpn-helper drops ALL then adds only NET_ADMIN, not privile
   const caps = [...adds.matchAll(/-\s*(\w+)/g)].map((m) => m[1]);
   assert.deepEqual(caps, ["NET_ADMIN"]);
 });
-test("INFRA-VPN-009: vpn-helper publishes NO host ports", () => {
-  // The service defines no `ports:` mapping (its API is the Unix socket only).
-  assert.doesNotMatch(helper, /\n\s*ports:\s*\n/);
+test("INFRA-VPN-009 / VPN-DATAPLANE-003: helper uses host networking (dynamic ports) and publishes NO control port", () => {
+  // Multi-VPN-Server: with network_mode host each VPN Server's OpenVPN listener
+  // binds its own host port dynamically (no static publish, no recreation). The
+  // helper has NO `ports:` mapping at all, and its control/IPC surface is the
+  // Unix socket in the shared volume — never a published network port.
+  assert.match(helper, /network_mode:\s*host/, "helper uses host networking for dynamic VPN ports");
+  assert.doesNotMatch(helper, /\n\s*ports:\s*\n/, "helper defines no static published ports");
+  // The IPC socket is a volume, never a port mapping.
+  assert.doesNotMatch(helper, /-\s*"[^"]*:\/run\/awamer/);
+});
+test("VPN-DATAPLANE: firewall backend + port range env are present on the helper", () => {
+  assert.match(helper, /VPN_FIREWALL_BACKEND/);
+  assert.match(helper, /VPN_SERVER_PORT_MIN/);
+  assert.match(helper, /VPN_SERVER_PORT_MAX/);
 });
 test("INFRA-VPN-005b: vpn-helper sets no-new-privileges", () => {
   assert.match(helper, /no-new-privileges:true/);

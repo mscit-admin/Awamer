@@ -41,6 +41,12 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - internal
+    # Loopback-only publish so the host-networked vpn-helper can reach the DB for
+    # the built-in VPN server's per-user auth-verify. Bound to 127.0.0.1 — NOT
+    # routable off-host; the backend still reaches PostgreSQL over the private
+    # `internal` network by its service name.
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -117,6 +123,15 @@ services:
       # this shared Unix socket, authenticated with a high-entropy shared secret.
       VPN_HELPER_SOCKET: /run/awamer/ipc/vpn-helper.sock
       VPN_HELPER_SECRET: "${VPN_HELPER_SECRET:?VPN_HELPER_SECRET missing — openssl rand -hex 32}"
+      # ---- Multi-VPN-Server dynamic port policy --------------------
+      # Each VPN Server is assigned its own port+protocol from this range (the DB
+      # record is authoritative). Keep aligned with the vpn-helper's env.
+      VPN_SERVER_PORT_MIN: ${VPN_SERVER_PORT_MIN:-20000}
+      VPN_SERVER_PORT_MAX: ${VPN_SERVER_PORT_MAX:-30000}
+      VPN_FIREWALL_BACKEND: ${VPN_FIREWALL_BACKEND:-iptables}
+      # Extra reserved ports a VPN Server may never use (e.g. the public HTTPS
+      # port); 22/80/443/backend/PostgreSQL/Redis are always reserved.
+      VPN_RESERVED_PORTS: ${VPN_RESERVED_PORTS:-}
     ports:
       # Bind to LOCALHOST ONLY — nginx will reverse-proxy from public 443.
       # NOTE: the backend NO LONGER publishes the OpenVPN server port; the
@@ -170,21 +185,37 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # MULTI-VPN-SERVER dynamic ports (§3): the helper uses HOST networking so each
+    # dynamically-created OpenVPN SERVER binds its OWN host port (from the
+    # VPN_SERVER_PORT_MIN..MAX range) WITHOUT recreating the container or
+    # publishing a static port. This is the smallest safe design for dynamic
+    # listeners. Increased exposure is bounded: the ONLY network listeners this
+    # container opens are validated OpenVPN data-plane ports; its control/IPC
+    # surface is the owner-group-only Unix socket in the shared volume (a
+    # filesystem socket, unaffected by host networking) — there is NO TCP/HTTP
+    # control API and no administrative listener.
+    network_mode: host
     environment:
-      # For the built-in OpenVPN SERVER's per-user auth-verify child only.
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Host networking → the bridge DNS name `postgres` is unreachable; the
+      # helper reaches PostgreSQL over the host loopback publish (see postgres
+      # service). Used ONLY by the built-in server's per-user auth-verify child.
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}
       VPN_HELPER_SOCKET: /run/awamer/ipc/vpn-helper.sock
       VPN_HELPER_SECRET: "${VPN_HELPER_SECRET:?VPN_HELPER_SECRET missing — openssl rand -hex 32}"
       OPENVPN_PATH: /usr/sbin/openvpn
       VPN_RUNTIME_DIR: /var/lib/awamer/vpn-runtime
-    networks:
-      - internal
+      # Per-server firewall (iptables) + the port window it may touch. Keep these
+      # aligned with the backend's VPN_SERVER_PORT_MIN/MAX.
+      VPN_FIREWALL_BACKEND: ${VPN_FIREWALL_BACKEND:-iptables}
+      VPN_SERVER_PORT_MIN: ${VPN_SERVER_PORT_MIN:-20000}
+      VPN_SERVER_PORT_MAX: ${VPN_SERVER_PORT_MAX:-30000}
     volumes:
       - vpn-helper-run:/run/awamer
-    # No `ports:` — the helper never publishes a host port. (If you use the
-    # built-in OpenVPN SERVER for EXTERNAL clients, publish ONLY that server's
-    # data port here, e.g. `- "1194:1194/udp"`; that is the VPN data plane, not
-    # the — always socket-only, never network-exposed — control/IPC surface.)
+    # NO static `ports:` — with host networking each VPN Server's OpenVPN listener
+    # binds its own host port directly; the helper opens the matching host
+    # firewall rule per server (iptables). The control/IPC surface is never a
+    # network port. cap_drop ALL + NET_ADMIN only (also lets it manage its own
+    # per-server iptables rules); not privileged.
     cap_drop:
       - ALL
     cap_add:

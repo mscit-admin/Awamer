@@ -5,13 +5,22 @@
  * rest with SecretBox, and hashes client passwords with Argon2 for the
  * auth-verify step. All queries are owner-scoped to the requesting user.
  */
-import type { Pool } from "../db/index.js";
+import type { Pool, PoolClient } from "../db/index.js";
 import type { SecretBox } from "../crypto/secretBox.js";
 import type { Argon2Service } from "../crypto/argon2.js";
 import { generateCa, generateServerCert, generateClientCert } from "../vpn/pki.js";
 import {
   type VpnServer, type VpnServerClient, type VpnProto, VpnServerErrors,
 } from "../domain/vpnServer.js";
+import {
+  type VpnPortPolicy, assertPortAllowed, assertProto, assertNoSubnetOverlap,
+  assertSubnetValid, nextFreePort, VpnPortErrors,
+} from "../domain/vpnPortPolicy.js";
+
+// A single advisory-lock key serializes all VPN-server port/subnet assignment so
+// concurrent create/auto-assign requests cannot race a port or an overlapping
+// subnet (the DB unique(port,proto) index is the ultimate guard behind it).
+const VPN_ASSIGN_LOCK = 0x41564e50; // "AVNP"
 
 function seal(box: SecretBox, pem: string): string {
   return JSON.stringify(box.seal({ pem }));
@@ -48,10 +57,17 @@ const C_COLS = `id, server_id, name, username, password_hash, password_enc, cert
 export interface CreateServerInput {
   name: string; description?: string | null; publicHost: string; port?: number;
   proto?: VpnProto; subnet?: string; dns?: string | null; clientToClient?: boolean; cipher?: string;
+  /** When true (and no explicit port), pick the next free port in the policy range. */
+  autoAssignPort?: boolean;
 }
 
-function wrapUnique(e: unknown, mk: () => Error): Error {
-  if ((e as { code?: string }).code === "23505") return mk();
+/** Map a Postgres 23505 to the right domain error by the violated constraint. */
+function mapUnique(e: unknown): Error {
+  const err = e as { code?: string; constraint?: string };
+  if (err.code === "23505") {
+    if (err.constraint === "vpn_servers_port_proto_key") return VpnPortErrors.InUse();
+    return VpnServerErrors.ServerNameTaken();
+  }
   return e instanceof Error ? e : new Error(String(e));
 }
 
@@ -60,7 +76,40 @@ export class VpnServerRepository {
     private readonly pool: Pool,
     private readonly box: SecretBox,
     private readonly argon2: Argon2Service,
+    private readonly policy: VpnPortPolicy = { min: 20000, max: 30000, reserved: new Set() },
   ) {}
+
+  /** Run `fn` inside a transaction holding the VPN-assignment advisory lock, so
+   *  port + subnet assignment is serialized and race-safe. */
+  private async withAssignLock<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SELECT pg_advisory_xact_lock($1)", [VPN_ASSIGN_LOCK]);
+      const out = await fn(c);
+      await c.query("COMMIT");
+      return out;
+    } catch (e) {
+      await c.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      c.release();
+    }
+  }
+
+  /** Ports already assigned to a protocol (optionally excluding one server). */
+  private async takenPorts(c: PoolClient, proto: VpnProto, excludeId?: string): Promise<number[]> {
+    const { rows } = await c.query<{ port: number }>(
+      `SELECT port FROM vpn_servers WHERE proto = $1 AND ($2::uuid IS NULL OR id <> $2)`,
+      [proto, excludeId ?? null]);
+    return rows.map((r) => r.port);
+  }
+  /** Subnets of all OTHER servers (for overlap checks). */
+  private async otherSubnets(c: PoolClient, excludeId?: string): Promise<string[]> {
+    const { rows } = await c.query<{ subnet: string }>(
+      `SELECT subnet FROM vpn_servers WHERE ($1::uuid IS NULL OR id <> $1)`, [excludeId ?? null]);
+    return rows.map((r) => r.subnet);
+  }
 
   private rowToServer(r: ServerRow): VpnServer {
     return {
@@ -87,28 +136,48 @@ export class VpnServerRepository {
   // ---- servers ------------------------------------------------------
 
   async createServer(userId: string, input: CreateServerInput): Promise<VpnServer> {
+    const proto: VpnProto = input.proto ?? "udp";
+    assertProto(proto);
+    const subnet = input.subnet ?? "10.8.0.0/24";
+    assertSubnetValid(subnet);
     const ca = generateCa(`${input.name} CA`);
     const server = generateServerCert("server", ca.certPem, ca.keyPem);
     try {
-      const { rows } = await this.pool.query<ServerRow>(
-        `INSERT INTO vpn_servers
-           (user_id, name, description, public_host, port, proto, subnet, dns,
-            client_to_client, cipher, ca_cert, ca_key_enc, server_cert, server_key_enc, tls_crypt_enc)
-         VALUES ($1,$2,$3,$4,COALESCE($5,1194),COALESCE($6,'udp'),COALESCE($7,'10.8.0.0/24'),$8,
-                 COALESCE($9,TRUE),COALESCE($10,'AES-256-GCM'),$11,$12::jsonb,$13,$14::jsonb,$15::jsonb)
-         RETURNING ${S_COLS}`,
-        [
-          userId, input.name, input.description ?? null, input.publicHost,
-          input.port ?? null, input.proto ?? null, input.subnet ?? null, input.dns ?? null,
-          input.clientToClient ?? null, input.cipher ?? null,
-          ca.certPem, seal(this.box, ca.keyPem),
-          server.certPem, seal(this.box, server.keyPem),
-          seal(this.box, ca.tlsCrypt),
-        ],
-      );
-      return this.rowToServer(rows[0]!);
+      return await this.withAssignLock(async (c) => {
+        // Resolve the port: explicit (validated) or auto-assigned within range.
+        let port: number;
+        if (typeof input.port === "number") {
+          assertPortAllowed(input.port, this.policy);
+          port = input.port;
+        } else if (input.autoAssignPort) {
+          const p = nextFreePort(await this.takenPorts(c, proto), this.policy);
+          if (p === null) throw VpnPortErrors.NoFreePort();
+          port = p;
+        } else {
+          // A new server must be assigned a port in the policy range.
+          throw VpnPortErrors.OutOfRange(this.policy.min, this.policy.max);
+        }
+        // Subnet must not overlap any other server's subnet.
+        assertNoSubnetOverlap(subnet, await this.otherSubnets(c));
+        const { rows } = await c.query<ServerRow>(
+          `INSERT INTO vpn_servers
+             (user_id, name, description, public_host, port, proto, subnet, dns,
+              client_to_client, cipher, ca_cert, ca_key_enc, server_cert, server_key_enc, tls_crypt_enc)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,TRUE),COALESCE($10,'AES-256-GCM'),$11,$12::jsonb,$13,$14::jsonb,$15::jsonb)
+           RETURNING ${S_COLS}`,
+          [
+            userId, input.name, input.description ?? null, input.publicHost,
+            port, proto, subnet, input.dns ?? null,
+            input.clientToClient ?? null, input.cipher ?? null,
+            ca.certPem, seal(this.box, ca.keyPem),
+            server.certPem, seal(this.box, server.keyPem),
+            seal(this.box, ca.tlsCrypt),
+          ],
+        );
+        return this.rowToServer(rows[0]!);
+      });
     } catch (e) {
-      throw wrapUnique(e, VpnServerErrors.ServerNameTaken);
+      throw mapUnique(e);
     }
   }
 
@@ -127,16 +196,30 @@ export class VpnServerRepository {
 
   async updateServer(userId: string, id: string, patch: Partial<Pick<CreateServerInput,
     "description" | "publicHost" | "port" | "proto" | "subnet" | "dns" | "clientToClient" | "cipher">>): Promise<VpnServer> {
-    const s = await this.getServer(userId, id);
-    const m = { ...s, ...patch } as VpnServer & CreateServerInput;
-    const { rows } = await this.pool.query<ServerRow>(
-      `UPDATE vpn_servers SET description=$3, public_host=$4, port=$5, proto=$6, subnet=$7,
-         dns=$8, client_to_client=$9, cipher=$10, updated_at=NOW()
-       WHERE id=$1 AND user_id=$2 RETURNING ${S_COLS}`,
-      [id, userId, patch.description ?? s.description, m.publicHost, m.port, m.proto,
-       m.subnet, patch.dns !== undefined ? patch.dns : s.dns, m.clientToClient, m.cipher]);
-    if (!rows[0]) throw VpnServerErrors.ServerNotFound();
-    return this.rowToServer(rows[0]);
+    try {
+      return await this.withAssignLock(async (c) => {
+        const s = await this.getServer(userId, id); // ownership
+        const m = { ...s, ...patch } as VpnServer & CreateServerInput;
+        const proto: VpnProto = m.proto;
+        assertProto(proto);
+        // Legacy compatibility (§42): only re-validate the port when it actually
+        // CHANGES, so a grandfathered legacy port (e.g. 1194, outside the current
+        // range) is preserved on an unrelated edit but any NEW port must be valid.
+        if (m.port !== s.port || proto !== s.proto) assertPortAllowed(m.port, this.policy);
+        if (m.subnet !== s.subnet) assertNoSubnetOverlap(m.subnet, await this.otherSubnets(c, id));
+        else assertSubnetValid(m.subnet);
+        const { rows } = await c.query<ServerRow>(
+          `UPDATE vpn_servers SET description=$3, public_host=$4, port=$5, proto=$6, subnet=$7,
+             dns=$8, client_to_client=$9, cipher=$10, updated_at=NOW()
+           WHERE id=$1 AND user_id=$2 RETURNING ${S_COLS}`,
+          [id, userId, patch.description ?? s.description, m.publicHost, m.port, proto,
+           m.subnet, patch.dns !== undefined ? patch.dns : s.dns, m.clientToClient, m.cipher]);
+        if (!rows[0]) throw VpnServerErrors.ServerNotFound();
+        return this.rowToServer(rows[0]);
+      });
+    } catch (e) {
+      throw mapUnique(e);
+    }
   }
 
   async deleteServer(userId: string, id: string): Promise<void> {
@@ -169,7 +252,8 @@ export class VpnServerRepository {
          JSON.stringify(this.box.seal({ p: input.password })), leaf.certPem, seal(this.box, leaf.keyPem)]);
       return this.rowToClient(rows[0]!);
     } catch (e) {
-      throw wrapUnique(e, VpnServerErrors.ClientNameTaken);
+      if ((e as { code?: string }).code === "23505") throw VpnServerErrors.ClientNameTaken();
+      throw e;
     }
   }
 

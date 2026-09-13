@@ -50,6 +50,9 @@ JWT_ACCESS_SECRET=$(generate_hex 64)
 JWT_REFRESH_SECRET=$(generate_hex 64)
 # Phase 10 — AES-256-GCM key for credential secrets at rest (32 bytes, base64).
 CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -base64 32)
+# SEC-INFRA-001 — authenticates backend → awamer-vpn-helper IPC (HMAC). Required.
+# High entropy; keep it stable across updates (do NOT rotate on normal upgrades).
+VPN_HELPER_SECRET=$(generate_hex 32)
 
 BOOTSTRAP_ADMIN_USERNAME=admin
 BOOTSTRAP_ADMIN_PASSWORD=$(generate_b64 24)
@@ -60,6 +63,17 @@ CORS_ALLOWED_ORIGINS=https://netsphere.example.com,tauri://localhost,https://tau
 LOG_LEVEL=info
 RATE_LIMIT_LOGIN_PER_MIN=10
 RATE_LIMIT_API_PER_MIN=120
+
+# Multi-VPN-Server dynamic ports: each VPN Server is assigned its OWN port +
+# protocol from this range (the DB record is authoritative — there is NO single
+# global OpenVPN port). The vpn-helper uses host networking so new servers get
+# their port without recreating the container, and opens the matching host
+# firewall rule per server. VPN_RESERVED_PORTS adds extra reserved ports (e.g.
+# the public HTTPS port) on top of 22/80/443/backend/PostgreSQL/Redis.
+VPN_SERVER_PORT_MIN=20000
+VPN_SERVER_PORT_MAX=30000
+VPN_FIREWALL_BACKEND=iptables
+VPN_RESERVED_PORTS=
 
 APP_VERSION=1.8.0
 EOF

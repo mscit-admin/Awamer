@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isSafePublicBaseUrl, normalizeBaseUrl } from "../usecases/publicBaseUrl.js";
 import { parseCidrList, type NetworkDiagnosticPolicy } from "../usecases/networkPolicy.js";
+import { makeVpnPortPolicy, type VpnPortPolicy } from "../domain/vpnPortPolicy.js";
 
 /**
  * Development-only default bootstrap password. Never accepted in production
@@ -107,6 +108,19 @@ const envSchema = z.object({
   VPN_HELPER_SOCKET: z.string().default("/run/awamer/ipc/vpn-helper.sock"),
   VPN_HELPER_SECRET: z.string().optional(),
 
+  // Multi-VPN-Server dynamic ports. Each VPN Server is assigned its OWN port +
+  // protocol from this range (the DB record is authoritative — there is no
+  // single deployment-wide OpenVPN port). Validated 1<=min<=max<=65535 (fail
+  // closed). VPN_RESERVED_PORTS adds extra infra ports (e.g. the HTTPS port) to
+  // the built-in reserved set (22/80/443/backend/PostgreSQL/Redis).
+  VPN_SERVER_PORT_MIN: z.coerce.number().int().default(20000),
+  VPN_SERVER_PORT_MAX: z.coerce.number().int().default(30000),
+  VPN_RESERVED_PORTS: z.string().optional(),
+  // Host firewall backend the privileged helper uses for per-server rules:
+  // "iptables" (default; works under iptables-legacy and iptables-nft), or
+  // "none" to disable automatic firewall management (report FIREWALL_ACTION_REQUIRED).
+  VPN_FIREWALL_BACKEND: z.enum(["iptables", "none"]).default("iptables"),
+
   // Bootstrap admin (created on first startup if no users exist).
   // The password default below is a DEVELOPMENT convenience only; production
   // rejects it (and other weak/placeholder values) — see loadConfig (AWM-CFG-001).
@@ -137,6 +151,15 @@ export interface Config {
   publicBaseUrl: string | null;
   /** Network CIDR hardening: parsed allow/deny lists for network diagnostics. */
   networkDiagnostic: NetworkDiagnosticPolicy;
+  /** Multi-VPN-Server port assignment policy (range + reserved ports). */
+  vpnPortPolicy: VpnPortPolicy;
+  /** Host firewall backend for per-server VPN rules ("iptables" | "none"). */
+  vpnFirewallBackend: "iptables" | "none";
+}
+
+/** Parse the PostgreSQL port out of DATABASE_URL (default 5432). */
+function pgPort(dbUrl: string): number {
+  try { return Number(new URL(dbUrl).port) || 5432; } catch { return 5432; }
 }
 
 export function loadConfig(): Config {
@@ -188,5 +211,21 @@ export function loadConfig(): Config {
       allowed: parseCidrList(env.NETWORK_DIAGNOSTIC_ALLOWED_CIDRS),
       deny: parseCidrList(env.NETWORK_DIAGNOSTIC_DENY_CIDRS),
     },
+    // Centralized reserved ports: SSH/HTTP/HTTPS, the backend, PostgreSQL (from
+    // DATABASE_URL), Redis, plus any operator-configured extras (e.g. the real
+    // HTTPS port). makeVpnPortPolicy throws (fail closed) on an invalid range.
+    vpnPortPolicy: makeVpnPortPolicy({
+      min: env.VPN_SERVER_PORT_MIN,
+      max: env.VPN_SERVER_PORT_MAX,
+      reserved: [
+        22, 80, 443,
+        env.AUTH_HTTP_PORT,
+        pgPort(env.DATABASE_URL),
+        6379,
+        ...(env.VPN_RESERVED_PORTS ?? "")
+          .split(/[,\s]+/).map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0),
+      ],
+    }),
+    vpnFirewallBackend: env.VPN_FIREWALL_BACKEND,
   };
 }
