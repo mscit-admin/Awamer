@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — F1/F2 + JWT hardening (proxy trust, IPv6 SSRF, HS256 pin)
+
+Three scoped security fixes from the production penetration review. See
+`FINAL_F1_F2_SECURITY_FIX_REPORT.md`.
+
+### Fixed
+- **F1 — restricted proxy trust (SEC-PROXY-001).** The backend no longer uses
+  `trustProxy: true`. A new `TRUST_PROXY` env (proxy-addr syntax; default
+  `loopback, uniquelocal`, and the literal `"true"` is rejected) means Fastify
+  trusts `X-Forwarded-*` only from the reverse-proxy path. A direct client on an
+  untrusted (public) address can no longer spoof `X-Forwarded-For` / `X-Real-IP` /
+  `Forwarded` to choose `req.ip`, bypass the login rate limiter, or forge the audit
+  source IP. The production nginx `/api/` block overwrites the forwarding headers
+  from trusted values and clears the unused RFC 7239 `Forwarded` header.
+- **F2 — IPv6 SSRF normalization.** `safeFetch.assertSafeUrl` now strips IPv6
+  brackets before IP classification, so bracketed literals (`[::1]`,
+  `[::ffff:127.0.0.1]`), IPv4-mapped-IPv6 (loopback/RFC1918/metadata), ULA
+  (`fc00::/7`), link-local (`fe80::/10`) and multicast (`ff00::/8`) are blocked as
+  IP literals rather than deferred to DNS (Node skips the pinning lookup for
+  literals). Redirect targets are revalidated through the same guard; the pinned
+  single-resolution anti-rebinding design is unchanged.
+- **JWT hardening.** All JWT verification paths (access, refresh, mfa_pending,
+  step-up) now pass `algorithms: ["HS256"]` explicitly — `none`, HS384/HS512
+  downgrade, and RS256 confusion are rejected regardless of library defaults.
+
+### Security
+- No auth/RBAC/VPN/tenant/session/deployment redesign. Regression: backend unit
+  255/0 (incl. JWT-ALG-001..006, PROXY-TRUST-001..006 + PROXY-AUDIT-001,
+  SSRF-IPV6-001..012), integration 209/0. F1 confirmed live (rotating XFF from an
+  untrusted peer no longer resets the rate limit). Live IPv6 SSRF reachability is
+  environment-limited (no IPv6 stack) → verified by unit tests.
+
 ## [Unreleased] — Multi-VPN firewall guarantee + rollback-safe port/protocol changes
 
 Two scoped fixes on the accepted Multi-VPN architecture (unchanged). See

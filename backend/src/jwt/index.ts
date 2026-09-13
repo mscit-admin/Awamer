@@ -95,7 +95,10 @@ export function createJwt(cfg: Config): JwtService {
   async function verify(token: string, key: Uint8Array, expected: TokenType): Promise<VerifiedClaims> {
     let payload;
     try {
-      const result = await jwtVerify(token, key, { issuer });
+      // Pin the accepted signature algorithm to HS256 explicitly (defence in depth):
+      // never accept "none", a downgraded/other HMAC (HS384/HS512), or an asymmetric
+      // alg — even if a future key/library change would otherwise permit it.
+      const result = await jwtVerify(token, key, { issuer, algorithms: ["HS256"] });
       payload = result.payload;
     } catch (err) {
       if (err instanceof joseErrors.JWTExpired) throw new JwtExpired();
@@ -145,7 +148,7 @@ export function createJwt(cfg: Config): JwtService {
     async verifyStepUp(token) {
       let payload;
       try {
-        payload = (await jwtVerify(token, accessKey, { issuer })).payload;
+        payload = (await jwtVerify(token, accessKey, { issuer, algorithms: ["HS256"] })).payload;
       } catch (err) {
         if (err instanceof joseErrors.JWTExpired) throw new JwtExpired();
         throw new JwtInvalid();

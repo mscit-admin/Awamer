@@ -148,8 +148,14 @@ export function assertSafeUrl(raw: string, allowHttp: boolean, allowLoopback = f
   else throw new SsrfError(`protocol not allowed: ${scheme}`);
   if (u.username || u.password) throw new SsrfError("embedded credentials are not allowed");
   if (!u.hostname) throw new SsrfError("missing host");
-  // If the host is a literal IP, validate it immediately.
-  if (isIP(u.hostname) && isBlockedIp(u.hostname, { allowLoopback })) throw new SsrfError("destination IP is not permitted");
+  // If the host is a literal IP, validate it immediately. URL.hostname keeps the
+  // surrounding brackets for IPv6 literals (e.g. "[::1]", "[::ffff:7f00:1]"), which
+  // would defeat isIP() and let a literal masquerade as a hostname — and Node's
+  // http/https connect skips the pinning lookup for IP literals, so this is the ONLY
+  // place a literal is screened. Strip the brackets so IPv6 and IPv4-mapped-IPv6
+  // literals are classified as IPs and blocked per policy (loopback/private/mapped).
+  const hostLiteral = u.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (isIP(hostLiteral) && isBlockedIp(hostLiteral, { allowLoopback })) throw new SsrfError("destination IP is not permitted");
   return u;
 }
 

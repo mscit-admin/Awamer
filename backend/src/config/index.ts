@@ -51,6 +51,16 @@ const envSchema = z.object({
   // HTTP
   AUTH_HTTP_HOST: z.string().default("0.0.0.0"),
   AUTH_HTTP_PORT: z.coerce.number().int().positive().default(8081),
+  // SEC-PROXY-001 — which upstream hops Fastify may trust for X-Forwarded-*.
+  // Passed straight to Fastify's `trustProxy` (proxy-addr syntax): keywords
+  // ("loopback", "linklocal", "uniquelocal"), IPs, or CIDRs (comma-separated).
+  // Default trusts ONLY the loopback + private/ULA proxy path (the shipped Nginx
+  // reverse proxy on the host / private Docker network) — never an arbitrary
+  // public client — so a direct attacker cannot spoof X-Forwarded-For / X-Real-IP
+  // / Forwarded to choose req.ip. Set to a specific proxy CIDR to tighten further.
+  // The literal "true" is rejected (that would trust every client).
+  TRUST_PROXY: z.string().default("loopback, uniquelocal")
+    .refine((v) => v.trim().toLowerCase() !== "true", "TRUST_PROXY must be a proxy address/CIDR/keyword list, never \"true\""),
 
   // Database
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -147,6 +157,8 @@ export interface Config {
   jwtAccessTtlSec: number;
   jwtRefreshTtlSec: number;
   corsOrigins: string[];
+  /** SEC-PROXY-001: Fastify `trustProxy` value (proxy-addr syntax). */
+  trustProxy: string;
   /** SEC-RESET-001: validated trusted public base URL (or null if unset). */
   publicBaseUrl: string | null;
   /** Network CIDR hardening: parsed allow/deny lists for network diagnostics. */
@@ -206,6 +218,7 @@ export function loadConfig(): Config {
     jwtAccessTtlSec: parseDuration(env.JWT_ACCESS_TTL),
     jwtRefreshTtlSec: parseDuration(env.JWT_REFRESH_TTL),
     corsOrigins: env.CORS_ALLOWED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean),
+    trustProxy: env.TRUST_PROXY.trim(),
     publicBaseUrl,
     networkDiagnostic: {
       allowed: parseCidrList(env.NETWORK_DIAGNOSTIC_ALLOWED_CIDRS),
