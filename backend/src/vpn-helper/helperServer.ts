@@ -59,6 +59,17 @@ export async function dispatch(core: HelperCore, req: HelperRequest): Promise<Re
       return { stopped: core.serverStop(ref("serverId")) };
     case "server_status":
       return core.serverStatus(ref("serverId"));
+    case "firewall_allow":
+    case "firewall_remove": {
+      const num = (key: string): number => { const v = p[key]; if (typeof v !== "number" || !Number.isFinite(v)) { const e = new Error(`bad ${key}`) as Error & { code: string }; e.code = "bad_request"; throw e; } return v; };
+      const proto = str("proto")!;
+      const serverId = ref("serverId");
+      const port = num("port");
+      const r = req.op === "firewall_allow"
+        ? await core.firewallAllow(serverId, port, proto)
+        : await core.firewallRemove(serverId, port, proto);
+      return { ...r };
+    }
     default: {
       const e = new Error("unknown operation") as Error & { code: string }; e.code = "unknown_op"; throw e;
     }

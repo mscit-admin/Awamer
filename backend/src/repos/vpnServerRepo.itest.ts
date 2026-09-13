@@ -22,7 +22,8 @@ test("VPN server: PKI issuance, client cert chain, password verify, .ovpn, revok
   created.push(userId);
 
   // Create a server → generates CA + server cert + tls-crypt.
-  const server = await repo.createServer(userId, { name: "hub", publicHost: "161.97.78.116", port: 1194, proto: "udp" });
+  // Port must be within the VPN port policy range (multi-server dynamic ports).
+  const server = await repo.createServer(userId, { name: "hub", publicHost: "161.97.78.116", port: 20010, proto: "udp" });
   assert.match(server.caCert, /BEGIN CERTIFICATE/);
   assert.match(server.serverCert, /BEGIN CERTIFICATE/);
   assert.match(server.tlsCrypt, /OpenVPN Static key V1/);
@@ -48,7 +49,7 @@ test("VPN server: PKI issuance, client cert chain, password verify, .ovpn, revok
     proto: server.proto, publicHost: server.publicHost, port: server.port, cipher: server.cipher,
     caCert: server.caCert, clientCert: client.cert, clientKey: client.key, tlsCrypt: server.tlsCrypt,
   });
-  assert.match(ovpn, /^remote 161\.97\.78\.116 1194$/m);
+  assert.match(ovpn, /^remote 161\.97\.78\.116 20010$/m);
   assert.match(ovpn, /<cert>/);
   assert.match(ovpn, /BEGIN OpenVPN Static key V1/);
 

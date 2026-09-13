@@ -10,13 +10,15 @@
 import { request, fetchBlob } from "@/shared/lib/api";
 
 export type VpnProto = "udp" | "tcp";
-export type VpnServerState = "starting" | "running" | "error" | "stopped";
+export type VpnServerState = "starting" | "running" | "error" | "stopped" | "port_conflict";
 
 export interface VpnServerStatus {
   server_id: string;
   state: VpnServerState;
   error: string | null;
   started_at: string | null;
+  /** Conservative: we do not run an external probe. */
+  external_reachability?: "not_verified";
 }
 
 export interface VpnServerProfile {
@@ -43,6 +45,8 @@ export interface VpnServerInput {
   description?: string | null;
   public_host?: string;
   port?: number;
+  /** Create only: let the backend assign the next free in-range port. */
+  auto_assign_port?: boolean;
   proto?: VpnProto;
   subnet?: string;
   dns?: string | null;
@@ -72,6 +76,10 @@ export interface VpnServerClientInput {
 }
 
 export const vpnServerApi = {
+  /** Allowed VPN Server port range (for the create form). */
+  portPolicy() {
+    return request<{ min: number; max: number }>("/api/v1/vpn-server/port-policy");
+  },
   list() {
     return request<{ data: VpnServerProfile[] }>("/api/v1/vpn-server/servers");
   },

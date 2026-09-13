@@ -21,6 +21,8 @@
  *  - Secret temp files are 0600 and removed on exit; secrets are never logged.
  */
 import { spawn as realSpawn, type ChildProcess } from "node:child_process";
+import net from "node:net";
+import dgram from "node:dgram";
 import { mkdir, writeFile, rm, realpath, access } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { join, resolve, sep } from "node:path";
@@ -55,6 +57,23 @@ export interface HelperCoreOptions {
   verifyExec?: string; // e.g. `'/usr/local/bin/node' '/app/dist/vpn/authVerify.js'`
   spawnFn?: SpawnFn;
   log?: (obj: Record<string, unknown>, msg: string) => void;
+  /** Per-server host firewall management (multi-VPN-server). */
+  firewallBackend?: "iptables" | "none";
+  iptablesPath?: string;
+  /** Allowed port window for firewall ops (must match the app's VPN policy). */
+  portMin?: number;
+  portMax?: number;
+  /** Injectable host port-free probe (for tests); default binds a real socket. */
+  portProbe?: (port: number, proto: "udp" | "tcp") => Promise<boolean>;
+}
+
+/** Result of a firewall op. `applied` false + actionRequired true = the operator
+ *  must open the port manually (backend "none" or iptables unavailable). */
+export interface FirewallResult {
+  applied: boolean;
+  actionRequired: boolean;
+  backend: string;
+  detail: string;
 }
 
 interface Session {
@@ -103,6 +122,10 @@ export class HelperCore {
   private readonly verifyExec: string | undefined;
   private readonly spawnFn: SpawnFn;
   private readonly log: (obj: Record<string, unknown>, msg: string) => void;
+  private readonly firewallBackend: "iptables" | "none";
+  private readonly iptablesPath: string;
+  private readonly portMin: number;
+  private readonly portMax: number;
   private readonly sessions = new Map<string, Session>();
 
   constructor(opts: HelperCoreOptions = {}) {
@@ -116,6 +139,67 @@ export class HelperCore {
     this.verifyExec = opts.verifyExec;
     this.spawnFn = opts.spawnFn ?? (realSpawn as unknown as SpawnFn);
     this.log = opts.log ?? (() => {});
+    this.firewallBackend = opts.firewallBackend ?? "iptables";
+    this.iptablesPath = opts.iptablesPath ?? "/usr/sbin/iptables";
+    this.portMin = opts.portMin ?? 20000;
+    this.portMax = opts.portMax ?? 30000;
+    this.portProbe = opts.portProbe;
+  }
+
+  // ---- per-server host firewall (structured, allow-listed) ----------------
+  /** Validate a firewall request STRICTLY: valid ref, port in the policy window,
+   *  udp/tcp only. Returns the iptables comment tag that marks Awamer ownership. */
+  private fwValidate(serverId: string, port: number, proto: string): string {
+    if (!isValidRef(serverId)) throw err("bad_ref", "invalid server id");
+    if (!Number.isInteger(port) || port < this.portMin || port > this.portMax) {
+      throw err("bad_port", `firewall port must be within ${this.portMin}-${this.portMax}`);
+    }
+    if (proto !== "udp" && proto !== "tcp") throw err("bad_proto", "protocol must be udp or tcp");
+    return `awamer-vpn:${serverId}`;
+  }
+
+  /** Run iptables with a FIXED path + argument array (no shell). */
+  private runFirewall(args: string[]): Promise<{ code: number; out: string }> {
+    return new Promise((resolve) => {
+      let child: ChildLike;
+      try { child = this.spawnFn(this.iptablesPath, args, { stdio: ["ignore", "pipe", "pipe"] }); }
+      catch { return resolve({ code: 127, out: "iptables not available" }); }
+      let out = "";
+      const onData = (b: Buffer) => { if (out.length < 8192) out += b.toString("utf8"); };
+      child.stdout?.on("data", onData); child.stderr?.on("data", onData);
+      child.once("error", () => resolve({ code: 127, out: "iptables spawn error" }));
+      child.once("exit", (c: unknown) => resolve({ code: typeof c === "number" ? c : 1, out }));
+    });
+  }
+
+  async firewallAllow(serverId: string, port: number, proto: string): Promise<FirewallResult> {
+    const tag = this.fwValidate(serverId, port, proto);
+    if (this.firewallBackend === "none") {
+      return { applied: false, actionRequired: true, backend: "none", detail: `open ${port}/${proto} manually` };
+    }
+    // Idempotent: only insert if an identically-tagged rule is not already present.
+    const check = await this.runFirewall(["-C", "INPUT", "-p", proto, "--dport", String(port), "-m", "comment", "--comment", tag, "-j", "ACCEPT"]);
+    if (check.code === 0) return { applied: true, actionRequired: false, backend: "iptables", detail: "already present" };
+    if (check.code === 127) return { applied: false, actionRequired: true, backend: "iptables", detail: "iptables unavailable" };
+    const ins = await this.runFirewall(["-I", "INPUT", "-p", proto, "--dport", String(port), "-m", "comment", "--comment", tag, "-j", "ACCEPT"]);
+    if (ins.code === 0) { this.log({ serverId, port, proto }, "firewall rule added"); return { applied: true, actionRequired: false, backend: "iptables", detail: "added" }; }
+    return { applied: false, actionRequired: true, backend: "iptables", detail: "iptables insert failed" };
+  }
+
+  async firewallRemove(serverId: string, port: number, proto: string): Promise<FirewallResult> {
+    const tag = this.fwValidate(serverId, port, proto);
+    if (this.firewallBackend === "none") return { applied: false, actionRequired: false, backend: "none", detail: "no-op" };
+    // Delete ONLY the rule carrying this server's ownership tag; never touch an
+    // untagged rule an external administrator created. Loop to clear duplicates.
+    let removed = 0;
+    for (let i = 0; i < 16; i++) {
+      const del = await this.runFirewall(["-D", "INPUT", "-p", proto, "--dport", String(port), "-m", "comment", "--comment", tag, "-j", "ACCEPT"]);
+      if (del.code === 0) { removed++; continue; }
+      if (del.code === 127) return { applied: false, actionRequired: false, backend: "iptables", detail: "iptables unavailable" };
+      break; // no more matching rules
+    }
+    this.log({ serverId, port, proto, removed }, "firewall rule removed");
+    return { applied: true, actionRequired: false, backend: "iptables", detail: `removed ${removed}` };
   }
 
   /** Public: no secrets, no profiles, no env dump. */
@@ -180,6 +264,26 @@ export class HelperCore {
     return this.spawnTracked("client", input.sessionRef, dir, args, undefined);
   }
 
+  /** Probe that a port/proto is free on the host; throw vpn_port_in_use if not.
+   *  Injectable for tests via `portProbe`. */
+  private portProbe: ((port: number, proto: "udp" | "tcp") => Promise<boolean>) | undefined;
+  private async assertPortFree(port: number, proto: "udp" | "tcp"): Promise<void> {
+    const free = this.portProbe
+      ? await this.portProbe(port, proto)
+      : await new Promise<boolean>((resolve) => {
+          if (proto === "tcp") {
+            const s = net.createServer();
+            s.once("error", (e: NodeJS.ErrnoException) => resolve(e.code !== "EADDRINUSE"));
+            s.listen(port, "0.0.0.0", () => s.close(() => resolve(true)));
+          } else {
+            const s = dgram.createSocket("udp4");
+            s.once("error", (e: NodeJS.ErrnoException) => { try { s.close(); } catch { /**/ } resolve(e.code !== "EADDRINUSE"); });
+            s.bind(port, "0.0.0.0", () => s.close(() => resolve(true)));
+          }
+        });
+    if (!free) throw err("vpn_port_in_use", `port ${port}/${proto} is already in use on the host`);
+  }
+
   async serverStart(input: ServerStartInput): Promise<{ state: SessionState; error: string | null }> {
     if (!isValidRef(input.serverId)) throw err("bad_ref", "invalid server id");
     const k = this.key("server", input.serverId);
@@ -188,6 +292,12 @@ export class HelperCore {
       return { state: existing.state, error: existing.error };
     }
     if (this.sessions.size >= this.maxSessions) throw err("too_many", "session limit reached");
+
+    // Runtime port-collision check: DB uniqueness is not enough — another OS
+    // process on the host may already hold the port/proto. Probe by trying to
+    // bind it (then release). If occupied → fail with vpn_port_in_use; we never
+    // touch the other process.
+    await this.assertPortFree(input.port, input.proto);
 
     const dir = await this.sessionDir("server", input.serverId);
     await this.prepareDir(dir);

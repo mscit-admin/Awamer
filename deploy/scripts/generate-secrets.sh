@@ -64,11 +64,16 @@ LOG_LEVEL=info
 RATE_LIMIT_LOGIN_PER_MIN=10
 RATE_LIMIT_API_PER_MIN=120
 
-# SEC-INFRA-DEPLOY-002 — built-in OpenVPN SERVER data-plane port published by
-# the vpn-helper container (udp+tcp). This is the OpenVPN listener external VPN
-# clients dial — NOT the helper control socket. Set it to match the port of the
-# VPN server you create in the app, then re-create the vpn-helper container.
-OPENVPN_SERVER_PORT=1194
+# Multi-VPN-Server dynamic ports: each VPN Server is assigned its OWN port +
+# protocol from this range (the DB record is authoritative — there is NO single
+# global OpenVPN port). The vpn-helper uses host networking so new servers get
+# their port without recreating the container, and opens the matching host
+# firewall rule per server. VPN_RESERVED_PORTS adds extra reserved ports (e.g.
+# the public HTTPS port) on top of 22/80/443/backend/PostgreSQL/Redis.
+VPN_SERVER_PORT_MIN=20000
+VPN_SERVER_PORT_MAX=30000
+VPN_FIREWALL_BACKEND=iptables
+VPN_RESERVED_PORTS=
 
 APP_VERSION=1.8.0
 EOF

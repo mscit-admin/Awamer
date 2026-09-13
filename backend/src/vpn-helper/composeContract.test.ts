@@ -61,22 +61,20 @@ test("INFRA-VPN-008b: vpn-helper drops ALL then adds only NET_ADMIN, not privile
   const caps = [...adds.matchAll(/-\s*(\w+)/g)].map((m) => m[1]);
   assert.deepEqual(caps, ["NET_ADMIN"]);
 });
-test("INFRA-VPN-009 / VPN-DATAPLANE-003: helper publishes ONLY the OpenVPN data port, never a control port", () => {
-  // SEC-INFRA-DEPLOY-002: the helper publishes the OpenVPN SERVER data-plane
-  // port (OPENVPN_SERVER_PORT, default 1194 udp+tcp) so external VPN clients can
-  // connect. Its control/IPC surface is the Unix socket in the shared volume and
-  // is NEVER published. Assert every published port is the OpenVPN data port and
-  // that the IPC socket path is a volume, not a port.
-  const portsBlock = /\n\s*ports:\s*\n((?:\s*-\s*"[^"]+"\s*\n?)+)/.exec(helper)?.[1] ?? "";
-  const mappings = [...portsBlock.matchAll(/-\s*"([^"]+)"/g)].map((m) => m[1]!);
-  assert.ok(mappings.length >= 1, "helper publishes the OpenVPN data port");
-  for (const m of mappings) {
-    assert.match(m, /OPENVPN_SERVER_PORT|1194/, `published port ${m} is the OpenVPN data port`);
-    assert.match(m, /\/(udp|tcp)$/, `published port ${m} is a udp/tcp data mapping`);
-  }
-  // The IPC socket is never a published port.
-  assert.doesNotMatch(portsBlock, /vpn-helper\.sock/);
+test("INFRA-VPN-009 / VPN-DATAPLANE-003: helper uses host networking (dynamic ports) and publishes NO control port", () => {
+  // Multi-VPN-Server: with network_mode host each VPN Server's OpenVPN listener
+  // binds its own host port dynamically (no static publish, no recreation). The
+  // helper has NO `ports:` mapping at all, and its control/IPC surface is the
+  // Unix socket in the shared volume — never a published network port.
+  assert.match(helper, /network_mode:\s*host/, "helper uses host networking for dynamic VPN ports");
+  assert.doesNotMatch(helper, /\n\s*ports:\s*\n/, "helper defines no static published ports");
+  // The IPC socket is a volume, never a port mapping.
   assert.doesNotMatch(helper, /-\s*"[^"]*:\/run\/awamer/);
+});
+test("VPN-DATAPLANE: firewall backend + port range env are present on the helper", () => {
+  assert.match(helper, /VPN_FIREWALL_BACKEND/);
+  assert.match(helper, /VPN_SERVER_PORT_MIN/);
+  assert.match(helper, /VPN_SERVER_PORT_MAX/);
 });
 test("INFRA-VPN-005b: vpn-helper sets no-new-privileges", () => {
   assert.match(helper, /no-new-privileges:true/);

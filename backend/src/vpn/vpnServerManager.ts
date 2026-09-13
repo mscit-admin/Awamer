@@ -10,15 +10,28 @@
  */
 import type { Logger } from "../logger/index.js";
 import { type VpnServer, VpnServerErrors } from "../domain/vpnServer.js";
+import { VpnPortErrors } from "../domain/vpnPortPolicy.js";
 import { VpnHelperClient, VpnHelperUnavailable, VpnHelperError } from "./helperClient.js";
 
-export type ServerState = "starting" | "running" | "error" | "stopped";
+// Conservative status set. We report RUNNING (locally up) but never claim the
+// server is externally reachable without evidence — the status carries a
+// separate `external_reachability` field that stays "not_verified".
+export type ServerState = "starting" | "running" | "error" | "stopped" | "port_conflict";
 
 export interface PublicVpnServerStatus {
   server_id: string;
   state: ServerState;
   error: string | null;
   started_at: string | null;
+  /** We do not run an external probe here, so this is conservative. */
+  external_reachability: "not_verified";
+}
+
+export interface FirewallOpResult {
+  applied: boolean;
+  action_required: boolean;
+  backend: string;
+  detail: string;
 }
 
 interface ServerRuntime {
@@ -35,8 +48,8 @@ export class VpnServerManager {
 
   status(serverId: string): PublicVpnServerStatus {
     const s = this.servers.get(serverId);
-    if (!s) return { server_id: serverId, state: "stopped", error: null, started_at: null };
-    return { server_id: s.serverId, state: s.state, error: s.error, started_at: s.startedAt };
+    if (!s) return { server_id: serverId, state: "stopped", error: null, started_at: null, external_reachability: "not_verified" };
+    return { server_id: s.serverId, state: s.state, error: s.error, started_at: s.startedAt, external_reachability: "not_verified" };
   }
 
   list(): PublicVpnServerStatus[] {
@@ -66,6 +79,12 @@ export class VpnServerManager {
       this.log.info({ server: server.id, port: server.port }, "VPN server started via helper");
       return this.status(server.id);
     } catch (e) {
+      // A runtime port collision is reported distinctly (state=port_conflict).
+      if (e instanceof VpnHelperError && e.code === "vpn_port_in_use") {
+        runtime.state = "port_conflict";
+        runtime.error = e.message;
+        throw VpnPortErrors.InUse();
+      }
       runtime.state = "error";
       runtime.error = e instanceof Error ? e.message : String(e);
       this.servers.delete(server.id);
@@ -73,6 +92,18 @@ export class VpnServerManager {
       if (e instanceof VpnHelperError) throw new Error(e.message);
       throw e;
     }
+  }
+
+  /** Ask the helper to open the host firewall for this server's data port.
+   *  Fail-closed on an unreachable helper (throws); a backend that returns
+   *  action_required is surfaced (not an error) so the UI/evidence can show it. */
+  async firewallAllow(serverId: string, port: number, proto: string): Promise<FirewallOpResult> {
+    const r = await this.helper.request("firewall_allow", { serverId, port, proto });
+    return { applied: r.applied === true, action_required: r.actionRequired === true, backend: String(r.backend ?? ""), detail: String(r.detail ?? "") };
+  }
+  async firewallRemove(serverId: string, port: number, proto: string): Promise<FirewallOpResult> {
+    const r = await this.helper.request("firewall_remove", { serverId, port, proto });
+    return { applied: r.applied === true, action_required: r.actionRequired === true, backend: String(r.backend ?? ""), detail: String(r.detail ?? "") };
   }
 
   async stop(serverId: string): Promise<boolean> {

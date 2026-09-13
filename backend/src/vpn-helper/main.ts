@@ -55,6 +55,11 @@ async function main(): Promise<void> {
     databaseUrl: process.env.DATABASE_URL,
     verifyExec,
     log,
+    // Multi-VPN-Server: per-server host firewall + the port window it may touch.
+    firewallBackend: process.env.VPN_FIREWALL_BACKEND === "none" ? "none" : "iptables",
+    iptablesPath: process.env.IPTABLES_PATH ?? "/usr/sbin/iptables",
+    portMin: Number(process.env.VPN_SERVER_PORT_MIN ?? 20000),
+    portMax: Number(process.env.VPN_SERVER_PORT_MAX ?? 30000),
   });
 
   const server = createHelperServer({ core, secret, socketPath, log });

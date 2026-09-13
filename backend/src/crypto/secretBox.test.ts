@@ -110,6 +110,8 @@ function fakeCfg(over: Partial<Config["env"]> & { isProd?: boolean }): Config {
     corsOrigins: [],
     publicBaseUrl: null,
     networkDiagnostic: { allowed: [], deny: [] },
+    vpnPortPolicy: { min: 20000, max: 30000, reserved: new Set<number>() },
+    vpnFirewallBackend: "iptables",
   };
 }
 

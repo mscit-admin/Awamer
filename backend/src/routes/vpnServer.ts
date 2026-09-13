@@ -23,6 +23,8 @@ interface Deps {
   audit: AuditRepository;
   jwt: JwtService;
   users: import("../repos/userRepo.js").UserRepository;
+  /** VPN Server port assignment range (for UI display + validation messages). */
+  portPolicy: { min: number; max: number };
 }
 
 const protoEnum = z.enum(["udp", "tcp"]);
@@ -46,6 +48,31 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
     };
     const uid = (req: { auth?: { sub: string } }) => req.auth!.sub;
 
+    // Firewall lifecycle: open/close a server's data port via the privileged
+    // helper. Best-effort + AUDITED — a firewall failure/action-required is
+    // recorded, never silently ignored, and never claims external readiness.
+    const fwAllow = async (actor: string, s: { id: string; port: number; proto: string }) => {
+      try {
+        const r = await deps.manager.firewallAllow(s.id, s.port, s.proto);
+        await deps.audit.log({ userId: actor, action: "vpn_server_firewall_allow", success: r.applied, resourceType: "vpn_server", resourceId: s.id, details: { port: s.port, proto: s.proto, applied: r.applied, action_required: r.action_required, backend: r.backend } });
+        return r;
+      } catch (e) {
+        await deps.audit.log({ userId: actor, action: "vpn_server_firewall_allow", success: false, resourceType: "vpn_server", resourceId: s.id, details: { port: s.port, proto: s.proto, error: e instanceof Error ? e.message : String(e) } });
+        return { applied: false, action_required: true, backend: "unknown", detail: "firewall op failed" };
+      }
+    };
+    const fwRemove = async (actor: string, s: { id: string; port: number; proto: string }) => {
+      try {
+        const r = await deps.manager.firewallRemove(s.id, s.port, s.proto);
+        await deps.audit.log({ userId: actor, action: "vpn_server_firewall_remove", success: r.applied, resourceType: "vpn_server", resourceId: s.id, details: { port: s.port, proto: s.proto, applied: r.applied, backend: r.backend } });
+      } catch (e) {
+        await deps.audit.log({ userId: actor, action: "vpn_server_firewall_remove", success: false, resourceType: "vpn_server", resourceId: s.id, details: { port: s.port, proto: s.proto, error: e instanceof Error ? e.message : String(e) } });
+      }
+    };
+
+    // ---- port policy (UI shows the allowed range) -------------------
+    app.get("/port-policy", async (_req, reply) => reply.send({ min: deps.portPolicy.min, max: deps.portPolicy.max }));
+
     // ---- servers ----------------------------------------------------
     app.get("/servers", async (req, reply) => {
       const list = await deps.servers.listServers(uid(req));
@@ -58,8 +85,9 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       description: z.string().max(1000).nullable().optional(),
       public_host: z.string().max(253).regex(HOST_RE, "invalid host"),
       port: z.number().int().min(1).max(65535).optional(),
+      auto_assign_port: z.boolean().optional(),
       proto: protoEnum.optional(),
-      subnet: z.string().regex(CIDR_RE, "subnet must be CIDR, e.g. 10.8.0.0/24").optional(),
+      subnet: z.string().regex(CIDR_RE, "subnet must be CIDR, e.g. 10.8.1.0/24").optional(),
       dns: z.string().max(253).regex(HOST_RE).nullable().optional(),
       client_to_client: z.boolean().optional(),
       cipher: z.string().max(40).optional(),
@@ -72,11 +100,13 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       try {
         const s = await deps.servers.createServer(uid(req), {
           name: d.name, description: d.description ?? null, publicHost: d.public_host,
-          port: d.port, proto: d.proto, subnet: d.subnet, dns: d.dns ?? null,
+          port: d.port, autoAssignPort: d.auto_assign_port, proto: d.proto, subnet: d.subnet, dns: d.dns ?? null,
           clientToClient: d.client_to_client, cipher: d.cipher,
         });
-        await deps.audit.log({ userId: uid(req), action: "vpn_server_create", success: true, resourceType: "vpn_server", resourceId: s.id });
-        return reply.code(201).send(toVpnServerPublic(s));
+        await deps.audit.log({ userId: uid(req), action: "vpn_server_create", success: true, resourceType: "vpn_server", resourceId: s.id, details: { port: s.port, proto: s.proto, subnet: s.subnet } });
+        // Open the host firewall for the assigned data port (audited, best-effort).
+        const fw = await fwAllow(uid(req), s);
+        return reply.code(201).send({ ...toVpnServerPublic(s), firewall: fw });
       } catch (e) { return fail(reply, e); }
     });
 
@@ -87,26 +117,43 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       } catch (e) { return fail(reply, e); }
     });
 
-    const updateSchema = createSchema.partial().omit({ name: true });
+    const updateSchema = createSchema.partial().omit({ name: true, auto_assign_port: true });
     app.patch("/servers/:id", async (req, reply) => {
       const p = updateSchema.safeParse(req.body);
       if (!p.success) return reply.code(400).send({ error: { code: "validation_failed", message: p.error.message } });
       const d = p.data;
+      const id = (req.params as { id: string }).id;
       try {
-        const s = await deps.servers.updateServer(uid(req), (req.params as { id: string }).id, {
+        const before = await deps.servers.getServer(uid(req), id);
+        const portChange = (d.port !== undefined && d.port !== before.port) || (d.proto !== undefined && d.proto !== before.proto);
+        // Controlled port/proto change lifecycle (§22): stop → validate+persist →
+        // firewall remove old / allow new. updateServer validates the new port
+        // (range/reserved/uniqueness); on rejection nothing changed (DB unchanged,
+        // server stays stopped) — a safe, consistent state.
+        if (portChange) await deps.manager.stop(id);
+        const s = await deps.servers.updateServer(uid(req), id, {
           description: d.description, publicHost: d.public_host, port: d.port, proto: d.proto,
           subnet: d.subnet, dns: d.dns, clientToClient: d.client_to_client, cipher: d.cipher,
         });
-        return reply.send(toVpnServerPublic(s));
+        let fw: unknown;
+        if (portChange) {
+          await fwRemove(uid(req), { id, port: before.port, proto: before.proto });
+          fw = await fwAllow(uid(req), s);
+          await deps.audit.log({ userId: uid(req), action: "vpn_server_port_changed", success: true, resourceType: "vpn_server", resourceId: id, details: { from: `${before.port}/${before.proto}`, to: `${s.port}/${s.proto}` } });
+        }
+        return reply.send({ ...toVpnServerPublic(s), ...(fw ? { firewall: fw } : {}) });
       } catch (e) { return fail(reply, e); }
     });
 
     app.delete("/servers/:id", async (req, reply) => {
       const id = (req.params as { id: string }).id;
       try {
+        const s = await deps.servers.getServer(uid(req), id); // port/proto for rule removal
         await deps.manager.stop(id);
+        // Remove ONLY this server's Awamer-owned firewall rule before deletion.
+        await fwRemove(uid(req), { id, port: s.port, proto: s.proto });
         await deps.servers.deleteServer(uid(req), id);
-        await deps.audit.log({ userId: uid(req), action: "vpn_server_delete", success: true, resourceType: "vpn_server", resourceId: id });
+        await deps.audit.log({ userId: uid(req), action: "vpn_server_delete", success: true, resourceType: "vpn_server", resourceId: id, details: { port: s.port, proto: s.proto } });
         return reply.code(204).send();
       } catch (e) { return fail(reply, e); }
     });
@@ -117,8 +164,10 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       try {
         const s = await deps.servers.getServer(uid(req), id);
         const st = await deps.manager.start(s);
-        await deps.audit.log({ userId: uid(req), action: "vpn_server_start", success: true, resourceType: "vpn_server", resourceId: id });
-        return reply.send(st);
+        await deps.audit.log({ userId: uid(req), action: "vpn_server_start", success: true, resourceType: "vpn_server", resourceId: id, details: { port: s.port, proto: s.proto } });
+        // Ensure the host firewall permits this server's data port (idempotent).
+        const fw = await fwAllow(uid(req), s);
+        return reply.send({ ...st, firewall: fw });
       } catch (e) {
         if (e instanceof DomainError) return fail(reply, e);
         return reply.code(502).send({ error: { code: "vpn_server_start_failed", message: e instanceof Error ? e.message : "start failed" } });

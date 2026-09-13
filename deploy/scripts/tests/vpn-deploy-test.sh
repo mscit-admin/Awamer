@@ -92,31 +92,26 @@ else ok "VPN-DEPLOY-SECRET-006 secret never printed by update"; fi
 MODE="$(stat -c '%a' "$LEGACY")"
 if [[ "$MODE" == "600" ]]; then ok "VPN-DEPLOY-SECRET-007 .env.production remains mode 0600"; else bad "VPN-DEPLOY-SECRET-007 mode is $MODE, expected 600"; fi
 
-# ---- DATAPLANE-001/-002/-003/-008: compose port contract ---------------------
+# ---- VPN-DATAPLANE compose contract (multi-server dynamic ports) -------------
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   RC="${SANDBOX}/rendered.json"
   docker compose -f "$COMPOSE_FILE" --env-file "$GEN" config --format json >"$RC" 2>/dev/null
-  helper_ports() { node -e '
-    const fs=require("fs"); const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
-    const p=(j.services["vpn-helper"].ports||[]).map(x=>`${x.published}/${x.protocol}`);
-    process.stdout.write(p.sort().join(","));
-  ' "$RC" 2>/dev/null; }
-  PORTS="$(helper_ports)"
-  echo "$PORTS" | grep -q '1194/udp' && ok "VPN-DATAPLANE-001 default UDP 1194 published" || bad "VPN-DATAPLANE-001 UDP 1194 ($PORTS)"
-  echo "$PORTS" | grep -q '1194/tcp' && ok "VPN-DATAPLANE-002 default TCP 1194 published" || bad "VPN-DATAPLANE-002 TCP 1194 ($PORTS)"
-  # Control plane: the only published ports are the OpenVPN data ports (1194);
-  # the IPC socket is a volume, never a port. So exactly two entries, both 1194.
-  N="$(echo "$PORTS" | tr ',' '\n' | grep -c '/')"
-  ONLY1194="$(echo "$PORTS" | tr ',' '\n' | grep -vc '^1194/')"
-  if [[ "$ONLY1194" -eq 0 && "$N" -ge 1 ]]; then ok "VPN-DATAPLANE-003 helper control plane has zero public ports (only 1194 data)"; else bad "VPN-DATAPLANE-003 unexpected helper ports ($PORTS)"; fi
-  # DATAPLANE-008: custom port honored.
-  CUSTOM="${SANDBOX}/rendered5.json"
-  ( cat "$GEN"; echo "OPENVPN_SERVER_PORT=1195" ) > "${SANDBOX}/gen5.env"
-  docker compose -f "$COMPOSE_FILE" --env-file "${SANDBOX}/gen5.env" config --format json >"$CUSTOM" 2>/dev/null
-  P5="$(node -e 'const j=require(process.argv[1]);process.stdout.write((j.services["vpn-helper"].ports||[]).map(x=>`${x.published}/${x.protocol}`).sort().join(","))' "$CUSTOM" 2>/dev/null)"
-  if echo "$P5" | grep -q '1195/udp' && echo "$P5" | grep -q '1195/tcp'; then ok "VPN-DATAPLANE-008 custom OPENVPN_SERVER_PORT honored ($P5)"; else bad "VPN-DATAPLANE-008 custom port ($P5)"; fi
+  jget() { node -e "const j=require('$RC'); process.stdout.write(String(($1)))" 2>/dev/null; }
+  NETMODE="$(jget 'j.services["vpn-helper"].network_mode || ""')"
+  NPORTS="$(jget '(j.services["vpn-helper"].ports||[]).length')"
+  # DATAPLANE-001/002: dynamic ports via host networking (no static publish, no recreation).
+  [[ "$NETMODE" == "host" ]] && ok "VPN-DATAPLANE-001/002 helper uses host networking (each server binds its own dynamic port)" || bad "VPN-DATAPLANE-001/002 expected network_mode host (got '$NETMODE')"
+  # DATAPLANE-003: control plane has zero published ports.
+  [[ "$NPORTS" == "0" ]] && ok "VPN-DATAPLANE-003 helper control plane has zero published ports" || bad "VPN-DATAPLANE-003 helper published $NPORTS ports (expected 0)"
+  # DATAPLANE-008: per-server port range is configured (single source of truth).
+  MIN="$(jget 'j.services["vpn-helper"].environment.VPN_SERVER_PORT_MIN || ""')"
+  MAX="$(jget 'j.services["vpn-helper"].environment.VPN_SERVER_PORT_MAX || ""')"
+  FB="$(jget 'j.services["vpn-helper"].environment.VPN_FIREWALL_BACKEND || ""')"
+  if [[ -n "$MIN" && -n "$MAX" && -n "$FB" ]]; then ok "VPN-DATAPLANE-008 per-server port range configured ($MIN-$MAX, firewall=$FB)"; else bad "VPN-DATAPLANE-008 port range/firewall env missing ($MIN/$MAX/$FB)"; fi
+  # No obsolete single global OpenVPN port anywhere in the rendered compose.
+  if grep -q 'OPENVPN_SERVER_PORT' "$RC"; then bad "obsolete OPENVPN_SERVER_PORT still present"; else ok "VPN-DATAPLANE no obsolete single-global OPENVPN_SERVER_PORT"; fi
 else
-  for t in 001 002 003 008; do printf '  \033[0;33mSKIP\033[0m VPN-DATAPLANE-%s (docker compose unavailable)\n' "$t"; done
+  for t in 001/002 003 008; do printf '  \033[0;33mSKIP\033[0m VPN-DATAPLANE-%s (docker compose unavailable)\n' "$t"; done
 fi
 
 echo

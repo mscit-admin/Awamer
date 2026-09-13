@@ -9,6 +9,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Multi-VPN-Server dynamic ports (DB-authoritative, no container recreation)
+
+Awamer can now run **multiple** built-in OpenVPN Servers **simultaneously**, each
+with its **own** port + protocol + subnet taken from the **database record**
+(there is no deployment-wide `OPENVPN_SERVER_PORT` anymore). New servers get their
+port **without recreating the `vpn-helper` container**, and the SEC-INFRA-001
+privilege split is preserved — the backend stays unprivileged; only the helper
+holds `NET_ADMIN` + `/dev/net/tun`. Demonstrated in a **live Docker runtime** with
+three simultaneous servers and three external clients from separate network
+namespaces — see `FINAL_MULTI_VPN_DYNAMIC_PORT_REMEDIATION_REPORT.md`.
+
+### Added
+- **Centralized VPN port/subnet policy** (`backend/src/domain/vpnPortPolicy.ts`):
+  configurable window `VPN_SERVER_PORT_MIN` (default 20000) / `VPN_SERVER_PORT_MAX`
+  (default 30000), validated fail-closed (`1 ≤ MIN ≤ MAX ≤ 65535`); a centralized
+  **reserved-port** set (22/80/443, the backend HTTP port, PostgreSQL, Redis, plus
+  any `VPN_RESERVED_PORTS`); IPv4 CIDR **subnet-overlap** detection; and a
+  next-free-port allocator.
+- **DB is authoritative for port+protocol.** Migration
+  `028_vpn_server_port_unique` adds a `UNIQUE (port, proto)` index (same port is
+  allowed on a different protocol). Assignment runs inside a transaction holding a
+  PostgreSQL advisory lock, so concurrent creates are race-safe; the unique index
+  is the ultimate guard.
+- **Auto-assign** a free port when none is given (`auto_assign_port`), plus a
+  `GET /api/v1/vpn-server/port-policy` endpoint and a create form that shows the
+  range, offers auto-assign, and surfaces policy errors.
+- **Per-server host firewall via the helper** — structured `firewall_allow` /
+  `firewall_remove` IPC ops (no generic exec, no rule text): the helper builds the
+  `iptables` argument array itself from a validated `{serverId, port, proto}`,
+  tags every rule with an `awamer-vpn:<serverId>` ownership comment, refuses ports
+  outside the policy window, and on removal deletes **only** its own tagged rule.
+  Backend detection `VPN_FIREWALL_BACKEND` (`iptables` | `none`); `none` returns a
+  `FIREWALL_ACTION_REQUIRED` result rather than failing.
+- **Runtime port-collision probe** — before spawning OpenVPN the helper binds the
+  target port/proto to confirm it is free; if another OS process holds it the start
+  fails with `vpn_port_in_use` (state `port_conflict`) and the other process is
+  never touched.
+- **Conservative status** — server status carries `external_reachability:
+  "not_verified"` and never claims external reachability without evidence.
+
+### Changed
+- **`deploy/docker-compose.production.yml`** — the `vpn-helper` now uses
+  `network_mode: host` so each server binds its own dynamic port with no static
+  `ports:` publish and no per-server container recreation; it gains
+  `VPN_FIREWALL_BACKEND` / `VPN_SERVER_PORT_MIN` / `VPN_SERVER_PORT_MAX`. PostgreSQL
+  is published on `127.0.0.1:5432` only (loopback) so the host-networked helper can
+  reach the DB for per-user auth-verify; the backend still uses the private network.
+  The single global `OPENVPN_SERVER_PORT` is removed everywhere.
+- **Installer/updater** (`generate-secrets.sh`, `.env.production.example`,
+  `install.sh`, `update.sh`) describe the dynamic per-server port range instead of a
+  single VPN port, and never open the whole range by default.
+
+### Security
+- The privilege boundary is unchanged: backend `cap_drop: ALL` (nothing added), no
+  `/dev/net/tun`, never spawns OpenVPN; helper `NET_ADMIN` only. `VPN_HELPER_SECRET`
+  is never rotated on update/restart. No generic privileged command API was added —
+  firewall and OpenVPN control remain a structured allow-list over the authenticated
+  Unix socket.
+
 ## [Unreleased] — SEC-INFRA-DEPLOY: VPN helper secret provisioning + OpenVPN data-plane port
 
 Two deployment fixes on top of SEC-INFRA-001 (helper architecture unchanged).

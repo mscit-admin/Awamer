@@ -23,9 +23,15 @@ BRANCH="${BRANCH:-main}"
 WEB_ROOT="${WEB_ROOT:-/var/www/awamer}"
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/docker-compose.production.yml}"
 ENV_FILE="${ENV_FILE:-.env.production}"
-# VPN-server listener port(s) to open on the host firewall (VPN Server feature).
-# Set VPN_PORTS="" to skip, or e.g. "1194/udp 1195/udp" for extra servers.
-VPN_PORTS="${VPN_PORTS:-1194/udp 1194/tcp}"
+# Multi-VPN-Server dynamic ports: per-server host firewall rules are now opened
+# and removed AUTOMATICALLY by the vpn-helper (iptables) as VPN Servers are
+# created/started/deleted — there is NO static single VPN port to open here.
+# VPN_PORTS is therefore EMPTY by default (deprecated). Set it only if you must
+# force extra host-firewall openings manually (e.g. "20001/udp 20003/tcp").
+VPN_PORTS="${VPN_PORTS:-}"
+# Configured VPN Server port range (for cloud-firewall guidance only).
+VPN_PORT_MIN="${VPN_SERVER_PORT_MIN:-20000}"
+VPN_PORT_MAX="${VPN_SERVER_PORT_MAX:-30000}"
 # Non-secret deployment config that install.sh persists (domain + HTTPS port).
 DEPLOYMENT_CONF="${AWAMER_DEPLOYMENT_CONF:-/etc/awamer/deployment.conf}"
 # ---------------------------------------------------------------------
@@ -201,16 +207,18 @@ if command -v nginx >/dev/null 2>&1; then
   fi
 fi
 
-# 5) Open the VPN-server port(s) on the host firewall (best-effort). The compose
-#    publishes the port from the container, but the host firewall must also allow
-#    it inbound for external OpenVPN clients to connect. Cloud security groups
-#    still need the same rule added in your provider console.
+# 5) HOST firewall for VPN Servers is now DYNAMIC: the vpn-helper opens/removes
+#    each server's port (iptables) as servers are created/deleted. We only honor
+#    an explicit VPN_PORTS override (deprecated escape hatch), and never open a
+#    static 1194 here (§28 — no stale firewall port).
 if [ -n "$VPN_PORTS" ] && command -v ufw >/dev/null 2>&1 && ufw status >/dev/null 2>&1; then
   for p in $VPN_PORTS; do
-    say "Allowing $p through ufw…"
+    say "Allowing explicit override $p through ufw…"
     ufw allow "$p" >/dev/null 2>&1 || true
   done
 fi
 
 say "Done. Hard-refresh the browser (Ctrl-Shift-R) to pick up the new frontend."
-say "VPN Server: ensure your cloud security group also allows inbound $VPN_PORTS."
+say "VPN Servers: per-server host firewall rules are managed automatically by the vpn-helper."
+say "CLOUD/provider firewall (not managed by Awamer): allow inbound UDP+TCP for the VPN Server"
+say "  port range ${VPN_PORT_MIN}-${VPN_PORT_MAX} (or just the specific ports of the servers you run)."

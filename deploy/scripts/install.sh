@@ -568,7 +568,18 @@ cat <<EOF
     1. Sign in via a desktop client and CHANGE the bootstrap password.
     2. Back up .env.production to a secure password manager.
     3. Set up automated database backups (see deploy/scripts/backup.sh).
-    4. Configure firewall: allow only 22 (SSH), 80, and ${HTTPS_PORT:-443} (Awamer HTTPS).
+    4. Firewall — CORE required ports (open these):
+         22/tcp   (SSH)
+         80/tcp   (ACME HTTP-01 certificate validation)
+         ${HTTPS_PORT:-443}/tcp  (Awamer HTTPS)
+       VPN Server ports: managed DYNAMICALLY, one per VPN Server, from the
+       configured range ${VPN_SERVER_PORT_MIN:-20000}-${VPN_SERVER_PORT_MAX:-30000} (UDP/TCP). On THIS host the
+       vpn-helper opens each server's rule automatically (iptables). On a
+       CLOUD/provider firewall (AWS SG / Azure NSG / GCP / Contabo / hardware),
+       which Awamer cannot manage, allow inbound UDP+TCP for the specific VPN
+       Server ports you create (or the whole ${VPN_SERVER_PORT_MIN:-20000}-${VPN_SERVER_PORT_MAX:-30000} range if operationally
+       necessary). Local host-firewall openness does NOT guarantee external
+       reachability if an upstream firewall blocks the port.
 
   Useful commands:
     Tail logs:          sudo docker compose -f deploy/docker-compose.production.yml logs -f auth-service

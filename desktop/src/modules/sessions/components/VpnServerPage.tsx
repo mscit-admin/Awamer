@@ -26,13 +26,30 @@ const emptyForm: VpnServerInput & { name: string; public_host: string } = {
   name: "",
   description: "",
   public_host: "",
-  port: 1194,
-  proto: "udp",
-  subnet: "10.8.0.0/24",
+  port: undefined as number | undefined,
+  auto_assign_port: true,
+  proto: "udp" as "udp" | "tcp",
+  subnet: "10.8.1.0/24",
   dns: "",
   client_to_client: true,
   cipher: "AES-256-GCM",
 };
+
+/** Friendly, code-aware messages for the multi-VPN-server validation errors. */
+function friendlyVpnError(e: unknown, fallback: string): string {
+  const code = e instanceof ApiError
+    ? ((e.payload as { error?: { code?: string } } | undefined)?.error?.code)
+    : undefined;
+  switch (code) {
+    case "vpn_port_out_of_range": return "Port is outside the allowed range.";
+    case "vpn_port_reserved": return "That port is reserved by the system.";
+    case "vpn_port_in_use": return "That port is already assigned or in use.";
+    case "vpn_subnet_overlap": return "Subnet overlaps another VPN server's subnet.";
+    case "vpn_no_free_port": return "No free port available in the configured range.";
+    case "vpn_bad_subnet": return "Subnet must be valid CIDR, e.g. 10.8.1.0/24.";
+    default: return e instanceof ApiError ? e.message : e instanceof Error ? e.message : fallback;
+  }
+}
 
 const errMsg = (e: unknown, fallback: string) =>
   e instanceof ApiError ? e.message : e instanceof Error ? e.message : fallback;
@@ -51,6 +68,9 @@ export function VpnServerPage() {
   // Which server's user panel is expanded.
   const [expanded, setExpanded] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Allowed VPN Server port range (from the backend policy), shown in the form.
+  const [portRange, setPortRange] = useState<{ min: number; max: number } | null>(null);
+  useEffect(() => { vpnServerApi.portPolicy().then(setPortRange).catch(() => {}); }, []);
 
   async function refresh() {
     try {
@@ -79,6 +99,7 @@ export function VpnServerPage() {
       description: s.description ?? "",
       public_host: s.public_host,
       port: s.port,
+      auto_assign_port: false, // editing an existing server keeps/uses its port
       proto: s.proto,
       subnet: s.subnet,
       dns: s.dns ?? "",
@@ -94,10 +115,13 @@ export function VpnServerPage() {
     setSaving(true);
     setError(null);
     const isEdit = editing !== "new" && editing !== null;
+    // Auto-assign (create only) lets the backend pick the next free in-range port.
+    const useAuto = !isEdit && form.auto_assign_port;
     const base: VpnServerInput = {
       description: form.description || null,
       public_host: form.public_host.trim(),
-      port: form.port ? Number(form.port) : undefined,
+      port: useAuto ? undefined : (form.port ? Number(form.port) : undefined),
+      auto_assign_port: useAuto ? true : undefined,
       proto: form.proto,
       subnet: form.subnet || undefined,
       dns: form.dns || null,
@@ -113,7 +137,7 @@ export function VpnServerPage() {
       setEditing(null);
       await refresh();
     } catch (err) {
-      setError(errMsg(err, "save failed"));
+      setError(friendlyVpnError(err, "save failed"));
     } finally {
       setSaving(false);
     }
@@ -198,7 +222,25 @@ export function VpnServerPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div>
               <label className="block text-xs text-fg-muted mb-1">Port</label>
-              <input type="number" min={1} max={65535} value={form.port ?? ""} onChange={(e) => set("port", e.target.value === "" ? undefined : Number(e.target.value))} className="input w-full" />
+              <input
+                type="number"
+                min={portRange?.min ?? 20000}
+                max={portRange?.max ?? 30000}
+                value={form.auto_assign_port && editing === "new" ? "" : (form.port ?? "")}
+                disabled={form.auto_assign_port && editing === "new"}
+                placeholder={form.auto_assign_port && editing === "new" ? "auto" : ""}
+                onChange={(e) => set("port", e.target.value === "" ? undefined : Number(e.target.value))}
+                className="input w-full disabled:opacity-50"
+              />
+              <p className="text-2xs text-fg-subtle mt-1">
+                Allowed range: {portRange ? `${portRange.min}-${portRange.max}` : "20000-30000"}
+              </p>
+              {editing === "new" && (
+                <label className="mt-1 flex items-center gap-1 text-2xs text-fg-muted">
+                  <input type="checkbox" checked={form.auto_assign_port} onChange={(e) => set("auto_assign_port", e.target.checked)} />
+                  Auto-assign port
+                </label>
+              )}
             </div>
             <div>
               <label className="block text-xs text-fg-muted mb-1">Protocol</label>
