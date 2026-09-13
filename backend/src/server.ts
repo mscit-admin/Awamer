@@ -193,7 +193,12 @@ async function main() {
     // Fastify 5: a pre-created logger instance goes in `loggerInstance`
     // (`logger` now only accepts a config object).
     loggerInstance: log,
-    trustProxy: true,
+    // SEC-PROXY-001 — trust ONLY the configured reverse-proxy hops for
+    // X-Forwarded-* (default: loopback + private/ULA, i.e. the Nginx proxy path),
+    // never arbitrary clients. A direct client on an untrusted address cannot spoof
+    // X-Forwarded-For / X-Real-IP / Forwarded to influence req.ip (rate limit,
+    // audit source IP, and any IP-sensitive logic).
+    trustProxy: cfg.trustProxy,
     bodyLimit: 1024 * 100,
   });
 

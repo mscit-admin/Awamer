@@ -41,6 +41,45 @@ test("AI-SSRF-013: non-HTTP protocols rejected", () => {
   assert.throws(() => assertSafeUrl("https://127.0.0.1/x", false), SsrfError); // literal loopback host
 });
 
+// ---- F2: IPv6 / IPv4-mapped-IPv6 literal normalization (SSRF-IPV6-001..012) --
+// URL.hostname keeps the brackets on an IPv6 literal ("[::1]"), which previously
+// slipped past isIP() and was deferred to DNS (and Node skips the pinning lookup
+// for literals). assertSafeUrl must classify bracketed literals as IPs and block
+// loopback / IPv4-mapped-private / ULA / link-local / multicast.
+test("SSRF-IPV6-001: http://[::1] blocked", () => {
+  assert.throws(() => assertSafeUrl("http://[::1]/", true), SsrfError);
+});
+test("SSRF-IPV6-002: http://[::ffff:127.0.0.1] blocked", () => {
+  assert.throws(() => assertSafeUrl("http://[::ffff:127.0.0.1]/", true), SsrfError);
+  assert.throws(() => assertSafeUrl("http://[0:0:0:0:0:ffff:7f00:1]/", true), SsrfError); // uncompressed form
+});
+test("SSRF-IPV6-003: IPv4-mapped RFC1918 blocked", () => {
+  for (const h of ["[::ffff:10.0.0.1]", "[::ffff:172.16.0.1]", "[::ffff:192.168.1.1]"]) {
+    assert.throws(() => assertSafeUrl(`https://${h}/`, true), SsrfError, h);
+  }
+});
+test("SSRF-IPV6-004: IPv4-mapped metadata IP blocked", () => {
+  assert.throws(() => assertSafeUrl("https://[::ffff:169.254.169.254]/", true), SsrfError);
+});
+test("SSRF-IPV6-005: fc00::/7 (unique-local) blocked", () => {
+  assert.throws(() => assertSafeUrl("https://[fc00::1]/", true), SsrfError);
+  assert.throws(() => assertSafeUrl("https://[fd12:3456:789a::1]/", true), SsrfError);
+});
+test("SSRF-IPV6-006: fe80::/10 (link-local) blocked", () => {
+  assert.throws(() => assertSafeUrl("https://[fe80::1]/", true), SsrfError);
+});
+test("SSRF-IPV6-007: ff00::/8 (multicast) + ::/128 blocked", () => {
+  assert.throws(() => assertSafeUrl("https://[ff02::1]/", true), SsrfError);
+  assert.throws(() => assertSafeUrl("https://[::]/", true), SsrfError);
+});
+test("SSRF-IPV6-011: a valid public IPv6 literal is allowed by validation", () => {
+  assert.doesNotThrow(() => assertSafeUrl("https://[2606:4700:4700::1111]/", false));
+});
+test("SSRF-IPV6-012: normal public IPv4 behavior unchanged", () => {
+  assert.doesNotThrow(() => assertSafeUrl("https://8.8.8.8/", false));
+  assert.throws(() => assertSafeUrl("https://127.0.0.1/", false), SsrfError);
+});
+
 // ---- Functional tests against a loopback server ---------------------------
 let server: http.Server;
 let base = "";
@@ -50,6 +89,8 @@ before(async () => {
     hits++;
     if (req.url === "/ok") { res.writeHead(200, { "content-type": "application/json" }); res.end('{"v":1}'); return; }
     if (req.url === "/redir-private") { res.writeHead(302, { location: "http://169.254.169.254/latest/meta-data/" }); res.end(); return; }
+    if (req.url === "/redir-ipv6-mapped-meta") { res.writeHead(302, { location: "http://[::ffff:169.254.169.254]/latest/meta-data/" }); res.end(); return; }
+    if (req.url === "/redir-ipv6-mapped-rfc1918") { res.writeHead(302, { location: "http://[::ffff:10.0.0.1]/" }); res.end(); return; }
     if (req.url === "/redir-ok") { res.writeHead(302, { location: `${base}/ok` }); res.end(); return; }
     if (req.url === "/big") { res.writeHead(200); res.end(Buffer.alloc(2 * 1024 * 1024, 0x41)); return; } // 2 MiB
     if (req.url === "/slow") { setTimeout(() => { res.writeHead(200); res.end("late"); }, 2000); return; }
@@ -70,6 +111,21 @@ test("AI-SSRF-012: a reachable endpoint works (loopback stands in for public)", 
 
 test("AI-SSRF-009/011: redirect/rebinding to a private/metadata target is rejected", async () => {
   await assert.rejects(() => safeFetch(`${base}/redir-private`, {}, dev), SsrfError);
+});
+
+test("SSRF-IPV6-009/010: redirect to an IPv6-form forbidden target is blocked", async () => {
+  // Redirect revalidation runs assertSafeUrl on each hop; an IPv4-mapped-IPv6
+  // metadata / RFC1918 Location (blocked regardless of allowLoopback) is rejected.
+  await assert.rejects(() => safeFetch(`${base}/redir-ipv6-mapped-meta`, {}, dev), SsrfError);
+  await assert.rejects(() => safeFetch(`${base}/redir-ipv6-mapped-rfc1918`, {}, dev), SsrfError);
+});
+
+test("SSRF-IPV6-008: a hostname resolving to a forbidden address fails closed (all-address check)", async () => {
+  // "localhost" resolves to loopback (127.0.0.1 and/or ::1); with allowLoopback off
+  // the pinned lookup must reject because a resolved address is forbidden. This is
+  // the same "reject if ANY resolved address is unsafe" path that defeats a mixed
+  // public+private DNS result.
+  await assert.rejects(() => safeFetch("http://localhost/ok", {}, { allowHttp: true }), SsrfError);
 });
 
 test("AI-SSRF-010: multi-hop redirect cap enforced", async () => {
