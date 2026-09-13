@@ -11,6 +11,7 @@ import type { JwtService } from "../jwt/index.js";
 import type { AuditRepository } from "../repos/otherRepos.js";
 import type { VpnServerRepository } from "../repos/vpnServerRepo.js";
 import type { VpnServerManager } from "../vpn/vpnServerManager.js";
+import type { VpnReconfigurationService } from "../vpn/vpnReconfigure.js";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 import { DomainError } from "../domain/index.js";
 import {
@@ -20,6 +21,7 @@ import {
 interface Deps {
   servers: VpnServerRepository;
   manager: VpnServerManager;
+  reconfig: VpnReconfigurationService;
   audit: AuditRepository;
   jwt: JwtService;
   users: import("../repos/userRepo.js").UserRepository;
@@ -33,7 +35,8 @@ const CIDR_RE = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
 
 function status(code: string): number {
   if (code.endsWith("_not_found")) return 404;
-  if (code.endsWith("_taken") || code.endsWith("_in_use")) return 409;
+  if (code.endsWith("_taken") || code.endsWith("_in_use") || code.endsWith("_in_progress") || code === "vpn_reconfiguration_failed") return 409;
+  if (code === "vpn_recovery_required") return 500;
   return 400;
 }
 
@@ -124,24 +127,35 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       const d = p.data;
       const id = (req.params as { id: string }).id;
       try {
-        const before = await deps.servers.getServer(uid(req), id);
-        const portChange = (d.port !== undefined && d.port !== before.port) || (d.proto !== undefined && d.proto !== before.proto);
-        // Controlled port/proto change lifecycle (§22): stop → validate+persist →
-        // firewall remove old / allow new. updateServer validates the new port
-        // (range/reserved/uniqueness); on rejection nothing changed (DB unchanged,
-        // server stays stopped) — a safe, consistent state.
-        if (portChange) await deps.manager.stop(id);
-        const s = await deps.servers.updateServer(uid(req), id, {
+        // MULTI-VPN-ROLLBACK-001 — a rollback-safe state machine performs any
+        // port/protocol change: it never removes the old firewall rule before the
+        // new listener is proven healthy, and restores the original working state
+        // (or reports RECOVERY_REQUIRED) if anything fails. Non-identity edits are
+        // a plain persist.
+        const outcome = await deps.reconfig.reconfigure(uid(req), id, {
           description: d.description, publicHost: d.public_host, port: d.port, proto: d.proto,
           subnet: d.subnet, dns: d.dns, clientToClient: d.client_to_client, cipher: d.cipher,
         });
-        let fw: unknown;
-        if (portChange) {
-          await fwRemove(uid(req), { id, port: before.port, proto: before.proto });
-          fw = await fwAllow(uid(req), s);
-          await deps.audit.log({ userId: uid(req), action: "vpn_server_port_changed", success: true, resourceType: "vpn_server", resourceId: id, details: { from: `${before.port}/${before.proto}`, to: `${s.port}/${s.proto}` } });
+        switch (outcome.status) {
+          case "updated":
+            return reply.send({ ...toVpnServerPublic(outcome.server), status: deps.manager.status(id) });
+          case "reconfigured":
+            return reply.send({ ...toVpnServerPublic(outcome.server), firewall: outcome.firewall, status: deps.manager.status(id) });
+          case "cleanup_required":
+            return reply.send({ ...toVpnServerPublic(outcome.server), firewall: outcome.firewall, warning: outcome.warning, status: deps.manager.status(id) });
+          case "rolled_back":
+            // The change was NOT applied; the server was restored to its original
+            // working configuration. Report a clear failure — never a false success.
+            return reply.code(409).send({ error: {
+              code: "vpn_reconfiguration_failed",
+              message: `reconfiguration failed at ${outcome.failureStage}; server restored to its original configuration (${outcome.error})`,
+            } });
+          case "recovery_required":
+            return reply.code(500).send({ error: {
+              code: "vpn_recovery_required",
+              message: `reconfiguration failed at ${outcome.failureStage} and automatic rollback could not fully restore the server; operator intervention required`,
+            } });
         }
-        return reply.send({ ...toVpnServerPublic(s), ...(fw ? { firewall: fw } : {}) });
       } catch (e) { return fail(reply, e); }
     });
 

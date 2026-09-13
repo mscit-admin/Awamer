@@ -62,6 +62,11 @@ async function main(): Promise<void> {
     portMax: Number(process.env.VPN_SERVER_PORT_MAX ?? 30000),
   });
 
+  // MULTI-VPN-FW-001 — verify the firewall backend exists + runs BEFORE serving.
+  // Fails closed (automatic firewall ops disabled) if unavailable; never fatal.
+  const fw = await core.probeFirewall();
+  log(fw, fw.firewallAvailable ? "firewall backend available" : "firewall backend UNAVAILABLE (automatic firewall disabled — fail closed)");
+
   const server = createHelperServer({ core, secret, socketPath, log });
   await listenHelper(server, socketPath);
   // Group (backend gid) may read+write the socket; owner too; world none.

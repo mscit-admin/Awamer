@@ -65,6 +65,9 @@ export interface HelperCoreOptions {
   portMax?: number;
   /** Injectable host port-free probe (for tests); default binds a real socket. */
   portProbe?: (port: number, proto: "udp" | "tcp") => Promise<boolean>;
+  /** Extra candidate iptables paths to try if the configured one is absent
+   *  (Alpine ships /sbin/iptables, Debian /usr/sbin/iptables). */
+  iptablesCandidates?: string[];
 }
 
 /** Result of a firewall op. `applied` false + actionRequired true = the operator
@@ -123,7 +126,11 @@ export class HelperCore {
   private readonly spawnFn: SpawnFn;
   private readonly log: (obj: Record<string, unknown>, msg: string) => void;
   private readonly firewallBackend: "iptables" | "none";
-  private readonly iptablesPath: string;
+  private iptablesPath: string;
+  private readonly iptablesCandidates: string[];
+  /** Resolved once at startup by probeFirewall(): whether automatic firewall
+   *  operations are actually usable. undefined = not probed yet. */
+  private firewallAvailable: boolean | undefined;
   private readonly portMin: number;
   private readonly portMax: number;
   private readonly sessions = new Map<string, Session>();
@@ -141,6 +148,9 @@ export class HelperCore {
     this.log = opts.log ?? (() => {});
     this.firewallBackend = opts.firewallBackend ?? "iptables";
     this.iptablesPath = opts.iptablesPath ?? "/usr/sbin/iptables";
+    // Candidate locations tried if the configured path is absent. Alpine (the
+    // production helper image) installs /sbin/iptables; Debian /usr/sbin/iptables.
+    this.iptablesCandidates = opts.iptablesCandidates ?? ["/usr/sbin/iptables", "/sbin/iptables"];
     this.portMin = opts.portMin ?? 20000;
     this.portMax = opts.portMax ?? 30000;
     this.portProbe = opts.portProbe;
@@ -172,10 +182,48 @@ export class HelperCore {
     });
   }
 
+  /**
+   * MULTI-VPN-FW-001 / startup capability check. Verify the configured firewall
+   * backend actually exists and is executable BEFORE serving requests, and cache
+   * the result. If it is unavailable we FAIL CLOSED: automatic firewall ops are
+   * disabled and health never claims the backend is available. Idempotent.
+   * Returns the same summary shape exposed by health().
+   */
+  async probeFirewall(): Promise<{ firewallBackend: string; firewallAvailable: boolean }> {
+    if (this.firewallBackend === "none") {
+      this.firewallAvailable = false;
+      return { firewallBackend: "none", firewallAvailable: false };
+    }
+    // Resolve the executable path: the configured one first, then known image
+    // locations. This is a FIXED candidate list resolved once at startup — never
+    // a PATH lookup and never influenced by request/user input.
+    const candidates = [this.iptablesPath, ...this.iptablesCandidates];
+    let resolved: string | null = null;
+    for (const p of candidates) {
+      if (await access(p, fsConstants.X_OK).then(() => true).catch(() => false)) { resolved = p; break; }
+    }
+    if (!resolved) {
+      this.firewallAvailable = false;
+      this.log({ backend: "iptables" }, "firewall backend NOT available (executable missing) — automatic firewall disabled");
+      return { firewallBackend: "iptables", firewallAvailable: false };
+    }
+    this.iptablesPath = resolved;
+    // Confirm it actually runs (kernel/netfilter present) via a harmless version query.
+    const v = await this.runFirewall(["--version"]);
+    this.firewallAvailable = v.code === 0;
+    this.log({ backend: "iptables", path: resolved, available: this.firewallAvailable }, "firewall backend probe");
+    return { firewallBackend: "iptables", firewallAvailable: this.firewallAvailable };
+  }
+
   async firewallAllow(serverId: string, port: number, proto: string): Promise<FirewallResult> {
     const tag = this.fwValidate(serverId, port, proto);
     if (this.firewallBackend === "none") {
       return { applied: false, actionRequired: true, backend: "none", detail: `open ${port}/${proto} manually` };
+    }
+    // Fail closed if a startup probe found the backend unusable — never attempt
+    // (and never report success) when iptables is not actually available.
+    if (this.firewallAvailable === false) {
+      return { applied: false, actionRequired: true, backend: "iptables", detail: "firewall backend unavailable" };
     }
     // Idempotent: only insert if an identically-tagged rule is not already present.
     const check = await this.runFirewall(["-C", "INPUT", "-p", proto, "--dport", String(port), "-m", "comment", "--comment", tag, "-j", "ACCEPT"]);
@@ -189,6 +237,9 @@ export class HelperCore {
   async firewallRemove(serverId: string, port: number, proto: string): Promise<FirewallResult> {
     const tag = this.fwValidate(serverId, port, proto);
     if (this.firewallBackend === "none") return { applied: false, actionRequired: false, backend: "none", detail: "no-op" };
+    if (this.firewallAvailable === false) {
+      return { applied: false, actionRequired: false, backend: "iptables", detail: "firewall backend unavailable" };
+    }
     // Delete ONLY the rule carrying this server's ownership tag; never touch an
     // untagged rule an external administrator created. Loop to clear duplicates.
     let removed = 0;
@@ -202,11 +253,18 @@ export class HelperCore {
     return { applied: true, actionRequired: false, backend: "iptables", detail: `removed ${removed}` };
   }
 
-  /** Public: no secrets, no profiles, no env dump. */
-  async health(): Promise<{ ready: boolean; openvpn: boolean; tun: boolean; sessions: number }> {
+  /** Public: no secrets, no profiles, no env dump. Reports firewall capability
+   *  (MULTI-VPN-FW-001) so callers can see whether automatic per-server firewall
+   *  management is available; if it was never probed we report the backend as not
+   *  yet confirmed available (conservative). */
+  async health(): Promise<{ ready: boolean; openvpn: boolean; tun: boolean; sessions: number; firewallBackend: string; firewallAvailable: boolean }> {
     const openvpn = await access(this.openvpnPath, fsConstants.X_OK).then(() => true).catch(() => false);
     const tun = await access("/dev/net/tun", fsConstants.F_OK).then(() => true).catch(() => false);
-    return { ready: true, openvpn, tun, sessions: this.sessions.size };
+    return {
+      ready: true, openvpn, tun, sessions: this.sessions.size,
+      firewallBackend: this.firewallBackend,
+      firewallAvailable: this.firewallAvailable === true,
+    };
   }
 
   private key(kind: SessionKind, ref: string): string { return `${kind}:${ref}`; }

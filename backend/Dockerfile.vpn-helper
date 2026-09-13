@@ -24,7 +24,12 @@ FROM node:20-alpine
 # tini reaps the openvpn children. No setuid bit is needed: this container holds
 # NET_ADMIN and the main process runs as root INSIDE this confined container —
 # which is the whole point of the split (root+NET_ADMIN live here, not in the API).
-RUN apk add --no-cache tini openvpn iproute2
+#
+# MULTI-VPN-FW-001 — `iptables` is REQUIRED, not optional: the helper opens/closes
+# each VPN Server's host firewall rule itself (structured args, no shell). It must
+# be installed explicitly in THIS image; the helper never relies on the host having
+# iptables, and there is no transitive/implicit dependency to fall back on.
+RUN apk add --no-cache tini openvpn iproute2 iptables
 
 WORKDIR /app
 COPY --from=builder /src/node_modules ./node_modules
