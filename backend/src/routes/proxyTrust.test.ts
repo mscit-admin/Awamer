@@ -93,3 +93,56 @@ test("PROXY-AUDIT-001: forged X-Forwarded-For does not poison the audited source
   assert.deepEqual(audits, [UNTRUSTED], "audit must record the trusted resolved IP, not the spoofed header");
   await app.close();
 });
+
+// ---- F1 tighten: private/LAN client is NOT a trusted proxy (default loopback) --
+// App configured with the SECURE PRODUCTION DEFAULT (loopback only). The proxy hop
+// is loopback (Nginx -> 127.0.0.1); the real client is a LAN address that must NOT
+// be treated as a further trusted hop.
+async function makeLoopbackApp(max = 2) {
+  const app = Fastify({ trustProxy: "loopback" });
+  await app.register(rateLimit, { max, timeWindow: "1 minute", keyGenerator: (req) => req.ip });
+  const audits: string[] = [];
+  app.get("/ip", async (req) => ({ ip: req.ip }));
+  app.get("/audit", async (req) => { audits.push(req.ip); return { ip: req.ip }; });
+  (app as unknown as { audits: string[] }).audits = audits;
+  return app;
+}
+const LAN = "10.0.0.50";
+
+test("PROXY-TRUST-LAN-001: a private LAN client is NOT automatically a trusted proxy", async () => {
+  const app = await makeLoopbackApp();
+  // Nginx (loopback) forwards "<attacker XFF>, <real LAN client>". Only loopback is
+  // trusted → walk stops at the LAN client; the attacker's 1.1.1.1 is discarded.
+  const r = await app.inject({ method: "GET", url: "/ip", remoteAddress: "127.0.0.1", headers: { "x-forwarded-for": `1.1.1.1, ${LAN}` } });
+  assert.equal(r.json().ip, LAN, "req.ip must be the real LAN client, never the spoofed left-most XFF");
+  await app.close();
+});
+
+test("PROXY-RATELIMIT-LAN-001: a LAN client cannot rotate X-Forwarded-For to bypass the rate limit", async () => {
+  const app = await makeLoopbackApp(3);
+  let last = 0;
+  for (let i = 1; i <= 6; i++) {
+    const r = await app.inject({ method: "GET", url: "/ip", remoteAddress: "127.0.0.1", headers: { "x-forwarded-for": `${i}.${i}.${i}.${i}, ${LAN}` } });
+    last = r.statusCode;
+  }
+  assert.equal(last, 429, "rotating the attacker XFF must not create new identities — same LAN client keeps one bucket");
+  await app.close();
+});
+
+test("PROXY-AUDIT-LAN-001: a LAN client cannot poison the audited source IP by rotating headers", async () => {
+  const app = await makeLoopbackApp(50);
+  for (const spoof of ["7.7.7.7", "8.8.8.8", "9.9.9.9"]) {
+    await app.inject({ method: "GET", url: "/audit", remoteAddress: "127.0.0.1",
+      headers: { "x-forwarded-for": `${spoof}, ${LAN}`, "x-real-ip": spoof, forwarded: `for=${spoof}` } });
+  }
+  const audits = (app as unknown as { audits: string[] }).audits;
+  assert.deepEqual(audits, [LAN, LAN, LAN], "every audited IP must be the real LAN client, not the rotated spoof");
+  await app.close();
+});
+
+test("PROXY-NGINX-001: legitimate Nginx path yields the real client IP (unit model)", async () => {
+  const app = await makeLoopbackApp();
+  const r = await app.inject({ method: "GET", url: "/ip", remoteAddress: "127.0.0.1", headers: { "x-forwarded-for": "198.51.100.7" } });
+  assert.equal(r.json().ip, "198.51.100.7");
+  await app.close();
+});

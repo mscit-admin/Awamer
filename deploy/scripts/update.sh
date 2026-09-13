@@ -42,6 +42,13 @@ cd "$ROOT"
 
 # shellcheck source=lib/evidence.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/evidence.sh"
+# shellcheck source=lib/trustproxy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/trustproxy.sh"
+
+# Docker names (see docker-compose.production.yml): the auth-service container and
+# the network it attaches to — used to discover the proxy gateway (PROXY-DEPLOY-001).
+AUTH_CONTAINER="${AUTH_CONTAINER:-netsphere-auth}"
+INTERNAL_NETWORK="${INTERNAL_NETWORK:-netsphere-internal}"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 err() { printf '\033[0;31m==> ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -63,6 +70,37 @@ ensure_vpn_helper_secret() {
   say "Added a generated VPN_HELPER_SECRET to $ENV_FILE (value not shown)."
 }
 ensure_vpn_helper_secret
+
+# --- SEC-PROXY-001: tighten a known-broad TRUST_PROXY default (F1 upgrade) ---
+# An earlier build shipped the generated default `TRUST_PROXY=loopback, uniquelocal`,
+# which trusts private/LAN addresses as proxy hops (a LAN client could spoof
+# X-Forwarded-For). Migrate ONLY that exact generated default down to `loopback`.
+# A value an administrator has explicitly customized is NEVER overwritten — it is
+# left intact and a warning is recorded so the operator can review it. If the key
+# is absent entirely, the code default (loopback) already applies; add it
+# explicitly for clarity. No secrets are involved here.
+ensure_trust_proxy_default() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  local cur
+  cur="$(grep -E '^TRUST_PROXY=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
+  if [[ -z "${cur+x}" || -z "$(grep -E '^TRUST_PROXY=' "$ENV_FILE" || true)" ]]; then
+    printf 'TRUST_PROXY=loopback\n' >> "$ENV_FILE"; chmod 600 "$ENV_FILE"
+    say "Set TRUST_PROXY=loopback in $ENV_FILE (secure default)."
+    return 0
+  fi
+  # Normalize spacing for the comparison ("loopback, uniquelocal" == "loopback,uniquelocal").
+  local norm; norm="$(printf '%s' "$cur" | tr -d '[:space:]' | tr 'A-Z' 'a-z')"
+  if [[ "$norm" == "loopback,uniquelocal" ]]; then
+    # Replace only the old generated broad default with the tightened one.
+    sed -i 's/^TRUST_PROXY=.*/TRUST_PROXY=loopback/' "$ENV_FILE"; chmod 600 "$ENV_FILE"
+    say "Migrated the old broad TRUST_PROXY default ('loopback, uniquelocal') to 'loopback' (SEC-PROXY-001)."
+  elif printf '%s' "$norm" | grep -qE '(true|false|\*|0\.0\.0\.0/0|::/0|uniquelocal|linklocal|10\.0\.0\.0/8|172\.16\.0\.0/12|192\.168\.0\.0/16|/([0-9]|1[0-6])(,|$))'; then
+    say "WARNING: TRUST_PROXY in $ENV_FILE is broad ('${cur}'). Review it — trust ONLY exact reverse-proxy addresses (e.g. 'loopback,172.20.0.1/32'), not whole private ranges. Left unchanged (custom value preserved)."
+  else
+    say "TRUST_PROXY already customized ('${cur}') — preserved unchanged."
+  fi
+}
+ensure_trust_proxy_default
 
 # --- DEPLOY-PORT-001: preserve the HTTPS port across updates (§25/§50) ---
 # The persisted deployment config is the source of truth for domain + port.
@@ -153,6 +191,26 @@ if [ "$BACKEND_CHANGED" -eq 1 ]; then
   done
 else
   say "No backend changes — skipping container rebuild."
+fi
+
+# 2b) PROXY-DEPLOY-001 — now that the stack is up and the Docker network exists,
+# discover the ACTUAL proxy gateway (the peer Fastify sees behind the host Nginx)
+# and set TRUST_PROXY to an EXACT host route (loopback,<gw>/32[,<gw6>/128]). This
+# fails closed (keeps loopback) if the gateway can't be determined, never trusts a
+# private range, and preserves an administrator-customized value. If it changes the
+# effective value, recreate ONLY auth-service so it reloads (no PG/VPN/secret churn).
+TP_BEFORE="$(tp_env_get "$ENV_FILE")"
+TP_STATUS="$(tp_configure_env "$ENV_FILE" "$AUTH_CONTAINER" "$INTERNAL_NETWORK" say)"
+TP_AFTER="$(tp_env_get "$ENV_FILE")"
+if [ "$TP_BEFORE" != "$TP_AFTER" ]; then
+  say "TRUST_PROXY changed ('${TP_BEFORE}' -> '${TP_AFTER}') — recreating auth-service to apply."
+  "${DC[@]}" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d auth-service
+  say "Verifying backend readiness after TRUST_PROXY update…"
+  for i in $(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8081/readyz >/dev/null 2>&1; then say "Backend ready (effective TRUST_PROXY=${TP_AFTER})."; break; fi
+    sleep 2
+    [ "$i" -eq 30 ] && { echo "Backend did not become READY after TRUST_PROXY update"; exit 1; }
+  done
 fi
 
 # 3) Always rebuild + publish the frontend.

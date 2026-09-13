@@ -290,6 +290,23 @@ for i in {1..30}; do
     sleep 1
 done
 
+# PROXY-DEPLOY-001 — the stack is up and the Docker network exists; discover the
+# actual proxy gateway (the peer Fastify sees behind the host Nginx) and set
+# TRUST_PROXY to an EXACT host route (loopback,<gw>/32[,<gw6>/128]). Fails closed
+# to loopback (never a private range) if it can't be determined; preserves an
+# admin-customized value. Recreate ONLY auth-service if the value changed.
+# shellcheck source=lib/trustproxy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/trustproxy.sh"
+export TP_DOCKER="sudo docker"
+_tp_before="$(tp_env_get .env.production)"
+tp_configure_env .env.production "netsphere-auth" "netsphere-internal" say >/dev/null || true
+_tp_after="$(tp_env_get .env.production)"
+if [[ "$_tp_before" != "$_tp_after" ]]; then
+    say "  TRUST_PROXY set to '${_tp_after}' — recreating auth-service to apply."
+    sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production up -d auth-service
+    for i in {1..30}; do curl -sf http://127.0.0.1:8081/readyz >/dev/null 2>&1 && { ok "Backend ready with effective TRUST_PROXY"; break; }; sleep 1; done
+fi
+
 # Capture container + migration + health evidence from the running stack.
 run_cmd READY "$EV_F_DOCKER" "docker compose ps" -- \
     sudo docker compose -f deploy/docker-compose.production.yml ps || true

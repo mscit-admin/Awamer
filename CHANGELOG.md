@@ -9,6 +9,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — PROXY-DEPLOY-001: dynamic Docker-gateway proxy trust
+
+Deployment integration for the Nginx → Docker → auth-service proxy hop. See
+`FINAL_PROXY_DEPLOY_001_REMEDIATION_REPORT.md`.
+
+### Fixed
+- **Installer/updater now discover the real Docker gateway** and trust it as an
+  **exact host route** (`TRUST_PROXY=loopback,<gw>/32[,<gw6>/128]`). The
+  containerized backend behind the host Nginx sees the Docker bridge gateway as its
+  peer; without trusting it, every client would collapse to the gateway identity.
+  A new sourceable `deploy/scripts/lib/trustproxy.sh` inspects the network the
+  `netsphere-auth` container is actually attached to, validates the gateway, and:
+  fails closed to `loopback` (never a private range) if it can't be determined;
+  **refreshes a stale generated gateway** (no accumulation) via a managed marker;
+  and **preserves an administrator-customized value** (never removes a real
+  reverse-proxy/LB entry; warns on broad values). `install.sh` and `update.sh`
+  apply it after the stack is up and recreate **only** `auth-service`
+  (no PostgreSQL/VPN/secret churn).
+
+### Security
+- Trust is exact `/32` (or `/128`) host routes only — never `uniquelocal`, whole
+  RFC1918 ranges, or `true`. Validated on a **real Docker topology** (real bridge
+  network + NAT + container + host Nginx + two netns clients): the two private/LAN
+  clients resolved to their own IPs (`10.201.1.2` / `10.201.2.2`, not the gateway
+  `172.30.0.1`), forged/rotated `X-Forwarded-For` could not choose `req.ip` or
+  bypass the rate limit, and the audit source IP was the real client. Backend
+  remained published on `127.0.0.1` only. Regression intact: backend unit 263/0,
+  integration 209/0, SSRF-IPV6 + JWT-ALG green, deploy tests (proxy-deploy 11,
+  proxy-trust-upgrade 6, vpn-deploy 11). No app/src changes.
+
+## [Unreleased] — F1 tighten: default TRUST_PROXY=loopback (LAN clients are not proxies)
+
+Follow-up to F1 from independent review. See `FINAL_F1_PROXY_TRUST_FIX_REPORT.md`.
+
+### Fixed
+- **TRUST_PROXY default tightened `loopback, uniquelocal` → `loopback`.** The old
+  default trusted private/LAN addresses as proxy hops, so a LAN client could rotate
+  `X-Forwarded-For` to poison `req.ip` / rate limiting / audit. A private/LAN
+  address is a **client, not a proxy**; extra proxies (a load balancer, a
+  containerized proxy) must be added as **exact** addresses/CIDRs.
+- **Fail-closed TRUST_PROXY validation.** `loadConfig()` now rejects values that
+  trust everyone or nothing (`true`, `false`, `*`, `0.0.0.0/0`, `::/0`, empty) —
+  an invalid trust config throws instead of silently widening to broad trust.
+- **Upgrade migration** (`update.sh`): the exact old generated default
+  `loopback, uniquelocal` is migrated to `loopback`; a missing key is added as
+  `loopback`; an administrator-customized value is preserved (with a WARNING when a
+  broad private range remains). No secrets printed.
+- **Deploy config**: `docker-compose.production.yml` passes
+  `TRUST_PROXY=${TRUST_PROXY:-loopback}`; `.env.production.example` documents the
+  default and the "add only an exact proxy CIDR" rule (incl. the Docker
+  bridge-gateway note).
+
+### Security
+- Verified end-to-end with **real Nginx + real backend**: a non-loopback client
+  (separate netns) rotating `X-Forwarded-For` through nginx could not bypass the
+  login rate limit (429). Regression intact: backend unit 263/0, integration 209/0,
+  SSRF-IPV6-001..012 and JWT-ALG-001..006 green, proxy-trust upgrade test 6/0. No
+  VPN/RBAC/tenant/MFA/session/AI/schema changes.
+
 ## [Unreleased] — F1/F2 + JWT hardening (proxy trust, IPv6 SSRF, HS256 pin)
 
 Three scoped security fixes from the production penetration review. See
