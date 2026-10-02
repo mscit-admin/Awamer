@@ -4,8 +4,6 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import multipart from "@fastify/multipart";
-import swagger from "@fastify/swagger";
-import swaggerUi from "@fastify/swagger-ui";
 import { v4 as uuid } from "uuid";
 
 import { loadConfig } from "./config/index.js";
@@ -37,6 +35,8 @@ import { resolveTrustedBaseUrl, assertResetEmailBaseUrl } from "./usecases/publi
 import { PasswordResetRepository } from "./repos/passwordResetRepo.js";
 import { MailService } from "./email/mailer.js";
 import { makePasswordResetRoutes } from "./routes/passwordReset.js";
+import { assertLeastPrivilegeRuntime } from "./db/runtimeRole.js";
+import { RELEASE } from "./version.js";
 import { configureRemoteDestinationPolicy } from "./usecases/remoteDestination.js";
 import { makeSmtpRoutes } from "./routes/smtp.js";
 import { makeSessionSettingsRoutes } from "./routes/sessionSettings.js";
@@ -93,6 +93,9 @@ async function main() {
   const cfg = loadConfig();
   const log = createLogger(cfg);
   const pool = await createPool(cfg, log);
+  // DB-LEAST-PRIVILEGE: production refuses to run as the superuser or the
+  // migration owner (no silent fallback to a privileged account).
+  await assertLeastPrivilegeRuntime(pool, { isProd: cfg.isProd, allowPrivileged: cfg.env.DB_ALLOW_PRIVILEGED_RUNTIME }, log);
 
   const argon2 = createArgon2(cfg);
   const jwt = createJwt(cfg);
@@ -260,10 +263,14 @@ async function main() {
 
   // OpenAPI docs (opt-in). Registered before the routes so it captures them;
   // browsable at /docs. Off by default so the API surface isn't exposed in prod.
+  // GO-LIVE: imported lazily so production (which refuses ENABLE_API_DOCS in
+  // loadConfig) never even loads @fastify/swagger-ui / @fastify/static.
   if (cfg.env.ENABLE_API_DOCS) {
+    const { default: swagger } = await import("@fastify/swagger");
+    const { default: swaggerUi } = await import("@fastify/swagger-ui");
     await app.register(swagger, {
       openapi: {
-        info: { title: "Awamer Terminal API", version: "1.8.0" },
+        info: { title: "Awamer Terminal API", version: RELEASE.version },
         components: {
           securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
         },
@@ -276,6 +283,12 @@ async function main() {
   // Liveness: the process itself is up. MUST NOT depend on PostgreSQL, so an
   // orchestrator doesn't kill a healthy process during a transient DB blip.
   app.get("/healthz", async () => ({ status: "ok" }));
+  // GO-LIVE traceability: non-sensitive release identity (version, commit,
+  // build date only — no paths/env/infrastructure). Public, like /healthz, so
+  // operators and the About screen can confirm exactly which build is running.
+  app.get("/api/v1/version", async () => ({
+    version: RELEASE.version, commit: RELEASE.commit, build_date: RELEASE.buildDate,
+  }));
   // Readiness (STAB-001): only "ready" when the DB actually answers, so traffic
   // isn't routed to an instance that can't serve it. Recovers automatically
   // when the DB returns (no restart needed).
@@ -355,7 +368,7 @@ async function main() {
   process.once("SIGTERM", closeOn("SIGTERM"));
 
   await app.listen({ host: cfg.env.AUTH_HTTP_HOST, port: cfg.env.AUTH_HTTP_PORT });
-  log.info({ host: cfg.env.AUTH_HTTP_HOST, port: cfg.env.AUTH_HTTP_PORT }, "auth-service listening");
+  log.info({ host: cfg.env.AUTH_HTTP_HOST, port: cfg.env.AUTH_HTTP_PORT, release: RELEASE }, "auth-service listening");
 }
 
 /**

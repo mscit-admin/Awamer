@@ -109,6 +109,11 @@ const envSchema = z.object({
   // surface, so enable it deliberately — e.g. in staging/dev).
   ENABLE_API_DOCS: z.string().optional().transform((v) => v === "true"),
 
+  // DB-LEAST-PRIVILEGE: emergency override ONLY — lets production start while
+  // DATABASE_URL is still an over-privileged role (superuser / migration
+  // owner). Logged as an error on every start; never set it in a normal deploy.
+  DB_ALLOW_PRIVILEGED_RUNTIME: z.string().optional().transform((v) => v === "true"),
+
   // CORS
   CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:1420,tauri://localhost,https://tauri.localhost"),
 
@@ -200,6 +205,38 @@ function pgPort(dbUrl: string): number {
   try { return Number(new URL(dbUrl).port) || 5432; } catch { return 5432; }
 }
 
+/**
+ * GO-LIVE production hardening (fail closed at startup):
+ *  - API docs (Swagger UI) are development-only — they enumerate the admin API
+ *    surface and pull in @fastify/static; production refuses ENABLE_API_DOCS.
+ *  - CORS: credentials are allowed, so no wildcard, no "null", and no plain-http
+ *    web origin (http://tauri.localhost — the Windows Tauri origin — excepted).
+ *  - The vpn-helper IPC secret must be present and high-entropy-length.
+ */
+export function assertProductionHardening(env: {
+  ENABLE_API_DOCS?: boolean; CORS_ALLOWED_ORIGINS: string; VPN_HELPER_SECRET?: string;
+}): void {
+  if (env.ENABLE_API_DOCS) {
+    throw new Error("ENABLE_API_DOCS must not be enabled in production (API docs are development-only)");
+  }
+  const origins = env.CORS_ALLOWED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean);
+  if (origins.length === 0) throw new Error("CORS_ALLOWED_ORIGINS must list at least one origin in production");
+  for (const o of origins) {
+    if (o === "*" || o.toLowerCase() === "null" || o.includes("*")) {
+      throw new Error(`CORS_ALLOWED_ORIGINS: wildcard/null origin "${o}" is not allowed in production`);
+    }
+    if (/^http:\/\//i.test(o) && o.toLowerCase() !== "http://tauri.localhost") {
+      throw new Error(`CORS_ALLOWED_ORIGINS: plain-http origin "${o}" is not allowed in production (use https)`);
+    }
+    if (!/^(https:\/\/|tauri:\/\/|http:\/\/tauri\.localhost$)/i.test(o)) {
+      throw new Error(`CORS_ALLOWED_ORIGINS: unsupported origin "${o}" in production`);
+    }
+  }
+  if (!env.VPN_HELPER_SECRET || env.VPN_HELPER_SECRET.length < 32) {
+    throw new Error("VPN_HELPER_SECRET is required in production and must be at least 32 characters");
+  }
+}
+
 export function loadConfig(): Config {
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
@@ -219,6 +256,7 @@ export function loadConfig(): Config {
     // AWM-CFG-001: never let production bootstrap a Super Admin with the dev
     // default or any weak/placeholder password. Fail closed before startup.
     assertProductionBootstrapPassword(env.BOOTSTRAP_ADMIN_PASSWORD);
+    assertProductionHardening(env);
   }
 
   // SEC-RESET-001: if a public base URL is provided, it MUST be a valid, safe

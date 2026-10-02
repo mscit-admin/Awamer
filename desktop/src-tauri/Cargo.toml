@@ -1,6 +1,6 @@
 [package]
 name = "netsphere-terminal"
-version = "1.7.0"
+version = "1.8.0"
 description = "Awamer Terminal — Enterprise Remote Administration"
 authors = ["Awamer Team"]
 edition = "2021"
@@ -27,8 +27,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1.0"
 
 # Phase 3 — SSH
-russh = "0.45"
-russh-keys = "0.45"
+# 0.63: SECURITY (RUSTSEC-2026-0153/0154 fixed in >=0.60.3); keys are now
+# `russh::keys` (the separate russh-keys crate is no longer used).
+russh = "0.63"
 bytes = "1.7"
 async-trait = "0.1"
 uuid = { version = "1.10", features = ["v4"] }

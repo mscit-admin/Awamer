@@ -65,20 +65,20 @@ static SESSIONS: Lazy<Mutex<HashMap<String, SftpSessionState>>> =
 // ---------------------------------------------------------------------
 
 #[derive(Clone)]
-struct ClientHandler {
-    host: String,
-    port: u16,
+pub(crate) struct ClientHandler {
+    pub(crate) host: String,
+    pub(crate) port: u16,
 }
 
-#[async_trait::async_trait]
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::keys::key::PublicKey,
+        presented: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         use crate::commands::known_hosts::{self, VerifyOutcome};
+        let server_public_key = &crate::commands::ssh_auth::presented_host_key(presented);
 
         let store_arc = known_hosts::STORE.clone();
         let mut guard = store_arc.lock().await;
@@ -189,49 +189,18 @@ pub async fn sftp_connect(args: SftpConnectArgs) -> Result<SftpConnectResult, Ap
     // Authenticate
     let auth_ok = match &auth {
         ResolvedAuth::Password(pw) => {
-            handle.authenticate_password(&username, pw).await
+            crate::commands::ssh_auth::authenticate_with_password(&mut handle, &username, pw).await
                 .map_err(|e| AppError::new("sftp_auth_failed", format!("authenticate: {e}")))?
         }
         ResolvedAuth::PrivateKey { pem, passphrase } => {
-            let key = russh_keys::decode_secret_key(pem, passphrase.as_deref())
-                .map_err(|e| {
-                    let code = if let russh_keys::Error::KeyIsEncrypted = e {
-                        "key_passphrase_required"
-                    } else if matches!(e, russh_keys::Error::CouldNotReadKey) {
-                        "key_invalid_passphrase"
-                    } else {
-                        "key_decode_failed"
-                    };
-                    AppError::new(code, format!("decode key: {e}"))
-                })?;
-            handle.authenticate_publickey(&username, Arc::new(key)).await
+            let key = crate::commands::ssh_auth::decode_private_key(pem, passphrase.as_deref())?;
+            crate::commands::ssh_auth::authenticate_with_key(&mut handle, &username, key).await
                 .map_err(|e| AppError::new("sftp_auth_failed", format!("authenticate: {e}")))?
         }
         ResolvedAuth::SshAgent => {
             let sock = std::env::var("SSH_AUTH_SOCK").map_err(|_|
                 AppError::new("ssh_agent_unavailable", "SSH_AUTH_SOCK is not set"))?;
-            let mut agent = russh_keys::agent::client::AgentClient::connect_uds(&sock).await
-                .map_err(|e| AppError::new("ssh_agent_connect_failed",
-                    format!("ssh-agent connect: {e}")))?;
-            let identities = agent.request_identities().await
-                .map_err(|e| AppError::new("ssh_agent_query_failed",
-                    format!("list identities: {e}")))?;
-            if identities.is_empty() {
-                return Err(AppError::new("ssh_agent_no_identities", "ssh-agent has no keys loaded"));
-            }
-            let mut ok = false;
-            for ident in &identities {
-                let (agent_back, result) =
-                    handle.authenticate_future(&username, ident.clone(), agent).await;
-                agent = agent_back;
-                match result {
-                    Ok(true) => { ok = true; break; }
-                    Ok(false) => {}
-                    Err(e) => return Err(AppError::new("ssh_agent_auth_failed",
-                        format!("authenticate via agent: {e}"))),
-                }
-            }
-            ok
+            crate::commands::ssh_auth::authenticate_with_agent(&mut handle, &username, &sock).await?
         }
     };
     if !auth_ok {

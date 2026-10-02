@@ -11,6 +11,11 @@ WORKDIR /src
 # SEC-RELEASE-001: install EXACTLY the audited lockfile (reproducible build;
 # a plain `npm install` would re-resolve ^ranges at build time).
 COPY package.json package-lock.json ./
+# GO-LIVE traceability: the image tag (APP_VERSION) must equal package.json.
+ARG APP_VERSION=""
+RUN if [ -n "$APP_VERSION" ] && [ "$APP_VERSION" != "$(node -p "require('./package.json').version")" ]; then \
+      echo "APP_VERSION=$APP_VERSION does not match package.json $(node -p "require('./package.json').version")" >&2; exit 1; \
+    fi
 COPY tsconfig.json ./
 RUN npm ci --no-audit --no-fund
 
@@ -22,6 +27,17 @@ RUN npm prune --omit=dev
 
 # =====================================================
 FROM node:20-alpine
+
+# Release identity (non-sensitive): exposed by GET /api/v1/version and OCI labels.
+ARG APP_VERSION=""
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.title="awamer" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+ENV GIT_COMMIT=${GIT_COMMIT} \
+    BUILD_DATE=${BUILD_DATE}
 
 # SEC-INFRA-001 — the Internet-facing backend is UNPRIVILEGED. It does NOT
 # contain the openvpn binary and never spawns OpenVPN: all privileged VPN work is

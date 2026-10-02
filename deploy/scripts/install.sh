@@ -239,9 +239,34 @@ else
     warn "Existing .env.production found, NOT regenerating"
 fi
 
+# DB-LEAST-PRIVILEGE upgrade path: an .env.production from an older release has
+# no per-role DB passwords. Generate any missing one IN PLACE (mode 600, value
+# never printed); db-provision then creates/updates the roles on `up`.
+for v in AWAMER_MIGRATOR_DB_PASSWORD AWAMER_APP_DB_PASSWORD AWAMER_VPN_AUTH_DB_PASSWORD; do
+    if ! grep -q "^${v}=." .env.production; then
+        ( umask 077; printf '%s=%s\n' "$v" "$(openssl rand -hex 32)" >> .env.production )
+        say "  Added ${v} to .env.production (generated, not displayed)"
+    fi
+done
+chmod 600 .env.production
+
+# GO-LIVE traceability: the image tag must be the release being deployed
+# (the Dockerfile refuses a tag that differs from backend/package.json).
+_pkg_ver="$(node -p "require('./backend/package.json').version" 2>/dev/null || true)"
+if [[ -n "$_pkg_ver" ]]; then
+    if grep -q '^APP_VERSION=' .env.production; then
+        sed -i "s/^APP_VERSION=.*/APP_VERSION=${_pkg_ver}/" .env.production
+    else
+        printf 'APP_VERSION=%s\n' "$_pkg_ver" >> .env.production
+    fi
+    say "  Release version: ${_pkg_ver}"
+fi
+export GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+export BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
 # Validate required vars
 MISSING=()
-for v in POSTGRES_PASSWORD REDIS_PASSWORD JWT_ACCESS_SECRET JWT_REFRESH_SECRET CREDENTIAL_ENCRYPTION_KEY VPN_HELPER_SECRET BOOTSTRAP_ADMIN_PASSWORD; do
+for v in POSTGRES_PASSWORD REDIS_PASSWORD JWT_ACCESS_SECRET JWT_REFRESH_SECRET CREDENTIAL_ENCRYPTION_KEY VPN_HELPER_SECRET BOOTSTRAP_ADMIN_PASSWORD AWAMER_MIGRATOR_DB_PASSWORD AWAMER_APP_DB_PASSWORD AWAMER_VPN_AUTH_DB_PASSWORD; do
     if ! grep -q "^${v}=." .env.production || grep -q "^${v}=CHANGE_ME" .env.production; then
         MISSING+=("$v")
     fi
@@ -311,12 +336,12 @@ fi
 run_cmd READY "$EV_F_DOCKER" "docker compose ps" -- \
     sudo docker compose -f deploy/docker-compose.production.yml ps || true
 _ev_kv_set docker_containers "$(sudo docker compose -f deploy/docker-compose.production.yml ps --services 2>/dev/null | tr '\n' ' ')"
-# Migration evidence (§13, §14): the backend runs migrations on startup; scrape
-# the (sanitized) migration lines from its logs — never dumps data.
-sudo docker compose -f deploy/docker-compose.production.yml logs auth-service 2>/dev/null \
-    | grep -iE 'migrat' | ev_log_block "$EV_F_MIGRATIONS" "migration lines from auth-service logs" || true
-_mig_start=$(sudo docker compose -f deploy/docker-compose.production.yml logs auth-service 2>/dev/null | grep -ioE 'applying migration[^0-9]*[0-9]+' | head -n1 | grep -oE '[0-9]+' || echo "?")
-_mig_end=$(sudo docker compose -f deploy/docker-compose.production.yml logs auth-service 2>/dev/null | grep -ioE 'applying migration[^0-9]*[0-9]+' | tail -n1 | grep -oE '[0-9]+' || echo "?")
+# Migration evidence (§13, §14): the one-shot `migrate` service applies the
+# migrations as the schema owner; scrape its (sanitized) log lines — never data.
+sudo docker compose -f deploy/docker-compose.production.yml logs migrate 2>/dev/null \
+    | grep -iE 'migrat' | ev_log_block "$EV_F_MIGRATIONS" "migration lines from the migrate job" || true
+_mig_start=$(sudo docker compose -f deploy/docker-compose.production.yml logs migrate 2>/dev/null | grep -ioE 'applying migration[^0-9]*[0-9]+' | head -n1 | grep -oE '[0-9]+' || echo "?")
+_mig_end=$(sudo docker compose -f deploy/docker-compose.production.yml logs migrate 2>/dev/null | grep -ioE 'applying migration[^0-9]*[0-9]+' | tail -n1 | grep -oE '[0-9]+' || echo "?")
 _ev_kv_set migration_start "$_mig_start"
 _ev_kv_set migration_end "$_mig_end"
 _ev_kv_set migration_result "$([[ $_ready -eq 1 ]] && echo PASS || echo UNKNOWN)"

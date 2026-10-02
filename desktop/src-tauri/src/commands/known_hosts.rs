@@ -40,8 +40,7 @@ use std::sync::Arc;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use once_cell::sync::Lazy;
-use russh::keys::key::PublicKey;
-use russh_keys::PublicKeyBase64;
+use russh::keys::PublicKey;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
@@ -186,7 +185,7 @@ impl KnownHostsStore {
         let label = if port == 22 { host.to_string() } else { format!("[{}]:{}", host, port) };
         let entry = KnownHostEntry {
             label,
-            algo: key.name().to_string(),
+            algo: key.algorithm().as_str().to_string(),
             key_b64: encode_public_key(key),
         };
         self.entries.push(entry);
@@ -287,7 +286,7 @@ fn encode_public_key(key: &PublicKey) -> String {
     // `PublicKeyBase64::public_key_base64()` returns the base64 of the
     // SSH wire-format bytes — exactly what OpenSSH writes after the algo
     // name in known_hosts.
-    key.public_key_base64()
+    crate::commands::ssh_auth::public_key_base64(key)
 }
 
 /// SHA256 fingerprint in the OpenSSH format: "SHA256:<base64 no padding>".

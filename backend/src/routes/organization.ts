@@ -223,7 +223,7 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
       // role.company_id == user's (destination) company.
       const mine = new Set(permissionsFor(req.auth!.role));
       // Validate an explicitly supplied destination role.
-      let newRole: string | undefined = p.data.role;
+      const newRole: string | undefined = p.data.role;
       if (newRole !== undefined) {
         const t = deps.roleService.tenantOf(newRole);
         if (!t) return err(reply, 400, "invalid_role", "unknown role");

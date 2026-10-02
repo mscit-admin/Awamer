@@ -42,6 +42,12 @@ cat <<EOF
 POSTGRES_USER=netsphere
 POSTGRES_PASSWORD=$(generate_hex 32)
 POSTGRES_DB=netsphere
+# DB-LEAST-PRIVILEGE: POSTGRES_USER is the cluster ADMIN, used only by the
+# one-shot db-provision job and backups. The services use these three roles
+# (created by deploy/db/provision-roles.sh). Hex = URL-safe; all must differ.
+AWAMER_MIGRATOR_DB_PASSWORD=$(generate_hex 32)
+AWAMER_APP_DB_PASSWORD=$(generate_hex 32)
+AWAMER_VPN_AUTH_DB_PASSWORD=$(generate_hex 32)
 
 REDIS_PASSWORD=$(generate_hex 32)
 

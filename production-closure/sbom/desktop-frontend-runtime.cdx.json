@@ -1,0 +1,1735 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:44666e3c-4ae2-47c7-b57a-42f99f21ae38",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-10-02T10:55:29.752Z",
+    "lifecycles": [
+      {
+        "phase": "build"
+      }
+    ],
+    "tools": [
+      {
+        "vendor": "npm",
+        "name": "cli",
+        "version": "10.9.4"
+      }
+    ],
+    "component": {
+      "bom-ref": "netsphere-terminal-desktop@1.8.0",
+      "type": "library",
+      "name": "desktop",
+      "version": "1.8.0",
+      "scope": "required",
+      "description": "Awamer Terminal — desktop client",
+      "purl": "pkg:npm/netsphere-terminal-desktop@1.8.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": ""
+        },
+        {
+          "name": "cdx:npm:package:private",
+          "value": "true"
+        }
+      ],
+      "externalReferences": []
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "@monaco-editor/loader@1.7.0",
+      "type": "library",
+      "name": "@monaco-editor/loader",
+      "version": "1.7.0",
+      "scope": "required",
+      "author": "Suren Atoyan",
+      "description": "the library aims to setup monaco editor into your browser",
+      "purl": "pkg:npm/%40monaco-editor/loader@1.7.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@monaco-editor/loader"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@monaco-editor/loader/-/loader-1.7.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/suren-atoyan/monaco-loader.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/suren-atoyan/monaco-loader.git"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/suren-atoyan/monaco-loader/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "808c11d47ac9aebc7ebdfc8e858982674fc9716a86e646df1bbf9dddffc2d4b5e4d84bf301b1d2837310e653b6b0c968f62ce8019d38b21a217ca2d54fa72b54"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@monaco-editor/react@4.7.0",
+      "type": "library",
+      "name": "@monaco-editor/react",
+      "version": "4.7.0",
+      "scope": "required",
+      "author": "Suren Atoyan",
+      "description": "Monaco Editor for React - use the monaco-editor in any React application without needing to use webpack (or rollup/parcel/etc) configuration files / plugins",
+      "purl": "pkg:npm/%40monaco-editor/react@4.7.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@monaco-editor/react"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@monaco-editor/react/-/react-4.7.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/suren-atoyan/monaco-react.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/suren-atoyan/monaco-react#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/suren-atoyan/monaco-react/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "732cd7402b4ee3bc9dcf1a50b42192406382f069376547815c50310fe0965d8168e4ea99c995289c59740f05254f201f4479ed05fc36a77c38b3d47aa1ed5e08"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@novnc/novnc@1.7.0",
+      "type": "library",
+      "name": "@novnc/novnc",
+      "version": "1.7.0",
+      "scope": "required",
+      "author": "Joel Martin",
+      "description": "An HTML5 VNC client",
+      "purl": "pkg:npm/%40novnc/novnc@1.7.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@novnc/novnc"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@novnc/novnc/-/novnc-1.7.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/novnc/noVNC.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/novnc/noVNC"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/novnc/noVNC/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "b9c1093b1e13d9abc844295ea1d93b6286d98f93b619ad8078b7d0ebd03fca31bd1c76dadbe3c38304a437716db6b986fbbd191b1db5b0494d168b8ad77473c8"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MPL-2.0"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@remix-run/router@1.23.4",
+      "type": "library",
+      "name": "@remix-run/router",
+      "version": "1.23.4",
+      "scope": "required",
+      "author": "Remix Software",
+      "description": "Nested/Data-driven/Framework-agnostic Routing",
+      "purl": "pkg:npm/%40remix-run/router@1.23.4",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@remix-run/router"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@remix-run/router/-/router-1.23.4.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/remix-run/react-router.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/remix-run/react-router#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/remix-run/react-router/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "abb8f981e2bbc6cdd4252766f7f8b2b5435c9419cb998c7512749e0855c73debad76a80831e15e1ed519812dc48652b1741100bbc3b0b490b098bac4ce94aced"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@tanstack/query-core@5.100.14",
+      "type": "library",
+      "name": "@tanstack/query-core",
+      "version": "5.100.14",
+      "scope": "required",
+      "author": "tannerlinsley",
+      "description": "The framework agnostic core that powers TanStack Query",
+      "purl": "pkg:npm/%40tanstack/query-core@5.100.14",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@tanstack/query-core"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@tanstack/query-core/-/query-core-5.100.14.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/TanStack/query.git"
+        },
+        {
+          "type": "website",
+          "url": "https://tanstack.com/query"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/TanStack/query/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e57e35746a7181e6872120915b6a18c1c4b27197942d9cc0ba76ae7574fda2fd4a3938fdc70b74087ea16f0a8fd7fcfbe19585eeb6059c3a72607d3b5c57197b"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@tanstack/react-query@5.100.14",
+      "type": "library",
+      "name": "@tanstack/react-query",
+      "version": "5.100.14",
+      "scope": "required",
+      "author": "tannerlinsley",
+      "description": "Hooks for managing, caching and syncing asynchronous and remote data in React",
+      "purl": "pkg:npm/%40tanstack/react-query@5.100.14",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@tanstack/react-query"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.100.14.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/TanStack/query.git"
+        },
+        {
+          "type": "website",
+          "url": "https://tanstack.com/query"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/TanStack/query/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a0eafa691752144c16873c44903ffd65c22d337f8b8c14a479599a7562b052cb001d3b2a77fedb3a35ab5f801bbc4928121800c733745e4e87fda6335e260103"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@tauri-apps/api@2.11.0",
+      "type": "library",
+      "name": "@tauri-apps/api",
+      "version": "2.11.0",
+      "scope": "required",
+      "description": "Tauri API definitions",
+      "purl": "pkg:npm/%40tauri-apps/api@2.11.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@tauri-apps/api"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@tauri-apps/api/-/api-2.11.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/tauri-apps/tauri.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/tauri-apps/tauri#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/tauri-apps/tauri/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "ec28a760e0e1932f6598edb7c479d416fd17b78ddf6ed58ccb165c2dc44194591c8172ae122ac1bc7a66b49f3d60c87278672adb45ae738ec56b85e3ca78b2c0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ]
+    },
+    {
+      "bom-ref": "@tauri-apps/plugin-shell@2.3.5",
+      "type": "library",
+      "name": "@tauri-apps/plugin-shell",
+      "version": "2.3.5",
+      "scope": "required",
+      "purl": "pkg:npm/%40tauri-apps/plugin-shell@2.3.5",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@tauri-apps/plugin-shell"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@tauri-apps/plugin-shell/-/plugin-shell-2.3.5.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/tauri-apps/plugins-workspace.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/tauri-apps/plugins-workspace#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/tauri-apps/plugins-workspace/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "8dec2d50b86243b948efea3008a02373cb582c9afdd94d7a6cf39e01ae3bd8b1c97606a26cb3fcdcd71f005d9efb0904700e77171290019edbc83cecd9e7a2ce"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ]
+    },
+    {
+      "bom-ref": "@tauri-apps/plugin-store@2.4.3",
+      "type": "library",
+      "name": "@tauri-apps/plugin-store",
+      "version": "2.4.3",
+      "scope": "required",
+      "description": "Simple, persistent key-value store.",
+      "purl": "pkg:npm/%40tauri-apps/plugin-store@2.4.3",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@tauri-apps/plugin-store"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@tauri-apps/plugin-store/-/plugin-store-2.4.3.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/tauri-apps/plugins-workspace.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/tauri-apps/plugins-workspace#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/tauri-apps/plugins-workspace/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f4b58f8fdc8ca61462f5ccc4b54bfced71db9756fac6077d117a4fad49eaea71bbfa76eda05f387782b0cfdc6102ffc77f7d2caf9f29abb10e97223ddfacbcab"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ]
+    },
+    {
+      "bom-ref": "@xmldom/xmldom@0.8.15",
+      "type": "library",
+      "name": "@xmldom/xmldom",
+      "version": "0.8.15",
+      "scope": "required",
+      "description": "A pure JavaScript W3C standard-based (XML DOM Level 2 Core) DOMParser and XMLSerializer module.",
+      "purl": "pkg:npm/%40xmldom/xmldom@0.8.15",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@xmldom/xmldom"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@xmldom/xmldom/-/xmldom-0.8.15.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git://github.com/xmldom/xmldom.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/xmldom/xmldom"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/xmldom/xmldom/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "ff9355fef0c02d51435e02e67eccbd4d108194ac0ed8b341173a73bdbf62223fa347e79273a0cb618bd539d8af4ff8e6eccb54e9379b62e466cc4388ef0e3450"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@xterm/addon-fit@0.10.0",
+      "type": "library",
+      "name": "@xterm/addon-fit",
+      "version": "0.10.0",
+      "scope": "required",
+      "author": "The xterm.js authors",
+      "purl": "pkg:npm/%40xterm/addon-fit@0.10.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@xterm/addon-fit"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@xterm/addon-fit/-/addon-fit-0.10.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/xtermjs/xterm.js.git#master"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/xtermjs/xterm.js/tree/master#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/xtermjs/xterm.js/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "5056240e6e0751a85fda59c4c87be2a39d5334688b2baea6a8fd89a004f2ee14597976863110ebd34262485ee6eb7bd1e562804c5eb4e721208092acc3426931"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@xterm/addon-web-links@0.11.0",
+      "type": "library",
+      "name": "@xterm/addon-web-links",
+      "version": "0.11.0",
+      "scope": "required",
+      "author": "The xterm.js authors",
+      "purl": "pkg:npm/%40xterm/addon-web-links@0.11.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@xterm/addon-web-links"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@xterm/addon-web-links/-/addon-web-links-0.11.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/xtermjs/xterm.js.git#master"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/xtermjs/xterm.js/tree/master#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/xtermjs/xterm.js/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "9c81d0dfca5023e6b99179d1693830a921e75fb284ebee1256871ea26a601cbdbaba703175f3fa20fa944d260f4204b0339ea1b0495fa0daeb5b957b054103fd"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "@xterm/xterm@5.5.0",
+      "type": "library",
+      "name": "@xterm/xterm",
+      "version": "5.5.0",
+      "scope": "required",
+      "description": "Full xterm terminal, in your browser",
+      "purl": "pkg:npm/%40xterm/xterm@5.5.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@xterm/xterm"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@xterm/xterm/-/xterm-5.5.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/xtermjs/xterm.js.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/xtermjs/xterm.js#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/xtermjs/xterm.js/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "86a24761a41be4ea6d36e9e7c809e41f233c6828d9d4c1080d342ed6221b6d30ffc68a6cf75341e72ab564afdd0b62436d55ad176df352d97d244d8dab04fcec"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "clsx@2.1.1",
+      "type": "library",
+      "name": "clsx",
+      "version": "2.1.1",
+      "scope": "required",
+      "author": "Luke Edwards",
+      "description": "A tiny (239B) utility for constructing className strings conditionally.",
+      "purl": "pkg:npm/clsx@2.1.1",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/clsx"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/lukeed/clsx.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/lukeed/clsx#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/lukeed/clsx/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "7989b441606d52b0566561b4777f3a386030d7a67df793e2395a3607b6e35926c779d1a5e5ed1959aabae6438681448d7ac1080e407d2126d383f24af5d84264"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "fflate@0.7.5",
+      "type": "library",
+      "name": "fflate",
+      "version": "0.7.5",
+      "scope": "required",
+      "author": "Arjun Barrett",
+      "description": "High performance (de)compression in an 8kB package",
+      "purl": "pkg:npm/fflate@0.7.5",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/fflate"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/fflate/-/fflate-0.7.5.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/101arrowz/fflate.git"
+        },
+        {
+          "type": "website",
+          "url": "https://101arrowz.github.io/fflate"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/101arrowz/fflate/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "4227987fffdc8aceb2c07362e6a5b5f8f5cf4386c2f9754902d4b801720c2fc3fbe86ae81223b19bfa10b67d5fd36524258d7e2ac5cc25c0be476bff120e06de"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "hash-wasm@4.12.0",
+      "type": "library",
+      "name": "hash-wasm",
+      "version": "4.12.0",
+      "scope": "required",
+      "author": "Dani Biró",
+      "description": "Lightning fast hash functions for browsers and Node.js using hand-tuned WebAssembly binaries (MD4, MD5, SHA-1, SHA-2, SHA-3, Keccak, BLAKE2, BLAKE3, PBKDF2, Argon2, bcrypt, scrypt, Adler-32, CRC32, CRC32C, RIPEMD-160, HMAC, xxHash, SM3, Whirlpool)",
+      "purl": "pkg:npm/hash-wasm@4.12.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/hash-wasm"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/hash-wasm/-/hash-wasm-4.12.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/Daninet/hash-wasm.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/Daninet/hash-wasm#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/Daninet/hash-wasm/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "fbfd81dab60b6f8f08fdebdd38884ff8afc30f671ad9f8018e9e8ef860449c20e4d9ee2ba5e5c82bc1af23244f8d37b38265a7f6098ac244238f1e81b6a0c755"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "kdbxweb@2.1.1",
+      "type": "library",
+      "name": "kdbxweb",
+      "version": "2.1.1",
+      "scope": "required",
+      "author": "Antelle",
+      "description": "Kdbx KeePass database reader for web",
+      "purl": "pkg:npm/kdbxweb@2.1.1",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/kdbxweb"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/kdbxweb/-/kdbxweb-2.1.1.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/keeweb/kdbxweb.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/keeweb/kdbxweb#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/keeweb/kdbxweb/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "cfe6b6f81133c8ada4521d310de918ee0c1cf4291bcd27ad532bdcefc34a55ac31574e941b52986e0f56f6164225d40f622cc855e3d3bd0b1851720ed6ab4085"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "loose-envify@1.4.0",
+      "type": "library",
+      "name": "loose-envify",
+      "version": "1.4.0",
+      "scope": "required",
+      "author": "Andres Suarez",
+      "description": "Fast (and loose) selective `process.env` replacer using js-tokens instead of an AST",
+      "purl": "pkg:npm/loose-envify@1.4.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/loose-envify"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/loose-envify/-/loose-envify-1.4.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git://github.com/zertosh/loose-envify.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/zertosh/loose-envify"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/zertosh/loose-envify/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "972bb13c6aff59f86b95e9b608bfd472751cd7372a280226043cee918ed8e45ff242235d928ebe7d12debe5c351e03324b0edfeb5d54218e34f04b71452a0add"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "lucide-react@0.408.0",
+      "type": "library",
+      "name": "lucide-react",
+      "version": "0.408.0",
+      "scope": "required",
+      "author": "Eric Fennis",
+      "description": "A Lucide icon library package for React applications",
+      "purl": "pkg:npm/lucide-react@0.408.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/lucide-react"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.408.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/lucide-icons/lucide.git"
+        },
+        {
+          "type": "website",
+          "url": "https://lucide.dev"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/lucide-icons/lucide/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f2411300079698ebed188afb1cf1e6e750d7a3195f90d9dc43915959747e69b5fcb1a4303185c035622452cb5a62d70a4a8fe298e7bfabeb55140f0037375254"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "monaco-editor@0.50.0",
+      "type": "library",
+      "name": "monaco-editor",
+      "version": "0.50.0",
+      "scope": "required",
+      "author": "Microsoft Corporation",
+      "description": "A browser based code editor",
+      "purl": "pkg:npm/monaco-editor@0.50.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/monaco-editor"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/monaco-editor/-/monaco-editor-0.50.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/microsoft/monaco-editor.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/microsoft/monaco-editor"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/microsoft/monaco-editor/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f027252c29ab45187eb2e97b0b4f0198f04fdcff305567c11e89ac4dc9ddc60e4d44210f7eefe673600653c937eda8e30d55dc5c5735d8e44031492693e96414"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "qrcode.react@4.2.0",
+      "type": "library",
+      "name": "qrcode.react",
+      "version": "4.2.0",
+      "scope": "required",
+      "author": "Paul O’Shannessy",
+      "description": "React component to generate QR codes",
+      "purl": "pkg:npm/qrcode.react@4.2.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/qrcode.react"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/qrcode.react/-/qrcode.react-4.2.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/zpao/qrcode.react.git"
+        },
+        {
+          "type": "website",
+          "url": "http://zpao.github.io/qrcode.react"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/zpao/qrcode.react/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "42982a5a2f2b0fd0ec4bd10fdf3ec14fee6563948586ca868e9816e4363f8b798ae0cf434c1373dc4acc8bc0566047c8dcbd1df0621b1a671d1404b5b884468c"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "react@18.3.1",
+      "type": "library",
+      "name": "react",
+      "version": "18.3.1",
+      "scope": "required",
+      "description": "React is a JavaScript library for building user interfaces.",
+      "purl": "pkg:npm/react@18.3.1",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/react"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/react/-/react-18.3.1.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/facebook/react.git"
+        },
+        {
+          "type": "website",
+          "url": "https://reactjs.org/"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/facebook/react/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "c12fa1020252851d0a844bcf240adfb8f54dd7e1f3d6dd18ea7e632eb1906e46f8bab80f13fd11bdefb590c075bffa16807826e1621c57e8bb176a53563fb689"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "react-dom@18.3.1",
+      "type": "library",
+      "name": "react-dom",
+      "version": "18.3.1",
+      "scope": "required",
+      "description": "React package for working with the DOM.",
+      "purl": "pkg:npm/react-dom@18.3.1",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/react-dom"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/react-dom/-/react-dom-18.3.1.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/facebook/react.git"
+        },
+        {
+          "type": "website",
+          "url": "https://reactjs.org/"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/facebook/react/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e66e2740aa7ead945bd3d2cd1f9f463380714e1f76e75ff295b2886e97bb4e91b17c9fbd92fe812e42c15c88e3b296e06e720136a948db7b519d3593d2c9d423"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "react-hook-form@7.76.1",
+      "type": "library",
+      "name": "react-hook-form",
+      "version": "7.76.1",
+      "scope": "required",
+      "author": "Beier",
+      "description": "Performant, flexible and extensible forms library for React Hooks",
+      "purl": "pkg:npm/react-hook-form@7.76.1",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/react-hook-form"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/react-hook-form/-/react-hook-form-7.76.1.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/react-hook-form/react-hook-form.git"
+        },
+        {
+          "type": "website",
+          "url": "https://react-hook-form.com"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/react-hook-form/react-hook-form/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "ad833bb4f89696ede765c86447f7b1ee98b2cee8b6bc53f268b9d79c8fd19db941fcbe2a7cc9b2b1eb3c965255b45d4da44f56041b09946b5c499ccf0975b5a9"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "react-router@6.30.6",
+      "type": "library",
+      "name": "react-router",
+      "version": "6.30.6",
+      "scope": "required",
+      "author": "Remix Software",
+      "description": "Declarative routing for React",
+      "purl": "pkg:npm/react-router@6.30.6",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/react-router"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/react-router/-/react-router-6.30.6.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/remix-run/react-router.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/remix-run/react-router#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/remix-run/react-router/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e477caee4e629bb2d3381d04a824267efcb80b5dc6f764ac8f55539a8b932b7009bf28ca4e716e095d2f70c003fc94be242e03bc320146b9407892058e1e555a"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "react-router-dom@6.30.6",
+      "type": "library",
+      "name": "react-router-dom",
+      "version": "6.30.6",
+      "scope": "required",
+      "author": "Remix Software",
+      "description": "Declarative routing for React web applications",
+      "purl": "pkg:npm/react-router-dom@6.30.6",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/react-router-dom"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/react-router-dom/-/react-router-dom-6.30.6.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/remix-run/react-router.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/remix-run/react-router#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/remix-run/react-router/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "d111ca673ef0c1f7ef914fb6305553d8d9e32b8e2cb0b115fa6d02009692d8ab26a2baf08fb5b11f4d233b448e096dbafed20d5272474e85db943b37dc8dfc61"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "scheduler@0.23.2",
+      "type": "library",
+      "name": "scheduler",
+      "version": "0.23.2",
+      "scope": "required",
+      "description": "Cooperative scheduler for the browser environment.",
+      "purl": "pkg:npm/scheduler@0.23.2",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/scheduler"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/scheduler/-/scheduler-0.23.2.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/facebook/react.git"
+        },
+        {
+          "type": "website",
+          "url": "https://reactjs.org/"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/facebook/react/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "50e4a1b0fc33ecdacc52a851eadd215a315dbaf3b36edbfbb680c7d7f848adf44d2030679c159dd02c094c6bd3a67815966c0609d3fdfd997fb55ac3a9cb98cd"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "state-local@1.0.7",
+      "type": "library",
+      "name": "state-local",
+      "version": "1.0.7",
+      "scope": "required",
+      "author": "Suren Atoyan",
+      "description": "Tiny, simple, and robust technique for defining and acting with local states",
+      "purl": "pkg:npm/state-local@1.0.7",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/state-local"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/state-local/-/state-local-1.0.7.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/suren-atoyan/state-local.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/suren-atoyan/state-local#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/suren-atoyan/state-local/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "1d310730d89e6a4127a1edf7b21058719ecd5fcdc00948c2bbc738d22386119b27823f7346792a4bd8f5a6a40f5f0a1b07465c553936ed111bec2390d14479f7"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "tailwind-merge@2.6.1",
+      "type": "library",
+      "name": "tailwind-merge",
+      "version": "2.6.1",
+      "scope": "required",
+      "author": "Dany Castillo",
+      "description": "Merge Tailwind CSS classes without style conflicts",
+      "purl": "pkg:npm/tailwind-merge@2.6.1",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/tailwind-merge"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-2.6.1.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/dcastil/tailwind-merge.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/dcastil/tailwind-merge"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/dcastil/tailwind-merge/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "3a8ead1dda59b06a64286f3c1c9f11475ae0fd17671244047cca04936c755d1237175031794fa28d15e9895505e146cb7dcc71446c3a4db50834a61d595b104d"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "use-sync-external-store@1.6.0",
+      "type": "library",
+      "name": "use-sync-external-store",
+      "version": "1.6.0",
+      "scope": "required",
+      "description": "Backwards compatible shim for React's useSyncExternalStore. Works with any React that supports hooks.",
+      "purl": "pkg:npm/use-sync-external-store@1.6.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/use-sync-external-store"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/use-sync-external-store/-/use-sync-external-store-1.6.0.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/facebook/react.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/facebook/react#readme"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/facebook/react/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "3e9e864b018ffcdacf22bc551402243907b2c3c9457a73878a34169144eb0efac5e002eaca53f60bf28291e4bd76950cdcabd84508676b9bedec82fde7e650f7"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "zod@3.25.76",
+      "type": "library",
+      "name": "zod",
+      "version": "3.25.76",
+      "scope": "required",
+      "author": "Colin McDonnell",
+      "description": "TypeScript-first schema declaration and validation library with static type inference",
+      "purl": "pkg:npm/zod@3.25.76",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/zod"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/zod/-/zod-3.25.76.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/colinhacks/zod.git"
+        },
+        {
+          "type": "website",
+          "url": "https://zod.dev"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/colinhacks/zod/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "83352dfeab7cd675ec14628815c0b76277c4031e4d92e9c27e70e5bee0524854b4d9b717bb82e679ad001485306cb5b158fc7777da7c4b94286ae8ca70d43171"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "zustand@4.5.7",
+      "type": "library",
+      "name": "zustand",
+      "version": "4.5.7",
+      "scope": "required",
+      "author": "Paul Henschel",
+      "description": "🐻 Bear necessities for state management in React",
+      "purl": "pkg:npm/zustand@4.5.7",
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/zustand"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/zustand/-/zustand-4.5.7.tgz"
+        },
+        {
+          "type": "vcs",
+          "url": "git+https://github.com/pmndrs/zustand.git"
+        },
+        {
+          "type": "website",
+          "url": "https://github.com/pmndrs/zustand"
+        },
+        {
+          "type": "issue-tracker",
+          "url": "https://github.com/pmndrs/zustand/issues"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "087394cbb9aede56c3ea8e8b24b7e59698e4ce11d7481957f01f7ea8f75d52c21f785e52fd4679ab49260ac9d1a93d541c54197213450c3ccc6d0b2e7ac1d697"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "netsphere-terminal-desktop@1.8.0",
+      "dependsOn": [
+        "@monaco-editor/react@4.7.0",
+        "@novnc/novnc@1.7.0",
+        "@tanstack/react-query@5.100.14",
+        "@tauri-apps/api@2.11.0",
+        "@tauri-apps/plugin-shell@2.3.5",
+        "@tauri-apps/plugin-store@2.4.3",
+        "@xterm/addon-fit@0.10.0",
+        "@xterm/addon-web-links@0.11.0",
+        "@xterm/xterm@5.5.0",
+        "clsx@2.1.1",
+        "hash-wasm@4.12.0",
+        "kdbxweb@2.1.1",
+        "lucide-react@0.408.0",
+        "monaco-editor@0.50.0",
+        "qrcode.react@4.2.0",
+        "react@18.3.1",
+        "react-dom@18.3.1",
+        "react-hook-form@7.76.1",
+        "react-router-dom@6.30.6",
+        "tailwind-merge@2.6.1",
+        "zod@3.25.76",
+        "zustand@4.5.7"
+      ]
+    },
+    {
+      "ref": "@monaco-editor/loader@1.7.0",
+      "dependsOn": [
+        "state-local@1.0.7"
+      ]
+    },
+    {
+      "ref": "@monaco-editor/react@4.7.0",
+      "dependsOn": [
+        "monaco-editor@0.50.0",
+        "react@18.3.1",
+        "react-dom@18.3.1",
+        "@monaco-editor/loader@1.7.0"
+      ]
+    },
+    {
+      "ref": "@novnc/novnc@1.7.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "@remix-run/router@1.23.4",
+      "dependsOn": []
+    },
+    {
+      "ref": "@tanstack/query-core@5.100.14",
+      "dependsOn": []
+    },
+    {
+      "ref": "@tanstack/react-query@5.100.14",
+      "dependsOn": [
+        "react@18.3.1",
+        "@tanstack/query-core@5.100.14"
+      ]
+    },
+    {
+      "ref": "@tauri-apps/api@2.11.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "@tauri-apps/plugin-shell@2.3.5",
+      "dependsOn": [
+        "@tauri-apps/api@2.11.0"
+      ]
+    },
+    {
+      "ref": "@tauri-apps/plugin-store@2.4.3",
+      "dependsOn": [
+        "@tauri-apps/api@2.11.0"
+      ]
+    },
+    {
+      "ref": "@xmldom/xmldom@0.8.15",
+      "dependsOn": []
+    },
+    {
+      "ref": "@xterm/addon-fit@0.10.0",
+      "dependsOn": [
+        "@xterm/xterm@5.5.0"
+      ]
+    },
+    {
+      "ref": "@xterm/addon-web-links@0.11.0",
+      "dependsOn": [
+        "@xterm/xterm@5.5.0"
+      ]
+    },
+    {
+      "ref": "@xterm/xterm@5.5.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "clsx@2.1.1",
+      "dependsOn": []
+    },
+    {
+      "ref": "fflate@0.7.5",
+      "dependsOn": []
+    },
+    {
+      "ref": "hash-wasm@4.12.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "kdbxweb@2.1.1",
+      "dependsOn": [
+        "@xmldom/xmldom@0.8.15",
+        "fflate@0.7.5"
+      ]
+    },
+    {
+      "ref": "loose-envify@1.4.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "lucide-react@0.408.0",
+      "dependsOn": [
+        "react@18.3.1"
+      ]
+    },
+    {
+      "ref": "monaco-editor@0.50.0",
+      "dependsOn": []
+    },
+    {
+      "ref": "qrcode.react@4.2.0",
+      "dependsOn": [
+        "react@18.3.1"
+      ]
+    },
+    {
+      "ref": "react@18.3.1",
+      "dependsOn": [
+        "loose-envify@1.4.0"
+      ]
+    },
+    {
+      "ref": "react-dom@18.3.1",
+      "dependsOn": [
+        "react@18.3.1",
+        "loose-envify@1.4.0",
+        "scheduler@0.23.2"
+      ]
+    },
+    {
+      "ref": "react-hook-form@7.76.1",
+      "dependsOn": [
+        "react@18.3.1"
+      ]
+    },
+    {
+      "ref": "react-router@6.30.6",
+      "dependsOn": [
+        "react@18.3.1",
+        "@remix-run/router@1.23.4"
+      ]
+    },
+    {
+      "ref": "react-router-dom@6.30.6",
+      "dependsOn": [
+        "react@18.3.1",
+        "react-dom@18.3.1",
+        "react-router@6.30.6",
+        "@remix-run/router@1.23.4"
+      ]
+    },
+    {
+      "ref": "scheduler@0.23.2",
+      "dependsOn": [
+        "loose-envify@1.4.0"
+      ]
+    },
+    {
+      "ref": "state-local@1.0.7",
+      "dependsOn": []
+    },
+    {
+      "ref": "tailwind-merge@2.6.1",
+      "dependsOn": []
+    },
+    {
+      "ref": "use-sync-external-store@1.6.0",
+      "dependsOn": [
+        "react@18.3.1"
+      ]
+    },
+    {
+      "ref": "zod@3.25.76",
+      "dependsOn": []
+    },
+    {
+      "ref": "zustand@4.5.7",
+      "dependsOn": [
+        "react@18.3.1",
+        "use-sync-external-store@1.6.0"
+      ]
+    }
+  ]
+}

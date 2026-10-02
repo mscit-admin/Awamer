@@ -1,0 +1,61 @@
+PASS  health: /healthz 200
+PASS  health: /readyz ready (DB connectivity)
+PASS  monitoring: audit_write_failures_total exported and 0  — {"status":"ready","audit_write_failures_total":0}
+PASS  traceability: /api/v1/version reports the release  — {"version":"1.8.0","commit":"4e5d4bd4ecf382d13aa2bb880063de779d9a0aaa","build_date":"2026-10-02T11:25:03Z"}
+PASS  traceability: commit id present  — 4e5d4bd4ecf382d13aa2bb880063de779d9a0aaa
+PASS  traceability: response has ONLY version/commit/build_date
+PASS  api-docs: /docs not served in production
+PASS  auth: bootstrap super_admin login  — status 200
+PASS  auth: /users/me as super_admin
+PASS  rbac: super_admin effective permissions include settings:manage + companies:manage
+PASS  users: super_admin creates a user  — status 201
+PASS  mfa: enrolment without step-up is refused
+PASS  mfa: enrolment with step-up  — status 200
+PASS  mfa: activation  — status 204
+PASS  session: pre-MFA access token invalidated by the MFA change
+PASS  mfa: login now requires the second factor
+PASS  REGRESSION mfa-token-confusion: challenge token is NOT a session  — status 401
+PASS  mfa: wrong code rejected
+PASS  mfa: correct code completes login  — status 200
+PASS  mfa: same TOTP code cannot be replayed  — status 401
+PASS  session: token refresh
+PASS  session: rotated refresh token cannot be reused
+PASS  session: logout
+PASS  session: refresh after logout is rejected
+PASS  tenants: super_admin creates companies A and B
+PASS  tenants: users provisioned in A and B
+PASS  REGRESSION smtp-authorization: company admin cannot change global SMTP
+PASS  rbac: company admin cannot change global branding
+PASS  REGRESSION super-admin-protection: company admin cannot reset the super_admin's password
+PASS  rbac: company admin cannot mint a role holding settings:manage
+PASS  rbac: company admin cannot grant super_admin
+PASS  rbac: company admin manages its own users
+PASS  tenant: Admin-A cannot read User-B
+PASS  rbac: user cannot use user administration
+PASS  rbac: readonly cannot create resources
+PASS  rbac: auditor cannot create resources
+PASS  rbac: auditor reads the (company-scoped) audit log
+PASS  rbac: user cannot read the audit log
+PASS  credentials: create (encrypted at rest)  — status 201
+PASS  credentials: metadata read does not return the secret
+PASS  credentials: owner reveal (credentials:reveal)
+PASS  tenant: User-B cannot read Company-A credential
+PASS  ssh: host created  — status 201
+PASS  ssh: interactive session via the WebSocket gateway (auth, TOFU, shell I/O)
+PASS  tenant: User-B cannot open Company-A's SSH host
+PASS  REGRESSION remote-ssrf: loopback destination denied  — destination_denied
+PASS  REGRESSION remote-ssrf: cloud metadata destination denied  — destination_denied
+PASS  REGRESSION vpn-file-access: .ovpn file-path directive rejected  — {"code":"vpn_unsafe_config","message":"OpenVPN config contains a disallowed directive: \"auth-user-pass\""}
+PASS  REGRESSION vpn-injection: script directive rejected
+PASS  vpn: valid client profile accepted  — status 201
+PASS  vpn: config reveal (vpn:reveal)
+PASS  tenant: User-B cannot read Company-A VPN profile
+PASS  REGRESSION vpn-injection: VPN-server cipher injection rejected
+PASS  audit: 'login_success' recorded
+PASS  audit: 'login_failed' recorded
+PASS  audit: 'mfa_enroll' recorded
+PASS  audit: 'credential_read' recorded
+PASS  audit: 'user_update' recorded
+PASS  audit: 'config_change' recorded
+PASS  monitoring: no audit write failures during the smoke run
+{"total":60,"passed":60,"failed":0,"failures":[]}

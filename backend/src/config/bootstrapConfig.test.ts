@@ -13,6 +13,9 @@ const PROD_BASE: Record<string, string> = {
   JWT_ACCESS_SECRET: "prod_access_secret_aaaaaaaaaaaaaaaaaaaaaaaa",
   JWT_REFRESH_SECRET: "prod_refresh_secret_bbbbbbbbbbbbbbbbbbbbbbbb",
   LOG_LEVEL: "error",
+  // GO-LIVE hardening also requires a production CORS list and helper secret.
+  CORS_ALLOWED_ORIGINS: "https://awamer.example.com,tauri://localhost,https://tauri.localhost",
+  VPN_HELPER_SECRET: "h".repeat(64),
 };
 
 /** Run loadConfig with a controlled process.env, restoring it afterward. */

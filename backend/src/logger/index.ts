@@ -28,21 +28,54 @@ const REDACT_PATHS = [
   "password_hash", "*.password_hash",
   "otp", "*.otp",
   "config", "*.config", // VPN .ovpn config text
+  // GO-LIVE logging review: token / secret field names used by the auth, MFA,
+  // reset and step-up flows, raw headers, and DB connection strings.
+  "authorization", "*.authorization",
+  "cookie", "*.cookie", "headers.cookie", "headers[\"set-cookie\"]", "*.headers[\"set-cookie\"]",
+  "req.headers[\"x-step-up-token\"]", "headers[\"x-step-up-token\"]",
+  "refresh_token", "*.refresh_token",
+  "access_token", "*.access_token",
+  "mfa_token", "*.mfa_token", "mfaToken", "*.mfaToken",
+  "mfa_code", "*.mfa_code",
+  "step_up_token", "*.step_up_token", "stepUpToken", "*.stepUpToken",
+  "reset_token", "*.reset_token", "resetToken", "*.resetToken",
+  "ticket", "*.ticket",
+  "secret_enc", "*.secret_enc", "secretEnc", "*.secretEnc",
+  "databaseUrl", "*.databaseUrl", "DATABASE_URL", "*.DATABASE_URL",
+  "connectionString", "*.connectionString",
 ];
+
+/** Drop the query string: one-time tickets / reset tokens can ride in it. */
+export function redactUrl(url: unknown): unknown {
+  return typeof url === "string" ? url.split("?")[0] : url;
+}
+
+/**
+ * Request serializer: method + path only (no query string, no headers, no
+ * body). Fastify logs `{ req }` on every request; this keeps one-time tokens
+ * in query strings (VNC ticket, reset link) out of the logs.
+ */
+function reqSerializer(req: { method?: string; url?: string; id?: unknown }) {
+  return { id: req.id, method: req.method, url: redactUrl(req.url) };
+}
+
+/** Shared pino options (exported for the redaction regression test). */
+export function loggerOptions(cfg: Config): pino.LoggerOptions {
+  return {
+    level: cfg.env.LOG_LEVEL,
+    base: cfg.isProd ? { service: "auth-service", env: cfg.env.APP_ENV } : { service: "auth-service" },
+    ...(cfg.isProd ? { timestamp: pino.stdTimeFunctions.isoTime } : {}),
+    redact: { paths: REDACT_PATHS, censor: "[redacted]" },
+    serializers: { req: reqSerializer },
+  };
+}
 
 export function createLogger(cfg: Config): Logger {
   if (cfg.isProd) {
-    return pino({
-      level: cfg.env.LOG_LEVEL,
-      base: { service: "auth-service", env: cfg.env.APP_ENV },
-      timestamp: pino.stdTimeFunctions.isoTime,
-      redact: { paths: REDACT_PATHS, censor: "[redacted]" },
-    });
+    return pino(loggerOptions(cfg));
   }
   return pino({
-    level: cfg.env.LOG_LEVEL,
-    base: { service: "auth-service" },
-    redact: { paths: REDACT_PATHS, censor: "[redacted]" },
+    ...loggerOptions(cfg),
     transport: {
       target: "pino-pretty",
       options: {

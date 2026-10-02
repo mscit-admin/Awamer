@@ -141,7 +141,7 @@ export function LoginPage() {
 
         <div className="mt-10 pt-6 border-t border-border">
           <p className="text-xs text-fg-subtle font-mono">
-            v1.0.0 · phase 1 foundation
+            v{__APP_VERSION__}
           </p>
         </div>
         </div>
