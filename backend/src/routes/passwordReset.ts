@@ -11,6 +11,8 @@ import { DomainError } from "../domain/index.js";
 
 interface Deps {
   reset: PasswordResetUseCase;
+  /** Per-IP requests/minute (SEC-RATE-001: same budget as /login). */
+  rateMax?: number;
 }
 
 // SEC-RESET-001: request headers (Origin/Referer/Host/X-Forwarded-*) are
@@ -20,8 +22,10 @@ interface Deps {
 export function makePasswordResetRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     const forgotSchema = z.object({ email: z.string().email() });
+    // SEC-RATE-001: mail-bombing / enumeration / token-guessing throttle.
+    const limited = { config: { rateLimit: { max: deps.rateMax ?? 10, timeWindow: "1 minute" } } };
 
-    app.post("/forgot-password", async (req, reply) => {
+    app.post("/forgot-password", limited, async (req, reply) => {
       const parsed = forgotSchema.safeParse(req.body);
       // Always respond 200 — never reveal whether the email exists (and never
       // reveal whether reset is unavailable). Errors are swallowed here.
@@ -36,7 +40,7 @@ export function makePasswordResetRoutes(deps: Deps): FastifyPluginAsync {
       password: z.string().min(8).max(256),
     });
 
-    app.post("/reset-password", async (req, reply) => {
+    app.post("/reset-password", limited, async (req, reply) => {
       const parsed = resetSchema.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });

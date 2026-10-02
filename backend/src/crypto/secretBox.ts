@@ -152,7 +152,10 @@ export function createSecretBox(key: Buffer): SecretBox {
     const iv = Buffer.from(env.iv, "base64");
     const tag = Buffer.from(env.tag, "base64");
     const ct = Buffer.from(env.ct, "base64");
-    const decipher = createDecipheriv(ALGO, key, iv);
+    // Require the full 128-bit GCM tag: Node otherwise accepts truncated
+    // (4..16-byte) tags, weakening authentication of stored secrets.
+    if (tag.length !== 16) throw new Error("secretBox: invalid authentication tag length");
+    const decipher = createDecipheriv(ALGO, key, iv, { authTagLength: 16 });
     decipher.setAuthTag(tag);
     const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
     const parsed = JSON.parse(pt.toString("utf8"));

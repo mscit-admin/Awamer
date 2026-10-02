@@ -6,7 +6,7 @@ import type { MFAUseCase } from "../usecases/mfa.js";
 import type { UserRepository } from "../repos/userRepo.js";
 import type { JwtService } from "../jwt/index.js";
 import type { User } from "../domain/index.js";
-import { DomainError } from "../domain/index.js";
+import { DomainError, isAccountLocked } from "../domain/index.js";
 import { permissionsFor } from "../domain/permissions.js";
 import { makeAuthMiddleware } from "../middleware/auth.js";
 import { isWebClient, setRefreshCookie, clearRefreshCookie, readRefreshCookie } from "./authCookies.js";
@@ -22,6 +22,8 @@ interface Deps {
   loginRateMax: number;
   /** Max-Age for the browser HttpOnly refresh cookie (SEC-019). */
   refreshCookieMaxAgeSec: number;
+  /** Live remote sessions to terminate on logout-all (SEC-LOGOUT-ALL-001). */
+  sessions?: Pick<import("../session/activeSessions.js").ActiveSessionManager, "revokeUser">;
 }
 
 export function userView(u: User) {
@@ -121,7 +123,7 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
       const mfaToken = auth.slice("Bearer ".length);
 
       let claims;
-      try { claims = await deps.jwt.verifyAccess(mfaToken); }
+      try { claims = await deps.jwt.verifyMfaPending(mfaToken); }
       catch { return reply.code(401).send({ error: { code: "invalid_mfa_token", message: "" } }); }
 
       if (claims.role !== "mfa_pending") {
@@ -133,9 +135,21 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       }
 
+      // SEC-MFA-BRUTE-001: a (temporarily) locked or disabled account gets no
+      // further code guesses, whatever IP they come from.
+      let pending;
+      try { pending = await deps.users.getById(claims.sub); }
+      catch { return reply.code(401).send({ error: { code: "invalid_mfa_token", message: "" } }); }
+      if (!pending.isActive) return reply.code(403).send({ error: { code: "account_inactive", message: "account is disabled" } });
+      if (isAccountLocked(pending, new Date())) {
+        return reply.code(403).send({ error: { code: "account_locked", message: "too many failed attempts; try again later" } });
+      }
+
+      const ua = String(req.headers["user-agent"] ?? "");
       try {
         await deps.mfa.verifyCode(claims.sub, parsed.data.code);
       } catch {
+        await deps.login.recordMfaFailure(claims.sub, req.ip, ua);
         return reply.code(401).send({ error: { code: "invalid_code", message: "invalid mfa code" } });
       }
 
@@ -178,6 +192,8 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
     // Revoke every active session for the authenticated user.
     app.post("/logout-all", { preHandler: makeAuthMiddleware(deps.jwt, deps.users) }, async (req, reply) => {
       await deps.refresh.logoutAll(req.auth!.sub, req.ip, String(req.headers["user-agent"] ?? ""));
+      // "Sign out everywhere" must also evict an attacker's already-open shell.
+      deps.sessions?.revokeUser(req.auth!.sub, "AUTHORIZATION_CHANGED");
       clearRefreshCookie(reply);
       return reply.code(204).send();
     });

@@ -37,7 +37,7 @@ function makeDeps(opts: {
   const refresh = {
     async get(_jti: string) { return session; },
     async insert(_r: any) { state.inserted++; },
-    async markRotated(_a: string, _b: string) { state.rotated++; },
+    async markRotated(_a: string, _b: string) { state.rotated++; return true; },
     async revokeAllForUser(_id: string) { state.revokedAll++; },
   };
   const audit = { async log(e: any) { state.audits.push(e); } };

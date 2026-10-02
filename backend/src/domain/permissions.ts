@@ -31,6 +31,7 @@ export const PERMISSIONS = [
   "vpn:reveal",         // read a VPN profile's decrypted config + credentials
   "vpn_server:manage",  // run OpenVPN server instances + manage their users
   "network:diagnose",   // SEC-NET-001: ping/traceroute/DNS/port-check/LAN scan
+  "settings:manage",    // super-admin: installation-wide settings (SMTP, branding, session policy)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -54,12 +55,17 @@ export const PERMISSION_META: Record<Permission, { label: string; description: s
   "vpn:reveal":         { label: "Reveal VPN config", description: "Read a VPN profile's decrypted OpenVPN config and credentials (needed to launch a tunnel)" },
   "vpn_server:manage":  { label: "Manage VPN server", description: "Run OpenVPN server instances on this host, manage their users, and issue client profiles" },
   "network:diagnose":   { label: "Network diagnostics", description: "Run network diagnostics (ping, traceroute, DNS, port check, LAN scan) — Admins only, not standard users" },
+  "settings:manage":    { label: "Manage instance settings", description: "Change installation-wide settings shared by every company (SMTP / password-reset email, branding, SSH session policy) — Super Admin only" },
 };
 
 const ALL: Permission[] = [...PERMISSIONS];
-// Company (tenant) management is a Super-Admin-only, cross-company capability;
-// regular admins get everything else, scoped to their own company.
-const ADMIN_ALL: Permission[] = ALL.filter((p) => p !== "companies:manage");
+// Company (tenant) management and installation-wide settings are
+// Super-Admin-only, cross-company capabilities; regular admins get everything
+// else, scoped to their own company. (`settings:manage` — SEC-INSTANCE-001: the
+// SMTP relay carries every tenant's password-reset links, so a company admin
+// must not control it.)
+export const GLOBAL_ONLY_PERMISSIONS: readonly Permission[] = ["companies:manage", "settings:manage"];
+const ADMIN_ALL: Permission[] = ALL.filter((p) => !GLOBAL_ONLY_PERMISSIONS.includes(p));
 
 /** Seed definitions for the built-in roles (also the static fallback matrix). */
 export const BUILTIN_ROLES: { key: string; name: string; description: string; permissions: Permission[] }[] = [

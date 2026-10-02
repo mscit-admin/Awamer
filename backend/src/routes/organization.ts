@@ -189,6 +189,15 @@ export function makeOrganizationRoutes(deps: Deps): FastifyPluginAsync {
       try { target = await deps.users.getById(id); }
       catch { return err(reply, 404, "not_found", "user not found"); }
       if (!mayTouch(s, target.companyId ?? "")) return err(reply, 404, "not_found", "user not found");
+      // SEC-TARGET-CEILING-001: never demote / move a user who holds a
+      // permission the actor lacks (e.g. a users:manage helpdesk role demoting
+      // its company admin, or an admin moving a co-located super_admin).
+      {
+        const actorPerms = new Set(permissionsFor(req.auth!.role));
+        if (!permissionsFor(target.role).every((perm) => actorPerms.has(perm))) {
+          return err(reply, 403, "forbidden", "that user holds privileges you do not have");
+        }
+      }
 
       // Determine the destination company. Non-super admins can only assign
       // within their own company (so they can never perform a cross-company

@@ -8,9 +8,11 @@ RUN apk add --no-cache python3 make g++
 
 WORKDIR /src
 
-COPY package.json ./
+# SEC-RELEASE-001: install EXACTLY the audited lockfile (reproducible build;
+# a plain `npm install` would re-resolve ^ranges at build time).
+COPY package.json package-lock.json ./
 COPY tsconfig.json ./
-RUN npm install --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 
 COPY src ./src
 RUN npm run build

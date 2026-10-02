@@ -2,18 +2,20 @@
  * Branding — instance app name + logo, editable from the UI.
  *
  *   GET  /api/v1/branding   public (needed on the login screen)
- *   PUT  /api/v1/branding   admin / super_admin
+ *   PUT  /api/v1/branding   settings:manage (Super Admin — installation-wide, SEC-INSTANCE-001)
  */
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import type { AppSettingsRepository } from "../repos/appSettings.js";
 import type { JwtService } from "../jwt/index.js";
-import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
+import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
+import type { AuditRepository } from "../repos/otherRepos.js";
 
 interface Deps {
   settings: AppSettingsRepository;
   jwt: JwtService;
   users: import("../repos/userRepo.js").UserRepository;
+  audit: AuditRepository;
 }
 
 const KEY_NAME = "app_name";
@@ -55,7 +57,7 @@ export function makeBrandingRoutes(deps: Deps): FastifyPluginAsync {
 
     app.put(
       "/",
-      { bodyLimit: MAX_BODY, preHandler: [makeAuthMiddleware(deps.jwt, deps.users), requireRole("admin", "super_admin")] },
+      { bodyLimit: MAX_BODY, preHandler: [makeAuthMiddleware(deps.jwt, deps.users), requirePermission("settings:manage")] },
       async (req, reply) => {
         const parsed = putSchema.safeParse(req.body);
         if (!parsed.success) {
@@ -73,6 +75,10 @@ export function makeBrandingRoutes(deps: Deps): FastifyPluginAsync {
         if (parsed.data.favicon !== undefined) await deps.settings.set(KEY_FAVICON, parsed.data.favicon || null);
         if (parsed.data.login_image !== undefined) await deps.settings.set(KEY_LOGIN_IMAGE, parsed.data.login_image || null);
         if (parsed.data.terminal_watermark !== undefined) await deps.settings.set(KEY_TERMINAL_WATERMARK, parsed.data.terminal_watermark || null);
+        await deps.audit.log({
+          userId: req.auth!.sub, action: "config_change", resourceType: "branding", success: true,
+          ipAddress: req.ip, details: { op: "branding_update", fields: Object.keys(parsed.data).filter((k) => (parsed.data as Record<string, unknown>)[k] !== undefined) },
+        });
         return reply.send(view(await deps.settings.getMany(KEYS)));
       },
     );

@@ -127,6 +127,16 @@ const envSchema = z.object({
   NETWORK_DIAGNOSTIC_ALLOWED_CIDRS: z.string().optional(),
   NETWORK_DIAGNOSTIC_DENY_CIDRS: z.string().optional(),
 
+  // SEC-REMOTE-DEST-001 — remote-session destinations (SSH/SFTP/Telnet/VNC and
+  // the SSH hop of tunnels). Private/internal hosts are ALWAYS allowed (that is
+  // the product); link-local/cloud-metadata, unspecified and multicast are
+  // ALWAYS denied. Loopback (the backend's own host/container) is denied unless
+  // explicitly enabled. DENY_CIDRS adds IPv4 ranges to refuse, e.g. the Docker
+  // network holding PostgreSQL: REMOTE_SESSION_DENY_CIDRS=172.18.0.0/16
+  REMOTE_SESSION_ALLOW_LOOPBACK: z.string().optional().transform((v) => v === "true"),
+  REMOTE_SESSION_DENY_CIDRS: z.string().optional(),
+  REMOTE_SESSION_DENY_LOCAL_SUBNETS: z.string().optional().transform((v) => v === "true"),
+
   // SEC-INFRA-001 — privileged VPN helper IPC. The backend never spawns
   // OpenVPN; it talks to the isolated awamer-vpn-helper over this Unix socket,
   // authenticated with a high-entropy shared secret. The secret is REQUIRED in

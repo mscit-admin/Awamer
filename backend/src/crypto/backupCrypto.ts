@@ -57,13 +57,25 @@ export function isEncryptedBackup(v: unknown): v is EncryptedBackup {
 }
 
 export function decryptBackup(enc: EncryptedBackup, passphrase: string): string {
+  // SEC-BACKUP-KDF-001: the KDF parameters come from the UPLOADED file. Feeding
+  // attacker-chosen N/r/p into synchronous scrypt let any backup:manage user
+  // pin the event loop for seconds-to-minutes per request (maxmem caps memory,
+  // not CPU — e.g. a huge `p`). Format v1 has only ever been written with the
+  // constants above, so accept exactly those and nothing else.
+  const kdf = enc?.kdf as Partial<EncryptedBackup["kdf"]> | undefined;
+  if (
+    enc?.version !== 1 || !kdf || kdf.algo !== "scrypt" ||
+    kdf.N !== SCRYPT_N || kdf.r !== SCRYPT_R || kdf.p !== SCRYPT_P || typeof kdf.salt !== "string"
+  ) {
+    throw new BackupDecryptError("unsupported backup encryption parameters");
+  }
   try {
-    const salt = Buffer.from(enc.kdf.salt, "base64");
-    const key = scryptSync(passphrase, salt, KEY_LEN, {
-      N: enc.kdf.N, r: enc.kdf.r, p: enc.kdf.p, maxmem: 64 * 1024 * 1024,
-    });
-    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(enc.iv, "base64"));
-    decipher.setAuthTag(Buffer.from(enc.tag, "base64"));
+    const salt = Buffer.from(kdf.salt, "base64");
+    const key = deriveKey(passphrase, salt);
+    const tag = Buffer.from(enc.tag, "base64");
+    if (tag.length !== 16) throw new Error("bad tag length"); // no truncated GCM tags
+    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(enc.iv, "base64"), { authTagLength: 16 });
+    decipher.setAuthTag(tag);
     const pt = Buffer.concat([decipher.update(Buffer.from(enc.ct, "base64")), decipher.final()]);
     return pt.toString("utf8");
   } catch {

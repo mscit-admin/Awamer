@@ -5,7 +5,7 @@
  * password is encrypted at rest with the credential SecretBox — never returned
  * to clients. Used for the forgot-password flow and an admin "send test" check.
  */
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import type { AppSettingsRepository } from "../repos/appSettings.js";
 import type { SecretBox } from "../crypto/secretBox.js";
 import type { Logger } from "../logger/index.js";
@@ -101,7 +101,7 @@ export class MailService {
     return s[K.baseUrl] ?? "";
   }
 
-  private async transport(): Promise<{ tx: nodemailer.Transporter; from: string } | null> {
+  private async transport(): Promise<{ tx: Transporter; from: string } | null> {
     const s = await this.settings.getMany(KEYS);
     if (!s[K.host] || !s[K.from]) return null;
     let pass: string | undefined;

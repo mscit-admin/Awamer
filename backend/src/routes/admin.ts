@@ -22,6 +22,7 @@ interface Deps {
   jwt: JwtService;
   refresh: RefreshRepository;
   sessions: import("../session/activeSessions.js").ActiveSessionManager;
+  audit: import("../repos/otherRepos.js").AuditRepository;
 }
 
 export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
@@ -49,6 +50,28 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
     const mayGrantRole = (callerRole: string, targetRole: string): boolean => {
       const mine = new Set(permissionsFor(callerRole));
       return permissionsFor(targetRole).every((p) => mine.has(p));
+    };
+
+    // SEC-TARGET-CEILING-001: the actor may only act on (edit, lock, disable,
+    // delete, reset the password of, or strip the MFA of) a user whose CURRENT
+    // permission set is a subset of the actor's own. Without this a company
+    // admin co-located with a super_admin (e.g. every account moved into the
+    // Default company by migration 012) could reset that super_admin's
+    // password / disable its MFA and log in with global `companies:manage`.
+    // 403 (not 404): the target is in scope, the action is not.
+    const mayActOnTarget = (callerRole: string, target: { role: string }): boolean =>
+      mayGrantRole(callerRole, target.role);
+    const targetTooPrivileged = async (
+      req: import("fastify").FastifyRequest,
+      reply: import("fastify").FastifyReply,
+      target: { id: string },
+      op: string,
+    ) => {
+      await deps.audit.log({
+        userId: req.auth!.sub, action: "permission_denied", resourceType: "user", resourceId: target.id,
+        success: false, ipAddress: req.ip, details: { op, reason: "target_privilege_ceiling" },
+      });
+      return reply.code(403).send({ error: { code: "forbidden", message: "that user holds privileges you do not have" } });
     };
 
     // SEC-016 Rule E / SEC-020: a role is assignable to a user in `targetCompany`
@@ -177,6 +200,7 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         const u = await deps.users.getById(idP.data.id);
         const s = await scope(req);
         if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
+        if (!mayActOnTarget(req.auth!.role, u)) return targetTooPrivileged(req, reply, u, "user_update");
         // A custom role must belong to the TARGET user's company (u.companyId),
         // not the actor's — so a super-admin can't assign a foreign-tenant role.
         if (bodyP.data.role !== undefined && !mayAssignRoleTenant(bodyP.data.role, u.companyId)) {
@@ -203,6 +227,16 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
           // (closes all on disable/lock, permission-aware on a role change).
           await deps.sessions.revalidateUser(u.id);
         }
+        await deps.audit.log({
+          userId: req.auth!.sub, action: "user_update", resourceType: "user", resourceId: u.id, success: true,
+          ipAddress: req.ip,
+          details: {
+            fields: Object.keys(bodyP.data).filter((k) => (bodyP.data as Record<string, unknown>)[k] !== undefined),
+            ...(roleChanged ? { prev_role: prevRole, new_role: u.role } : {}),
+            ...(bodyP.data.is_active !== undefined ? { is_active: bodyP.data.is_active } : {}),
+            ...(bodyP.data.is_locked !== undefined ? { is_locked: bodyP.data.is_locked } : {}),
+          },
+        });
         return reply.send(userView(u));
       } catch (e) {
         if (e instanceof DomainError) return reply.code(404).send({ error: { code: e.code, message: e.message } });
@@ -220,7 +254,14 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         const u = await deps.users.getById(parsed.data.id);
         const s = await scope(req);
         if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
+        if (!mayActOnTarget(req.auth!.role, u)) return targetTooPrivileged(req, reply, u, "user_delete");
         await deps.users.delete(parsed.data.id);
+        // The FK sets audit_logs.user_id NULL on delete, so record who the
+        // deleted account was (username/company), not just its id.
+        await deps.audit.log({
+          userId: req.auth!.sub, action: "user_delete", resourceType: "user", resourceId: u.id, success: true,
+          ipAddress: req.ip, details: { username: u.username, company_id: u.companyId, role: u.role },
+        });
         // AWM-SEC-022: no active remote session may survive deletion.
         deps.sessions.revokeUser(parsed.data.id, "USER_DELETED");
         return reply.code(204).send();
@@ -240,6 +281,7 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         const u = await deps.users.getById(idP.data.id);
         const s = await scope(req);
         if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
+        if (!mayActOnTarget(req.auth!.role, u)) return targetTooPrivileged(req, reply, u, "admin_password_reset");
         await deps.changePassword.adminReset(req.auth!.sub, idP.data.id, bodyP.data.password);
         return reply.send({ ok: true });
       } catch (e) {
@@ -259,6 +301,7 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
         const u = await deps.users.getById(idP.data.id);
         const s = await scope(req);
         if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
+        if (!mayActOnTarget(req.auth!.role, u)) return targetTooPrivileged(req, reply, u, "admin_mfa_disable");
         await deps.mfa.adminDisable(req.auth!.sub, idP.data.id);
         return reply.send({ ok: true });
       } catch (e) {

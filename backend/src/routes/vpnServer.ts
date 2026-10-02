@@ -15,7 +15,7 @@ import type { VpnReconfigurationService } from "../vpn/vpnReconfigure.js";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 import { DomainError } from "../domain/index.js";
 import {
-  assembleClientOvpn, toVpnServerPublic, toVpnServerClientPublic,
+  assembleClientOvpn, toVpnServerPublic, toVpnServerClientPublic, VPN_SERVER_CIPHERS,
 } from "../domain/vpnServer.js";
 
 interface Deps {
@@ -93,7 +93,8 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       subnet: z.string().regex(CIDR_RE, "subnet must be CIDR, e.g. 10.8.1.0/24").optional(),
       dns: z.string().max(253).regex(HOST_RE).nullable().optional(),
       client_to_client: z.boolean().optional(),
-      cipher: z.string().max(40).optional(),
+      // SEC-VPN-CFG-001: strict allowlist (was free text → config injection).
+      cipher: z.enum(VPN_SERVER_CIPHERS).optional(),
     });
 
     app.post("/servers", async (req, reply) => {

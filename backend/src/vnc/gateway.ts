@@ -11,6 +11,7 @@
  * VNC password is handled by noVNC on the client.
  */
 import net from "node:net";
+import { resolveRemoteDestination, RemoteDestinationDenied } from "../usecases/remoteDestination.js";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
@@ -81,12 +82,17 @@ export function makeVncGateway(deps: VncGatewayDeps) {
         return closeWs(4404, "host not found");
       }
 
+      // SEC-REMOTE-DEST-001: raw TCP relay — never to metadata/loopback/etc.
+      let targetIp: string;
+      try { targetIp = await resolveRemoteDestination(host.hostname); }
+      catch { return closeWs(4403, "destination not allowed"); }
+
       // Connect to the target VNC server and relay bytes both ways.
       let historyId: number | null = null;
       let bytesIn = 0;
       let bytesOut = 0;
 
-      const sock = net.connect({ host: host.hostname, port: host.port });
+      const sock = net.connect({ host: targetIp, port: host.port });
       sock.setTimeout(20_000);
 
       // AWM-SEC-022: track this session so a later disable/lock/delete/role change

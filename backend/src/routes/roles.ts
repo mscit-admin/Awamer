@@ -12,7 +12,7 @@ import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import type { JwtService } from "../jwt/index.js";
 import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
-import { PERMISSIONS, PERMISSION_META, isPermission, permissionsFor } from "../domain/permissions.js";
+import { PERMISSIONS, PERMISSION_META, isPermission, permissionsFor, GLOBAL_ONLY_PERMISSIONS as GLOBAL_ONLY_PERMISSIONS_LIST } from "../domain/permissions.js";
 import { tenantScopeForActor } from "../domain/tenantScope.js";
 import { isBuiltinRole } from "../domain/index.js";
 import { RoleRepository, RoleNotFound, RoleKeyTaken } from "../repos/roleRepo.js";
@@ -32,7 +32,7 @@ interface Deps {
 // actor who already holds them (in practice, a super-admin). The generic
 // subset ceiling below already blocks these for a normal admin, but naming
 // them explicitly is belt-and-suspenders against a future role misconfiguration.
-const GLOBAL_ONLY_PERMISSIONS = new Set<string>(["companies:manage"]);
+const GLOBAL_ONLY_PERMISSIONS = new Set<string>(GLOBAL_ONLY_PERMISSIONS_LIST);
 
 function slugify(name: string): string {
   return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);

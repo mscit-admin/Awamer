@@ -92,3 +92,25 @@ test("toVpnProfilePublic strips all secret material to presence flags", () => {
   assert.equal("password" in pub, false);
   assert.equal("ovpn" in pub, false);
 });
+
+// SEC-OVPN-FILE-001 — client configs run as root in the HOST-network helper.
+test("OVPN-FILE-001: file read/write, control-channel and route-hijack directives are rejected", () => {
+  for (const line of [
+    "auth-user-pass /proc/self/environ", "ca /etc/shadow", "key /run/awamer/ipc/secret", "tls-auth /etc/x 1",
+    "secret /etc/x", "pkcs12 /root/x.p12", "config /etc/openvpn/other.conf", "askpass /etc/x",
+    "management 0.0.0.0 7505", "management-hold", "log /run/awamer/vpn/x/verify.sh", "log-append /tmp/x",
+    "writepid /run/awamer/ipc/vpn-helper.sock", "status /tmp/x 1", "replay-persist /tmp/x",
+    "redirect-gateway def1", "redirect-private", "http-proxy proxy.example 8080 /etc/passwd",
+  ]) {
+    assert.throws(() => assertSafeOvpnConfig(`client\n${line}\n`), /./, line);
+  }
+});
+
+test("OVPN-FILE-002: legitimate inline / bare forms stay accepted", () => {
+  const ok = [
+    "client", "dev tun", "remote vpn.example.com 1194 udp", "auth-user-pass", "tls-auth [inline] 1",
+    "key-direction 1", "route 10.20.0.0 255.255.0.0", "http-proxy proxy.example 8080",
+    "<ca>", "-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----", "</ca>",
+  ].join("\n");
+  assert.doesNotThrow(() => assertSafeOvpnConfig(ok));
+});

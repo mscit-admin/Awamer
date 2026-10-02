@@ -34,6 +34,7 @@ import { makeTelnetGateway } from "../telnet/gateway.js";
 import { makeWsTunnelGateway } from "../ssh/wsTunnelGateway.js";
 import { makeVncGateway } from "../vnc/gateway.js";
 import { getPool, closePool, dbSkip } from "../test/db.js";
+import { configureRemoteDestinationPolicy } from "../usecases/remoteDestination.js";
 
 const noopLog = { info() {}, warn() {}, error() {}, debug() {}, child() { return noopLog; } } as any;
 const PW = "St4le-T0ken-Str0ng!";
@@ -95,6 +96,9 @@ const telnetTrial = (t: string) => wsTrial("/api/v1/telnet/connect", `host_id=${
 const tunnelTrial = (t: string) => wsTrial("/api/v1/tunnel/connect", `host_id=${HID}&dst_host=127.0.0.1&dst_port=${tcpPort}`, t);
 
 before(async () => {
+  // These suites drive fake servers on 127.0.0.1 — opt in to loopback
+  // destinations (production default denies them, SEC-REMOTE-DEST-001).
+  configureRemoteDestinationPolicy({ allowLoopback: true });
   if (dbSkip) return;
   const cfg = loadConfig();
   jwt = createJwt(cfg);

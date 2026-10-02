@@ -8,10 +8,14 @@ import { useTerminalUi } from "@/modules/sessions/store/terminalUiStore";
 import { useTerminalPaste, type PasteButton } from "@/modules/sessions/store/terminalPastePref";
 import { useLockStore } from "@/modules/auth/store/lockStore";
 import { ApiError } from "@/shared/lib/api";
+import { hasPerm } from "@/shared/lib/permissions";
 
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  // Instance-wide SSH policy: settings:manage (Super Admin), not "any admin".
+  const canInstanceSettings = Array.isArray(user?.permissions)
+    ? hasPerm(user?.permissions, "settings:manage")
+    : user?.role === "super_admin";
 
   return (
     <div className="px-8 py-8 max-w-3xl mx-auto animate-fade-in">
@@ -52,7 +56,7 @@ export function SettingsPage() {
         <TerminalUiSettings />
       </Section>
 
-      {isAdmin && (
+      {canInstanceSettings && (
         <Section title="SSH sessions" icon={<Clock className="size-4" />}>
           <AdminSessionSettings />
         </Section>

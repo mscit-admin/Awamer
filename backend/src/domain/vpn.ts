@@ -116,6 +116,32 @@ const DENIED_OVPN_DIRECTIVES = new Set([
   "tls-crypt-v2-verify", "auth-user-pass-verify", "client-connect",
   "client-disconnect", "learn-address", "plugin", "script-security",
   "setenv-safe", "iproute", "cd", "chroot", "up-restart", "route-noexec",
+  // SEC-OVPN-FILE-001: the config runs as root in the HOST-network vpn-helper.
+  // Deny directives that read/write arbitrary files, open a control channel,
+  // include other configs, or hijack the host's default route.
+  "management", "management-client", "management-client-user", "management-client-group",
+  "management-hold", "management-query-passwords", "management-query-proxy",
+  "management-query-remote", "management-signal", "management-forget-disconnect",
+  "management-up-down", "management-client-auth", "management-client-pf", "management-external-key",
+  "management-external-cert", "management-log-cache",
+  "log", "log-append", "writepid", "status", "replay-persist", "ifconfig-pool-persist",
+  "config", "askpass", "daemon", "tmp-dir", "redirect-gateway", "redirect-private",
+  "auth-gen-token-secret", "http-proxy-user-pass",
+]);
+
+/**
+ * SEC-OVPN-FILE-001 — directives that may take EITHER an inline `<tag>` block
+ * OR a filesystem path. The helper writes only `client.ovpn` (plus its own
+ * auth file), so a legitimate profile can only use the inline form; a path
+ * argument is an attempt to read a local file as root (e.g.
+ * `auth-user-pass /proc/self/environ` would send the helper's environment —
+ * DATABASE_URL, VPN_HELPER_SECRET — to the attacker's VPN server as the
+ * "username"). Bare `auth-user-pass` (prompt via the helper's file) stays OK,
+ * and `[inline]` is the explicit inline marker.
+ */
+const FILE_ARG_DIRECTIVES = new Set([
+  "auth-user-pass", "ca", "cert", "key", "tls-auth", "tls-crypt", "tls-crypt-v2",
+  "secret", "pkcs12", "dh", "crl-verify", "extra-certs", "capath", "http-proxy",
 ]);
 
 /**
@@ -129,9 +155,18 @@ export function assertSafeOvpnConfig(config: string): void {
   for (const rawLine of config.split(/\r?\n/)) {
     const line = rawLine.replace(/[#;].*$/, "").trim();
     if (!line) continue;
-    const directive = line.split(/\s+/)[0]!.toLowerCase().replace(/^-+/, "");
+    const parts = line.split(/\s+/);
+    const directive = parts[0]!.toLowerCase().replace(/^-+/, "");
     if (DENIED_OVPN_DIRECTIVES.has(directive)) {
       throw VpnErrors.UnsafeConfig(directive);
+    }
+    if (FILE_ARG_DIRECTIVES.has(directive) && parts.length > 1) {
+      const arg = parts[1]!;
+      // `http-proxy host port [authfile]` — only a 4th token is a file.
+      const fileArg = directive === "http-proxy" ? parts[3] : arg;
+      if (fileArg !== undefined && fileArg !== "[inline]" && !/^\d+$/.test(fileArg)) {
+        throw VpnErrors.UnsafeConfig(directive);
+      }
     }
   }
 }

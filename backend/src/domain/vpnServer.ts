@@ -92,6 +92,40 @@ export function toVpnServerClientPublic(c: VpnServerClient): VpnServerClientPubl
 const DATA_CIPHERS = "AES-256-GCM:AES-128-GCM";
 const inline = (tag: string, pem: string) => `<${tag}>\n${pem.trim()}\n</${tag}>`;
 
+/**
+ * SEC-VPN-CFG-001 — the ONLY data ciphers a server may be configured with
+ * (mirrors DATA_CIPHERS and the UI's choices). A strict allowlist, not a
+ * sanitiser: the value is interpolated into an OpenVPN config that runs with
+ * `script-security 2` inside the root, host-network vpn-helper, so a newline in
+ * it (e.g. `AES-256-GCM\nup "/bin/sh -c …"`) was a root command injection.
+ */
+export const VPN_SERVER_CIPHERS = ["AES-256-GCM", "AES-128-GCM"] as const;
+export type VpnServerCipher = (typeof VPN_SERVER_CIPHERS)[number];
+export function isVpnServerCipher(s: unknown): s is VpnServerCipher {
+  return typeof s === "string" && (VPN_SERVER_CIPHERS as readonly string[]).includes(s);
+}
+
+const CFG_HOST_RE = /^[A-Za-z0-9._:-]{1,253}$/;
+const CFG_CIDR_RE = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
+
+/**
+ * SEC-VPN-CFG-001 — defence in depth at the single point where structured
+ * values become OpenVPN config text. Runs in BOTH the backend (client .ovpn)
+ * and the vpn-helper (server.conf), so a value that bypassed API validation
+ * (or was stored before it existed) can never inject a directive.
+ */
+function assertSafeConfigScalars(v: {
+  cipher: string; proto: string; port: number; subnet?: string; dns?: string | null; publicHost?: string;
+}): void {
+  const bad = (what: string) => new DomainError("vpn_invalid_config", `invalid VPN ${what}`);
+  if (!isVpnServerCipher(v.cipher)) throw bad("cipher");
+  if (v.proto !== "udp" && v.proto !== "tcp") throw bad("protocol");
+  if (!Number.isInteger(v.port) || v.port < 1 || v.port > 65535) throw bad("port");
+  if (v.subnet !== undefined && !CFG_CIDR_RE.test(v.subnet)) throw bad("subnet");
+  if (v.dns != null && !CFG_HOST_RE.test(v.dns)) throw bad("DNS server");
+  if (v.publicHost !== undefined && !CFG_HOST_RE.test(v.publicHost)) throw bad("public host");
+}
+
 /** Convert a CIDR ("10.8.0.0/24") to OpenVPN's `network netmask` pair. */
 export function cidrToServerLine(cidr: string): string {
   const [net, prefixStr] = cidr.split("/");
@@ -109,6 +143,7 @@ export function assembleClientOvpn(input: {
   caCert: string; clientCert: string; clientKey: string; tlsCrypt: string;
   embedCredentials?: { username: string; password: string };
 }): string {
+  assertSafeConfigScalars({ cipher: input.cipher, proto: input.proto, port: input.port, publicHost: input.publicHost });
   const lines = [
     "client",
     "dev tun",
@@ -141,6 +176,7 @@ export function assembleServerConfig(input: {
   caCert: string; serverCert: string; serverKey: string; tlsCrypt: string;
   verifyCommand: string;
 }): string {
+  assertSafeConfigScalars({ cipher: input.cipher, proto: input.proto, port: input.port, subnet: input.subnet, dns: input.dns });
   const lines = [
     `port ${input.port}`,
     `proto ${input.proto}`,

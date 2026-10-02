@@ -88,7 +88,7 @@ before(async () => {
   // Not exercised by the RBAC tests (only /disable-mfa uses it) — stub it.
   const mfa = {} as unknown as MFAUseCase;
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt, users }), { prefix: "/api/v1/roles" });
-  await app.register(makeAdminRoutes({ sessions, users, register, changePassword, mfa, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
+  await app.register(makeAdminRoutes({ audit, sessions, users, register, changePassword, mfa, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
   await app.ready();
 });
 

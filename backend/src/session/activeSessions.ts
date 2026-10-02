@@ -13,7 +13,7 @@ import { can, type Permission } from "../domain/permissions.js";
 import type { AuthUserSource } from "../middleware/auth.js";
 import type { Logger } from "../logger/index.js";
 
-export type SessionKind = "ssh" | "telnet" | "tunnel" | "vnc";
+export type SessionKind = "ssh" | "telnet" | "tunnel" | "vnc" | "sftp";
 
 export type RevokeReason =
   | "USER_DISABLED"

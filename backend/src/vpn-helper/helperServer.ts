@@ -9,6 +9,7 @@
 import net from "node:net";
 import { chmod } from "node:fs/promises";
 import type { HelperCore } from "./helperCore.js";
+import { isVpnServerCipher } from "../domain/vpnServer.js";
 import {
   verifyRequest, signResponse, NonceCache, HelperAuthError,
   type HelperRequest, type HelperResponse, isValidRef,
@@ -48,6 +49,10 @@ export async function dispatch(core: HelperCore, req: HelperRequest): Promise<Re
       const num = (key: string): number => { const v = p[key]; if (typeof v !== "number" || !Number.isFinite(v)) { const e = new Error(`bad ${key}`) as Error & { code: string }; e.code = "bad_request"; throw e; } return v; };
       const proto = str("proto")!;
       if (proto !== "udp" && proto !== "tcp") { const e = new Error("bad proto") as Error & { code: string }; e.code = "bad_request"; throw e; }
+      // SEC-VPN-CFG-001: the privileged helper does not trust the caller's
+      // scalars — the cipher must be on the allowlist (assembleServerConfig
+      // re-checks every interpolated value as well).
+      if (!isVpnServerCipher(p.cipher)) { const e = new Error("bad cipher") as Error & { code: string }; e.code = "bad_request"; throw e; }
       return await core.serverStart({
         serverId: ref("serverId"), port: num("port"), proto,
         subnet: str("subnet")!, dns: (str("dns", false) ?? null),

@@ -22,6 +22,7 @@ import type { Logger } from "../logger/index.js";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
 import { resolveSshConnection, SshResolveError } from "./resolveAuth.js";
 import { makeHostVerifier, type HostKeyStore } from "./hostKeys.js";
+import { resolveRemoteDestination, RemoteDestinationDenied } from "../usecases/remoteDestination.js";
 import { awaitAuthFrame } from "./gateway.js";
 
 export interface WsTunnelDeps {
@@ -89,6 +90,14 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
       }
       const { host, username, auth } = resolved;
 
+      // SEC-REMOTE-DEST-001: the SSH hop itself is policy-checked (the forwarded
+      // dst is reached FROM the remote server, which is intended pivoting).
+      let targetIp: string;
+      try { targetIp = await resolveRemoteDestination(host.hostname); }
+      catch (e) {
+        return fail("destination_denied", e instanceof RemoteDestinationDenied ? e.message : "destination could not be resolved");
+      }
+
       const conn = new Client();
 
       // AWM-SEC-022: register for active revocation (revoking tunnels:manage,
@@ -130,7 +139,7 @@ export function makeWsTunnelGateway(deps: WsTunnelDeps) {
 
       sendJson(ws, { type: "status", status: "connecting" });
       conn.connect({
-        host: host.hostname,
+        host: targetIp,
         port: host.port,
         username,
         readyTimeout: 20_000,

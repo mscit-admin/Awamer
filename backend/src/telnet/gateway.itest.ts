@@ -18,6 +18,7 @@ import { loadConfig } from "../config/index.js";
 import { createLogger } from "../logger/index.js";
 import { createJwt, type JwtService } from "../jwt/index.js";
 import { makeTelnetGateway } from "./gateway.js";
+import { configureRemoteDestinationPolicy } from "../usecases/remoteDestination.js";
 
 const noJwt = process.env.JWT_ACCESS_SECRET ? undefined : "set JWT_ACCESS_SECRET to run";
 
@@ -29,6 +30,9 @@ let tcpServer: net.Server;
 let tcpPort = 0;
 
 before(async () => {
+  // These suites drive fake servers on 127.0.0.1 — opt in to loopback
+  // destinations (production default denies them, SEC-REMOTE-DEST-001).
+  configureRemoteDestinationPolicy({ allowLoopback: true });
   if (noJwt) return;
   const cfg = loadConfig();
   jwt = createJwt(cfg);
