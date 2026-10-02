@@ -1,6 +1,8 @@
 /**
- * SMTP configuration (Administration). Admin / super_admin only — instance
- * infrastructure, gated by role like Branding.
+ * SMTP configuration (Administration). Installation-wide infrastructure, so
+ * it is gated by `settings:manage` (Super Admin only — SEC-INSTANCE-001): the
+ * relay carries EVERY tenant's password-reset links, so a company admin who
+ * could repoint it would capture reset tokens for users in other companies.
  *
  *   GET  /api/v1/admin/smtp        current config (never the password)
  *   PUT  /api/v1/admin/smtp        update config
@@ -10,18 +12,20 @@ import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import type { JwtService } from "../jwt/index.js";
 import type { MailService } from "../email/mailer.js";
-import { makeAuthMiddleware, requireRole } from "../middleware/auth.js";
+import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
+import type { AuditRepository } from "../repos/otherRepos.js";
 
 interface Deps {
   mailer: MailService;
   jwt: JwtService;
   users: import("../repos/userRepo.js").UserRepository;
+  audit: AuditRepository;
 }
 
 export function makeSmtpRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
-    app.addHook("preHandler", requireRole("admin", "super_admin"));
+    app.addHook("preHandler", requirePermission("settings:manage"));
 
     app.get("/", async (_req, reply) => {
       return reply.send(await deps.mailer.getPublicConfig());
@@ -47,6 +51,11 @@ export function makeSmtpRoutes(deps: Deps): FastifyPluginAsync {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       }
       await deps.mailer.update(parsed.data);
+      // Field NAMES only — never the password or other values.
+      await deps.audit.log({
+        userId: req.auth!.sub, action: "config_change", resourceType: "smtp", success: true,
+        ipAddress: req.ip, details: { op: "smtp_update", fields: Object.keys(parsed.data).filter((k) => (parsed.data as Record<string, unknown>)[k] !== undefined) },
+      });
       return reply.send(await deps.mailer.getPublicConfig());
     });
 

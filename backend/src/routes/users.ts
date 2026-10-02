@@ -102,7 +102,10 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
 
     // ---------- Verify password (idle-lock unlock) ----------------------
     const verifySchema = z.object({ password: z.string().min(1).max(256) });
-    app.post("/auth/verify-password", async (req, reply) => {
+    // SEC-RATE-001: password (and OTP) oracles get the login-grade throttle, not
+    // just the global API limit.
+    const oracleLimit = { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } };
+    app.post("/auth/verify-password", oracleLimit, async (req, reply) => {
       const parsed = verifySchema.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
@@ -119,7 +122,7 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
       password: z.string().min(1).max(256),
       mfa_code: z.string().regex(/^\d{6}$/).optional(),
     });
-    app.post("/auth/step-up", async (req, reply) => {
+    app.post("/auth/step-up", oracleLimit, async (req, reply) => {
       const parsed = stepUpSchema.safeParse(req.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });

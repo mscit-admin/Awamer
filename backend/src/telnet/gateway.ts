@@ -11,6 +11,7 @@
  *   server → client: binary = output; text JSON = {type:"status"|"error",...}
  */
 import net from "node:net";
+import { resolveRemoteDestination, RemoteDestinationDenied } from "../usecases/remoteDestination.js";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";
 import { can } from "../domain/permissions.js";
@@ -124,6 +125,14 @@ export function makeTelnetGateway(deps: TelnetGatewayDeps) {
         return fail("host_not_found", "host not found");
       }
 
+      // SEC-REMOTE-DEST-001: raw TCP relay — never to metadata/loopback/etc.
+      let targetIp: string;
+      try { targetIp = await resolveRemoteDestination(host.hostname); }
+      catch (e) {
+        if (e instanceof RemoteDestinationDenied) return fail("destination_denied", e.message);
+        return fail("destination_denied", "destination could not be resolved");
+      }
+
       const negotiator = new TelnetNegotiator();
       let historyId: number | null = null;
       let bytesIn = 0;
@@ -136,7 +145,7 @@ export function makeTelnetGateway(deps: TelnetGatewayDeps) {
       };
 
       sendJson(ws, { type: "status", status: "connecting" });
-      const sock = net.connect({ host: host.hostname, port: host.port });
+      const sock = net.connect({ host: targetIp, port: host.port });
       sock.setTimeout(20_000);
 
       // AWM-SEC-022: register for active revocation (disable/lock/delete/role

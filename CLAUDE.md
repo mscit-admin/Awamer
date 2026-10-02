@@ -34,7 +34,10 @@ Current permissions: `resources:write`, `sessions:connect`,
 (Super Admin: manage companies/tenants), `org:manage` (manage a company's
 org hierarchy), `ai:use` (use the AI terminal assistant), `ai:manage`
 (configure org AI providers), `ai:use_personal` (add/use personal AI
-providers) — defined in code; add new ones here when a feature needs them.
+providers), `vpn:manage`, `vpn:reveal`, `vpn_server:manage`, `network:diagnose`,
+`settings:manage` (Super Admin: installation-wide SMTP/branding/session policy —
+global-only, like `companies:manage`) — defined in code; add new ones here when
+a feature needs them.
 
 **Roles are dynamic** (DB table `roles`, migration `007`). The 5 built-ins
 (super_admin, admin, user, readonly, auditor) are seeded and **locked**; admins

@@ -19,6 +19,7 @@ import { makeTelnetGateway } from "../telnet/gateway.js";
 import { makeWsTunnelGateway } from "../ssh/wsTunnelGateway.js";
 import { makeVncGateway } from "../vnc/gateway.js";
 import { getPool, closePool, dbSkip } from "../test/db.js";
+import { configureRemoteDestinationPolicy } from "../usecases/remoteDestination.js";
 
 let app: FastifyInstance;
 let jwt: JwtService;
@@ -62,6 +63,9 @@ function wsTrial(path: string, query: string, tokenStr: string): Promise<{ code?
 }
 
 before(async () => {
+  // These suites drive fake servers on 127.0.0.1 — opt in to loopback
+  // destinations (production default denies them, SEC-REMOTE-DEST-001).
+  configureRemoteDestinationPolicy({ allowLoopback: true });
   if (dbSkip) return;
   const cfg = loadConfig();
   jwt = createJwt(cfg);

@@ -82,10 +82,11 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/users", label: "Users", icon: <Users className="size-4" />, available: true, perm: "users:manage" },
   { to: "/roles", label: "Roles & Permissions", icon: <Shield className="size-4" />, available: true, perm: "users:manage" },
 ];
-// Branding & SMTP are gated by the admin role (server enforces requireRole), not a permission.
+// Branding & SMTP are installation-wide (shared by every company), so the
+// server gates them on `settings:manage` — Super Admin only (SEC-INSTANCE-001).
 const ADMIN_ROLE_NAV: NavItem[] = [
-  { to: "/branding", label: "Branding", icon: <Palette className="size-4" />, available: true },
-  { to: "/smtp", label: "Email (SMTP)", icon: <Mail className="size-4" />, available: true },
+  { to: "/branding", label: "Branding", icon: <Palette className="size-4" />, available: true, perm: "settings:manage" },
+  { to: "/smtp", label: "Email (SMTP)", icon: <Mail className="size-4" />, available: true, perm: "settings:manage" },
 ];
 
 export function DashboardLayout() {
@@ -111,6 +112,10 @@ export function DashboardLayout() {
   // session / backend), don't hide anything — fall back to showing it.
   const can = (perm: Permission) =>
     isAdmin || !Array.isArray(user?.permissions) || hasPerm(user?.permissions, perm);
+  // Global-only permissions are NOT implied by the admin role: trust the
+  // server's effective list (fall back to the role only for an old payload).
+  const canStrict = (perm: Permission) =>
+    Array.isArray(user?.permissions) ? hasPerm(user?.permissions, perm) : user?.role === "super_admin";
   const canManageUsers = can("users:manage");
   const canAudit = can("audit:read");
   const appName = useAppName();
@@ -172,7 +177,7 @@ export function DashboardLayout() {
               {ADMIN_NAV.filter((i) => !i.perm || can(i.perm)).map((item) => (
                 <NavItemLink key={item.to} item={item} />
               ))}
-              {isAdmin && ADMIN_ROLE_NAV.map((item) => (
+              {ADMIN_ROLE_NAV.filter((i) => !i.perm || canStrict(i.perm)).map((item) => (
                 <NavItemLink key={item.to} item={item} />
               ))}
               {canAudit && (

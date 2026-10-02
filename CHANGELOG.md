@@ -9,6 +9,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Final security closure (FINAL-SEC)
+
+Independent final assessment of the current code; full evidence in
+`security-final/`. Fixes ship with regression tests (unit + real-PostgreSQL
+integration) where testable; `security-final/SECURITY_TEST_RESULTS.md` records
+which tests were shown to fail on the previous code and which items are verified
+by code review only.
+
+### Added — RBAC
+- **New permission `settings:manage`** — "Manage instance settings": change
+  installation-wide settings shared by every company (SMTP / password-reset email,
+  branding, SSH session policy). **Default grants: `super_admin` only** (not
+  `admin`, `user`, `readonly`, `auditor`). It is a global-only permission (like
+  `companies:manage`): a company admin cannot grant it to a custom role. Mirrored in
+  `backend/src/domain/permissions.ts` and `desktop/src/shared/lib/permissions.ts`;
+  built-ins are reconciled at startup (no migration).
+
+### Security
+- **CRITICAL — VPN server config injection → root RCE in the vpn-helper
+  (SEC-VPN-CFG-001).** `cipher` was free text interpolated into an OpenVPN server
+  config running with `script-security 2` in the root, host-network helper. Now a
+  strict allowlist (`AES-256-GCM`, `AES-128-GCM`) at the API, re-checked in the
+  helper IPC handler and in both config assemblers (cipher/proto/port/subnet/DNS/host).
+- **HIGH — MFA bypass (SEC-MFA-BYPASS-001).** The post-password MFA challenge
+  token was a `typ:"access"` JWT; for MFA accounts with `auth_version = 1` it was
+  accepted as a full session. It is now `typ:"mfa_pending"`, rejected by every
+  authenticated route/WebSocket and accepted only by `/auth/mfa/verify`.
+- **HIGH — Cross-tenant account takeover via instance-wide SMTP
+  (SEC-INSTANCE-001).** Any company admin could repoint the global SMTP relay and
+  capture every tenant's password-reset links. SMTP, branding and session-settings
+  now require `settings:manage`; changes are audited (field names only).
+- **HIGH — Admin could take over a more-privileged user (SEC-TARGET-CEILING-001).**
+  Reset-password / disable-MFA / PATCH / DELETE and org re-assignment now require
+  the target's permissions to be a subset of the actor's (blocks company admin →
+  co-located super_admin, and users:manage helpdesk → demoting its admin).
+- **HIGH — Remote-session SSRF (SEC-REMOTE-DEST-001).** Telnet/VNC raw-TCP relays
+  (and SSH/SFTP/tunnel hops) could target cloud metadata (169.254.169.254) and the
+  backend's own loopback/Docker network. Destinations are resolved once and
+  policy-checked (metadata/link-local/unspecified/multicast always denied; loopback
+  opt-in `REMOTE_SESSION_ALLOW_LOOPBACK`; `REMOTE_SESSION_DENY_LOCAL_SUBNETS`
+  — default true in the Docker deploy — blocks PostgreSQL/Redis; extra
+  `REMOTE_SESSION_DENY_CIDRS`). Private infrastructure remains reachable.
+- **HIGH — Client .ovpn could read/write files as root in the host-network
+  vpn-helper (SEC-OVPN-FILE-001).** The directive blocklist covered only script
+  execution. Now also denied: file-path arguments to `auth-user-pass`/`ca`/`key`/
+  `secret`/… (e.g. `auth-user-pass /proc/self/environ` would have sent the helper's
+  DATABASE_URL + VPN_HELPER_SECRET to the VPN server), `log`/`writepid`/`status`/…,
+  `config`, `askpass`, `management*`, `redirect-gateway`; server-pushed
+  `redirect-gateway` is filtered (`--pull-filter`). Inline `<ca>` blocks still work.
+- **HIGH (dependencies)** — fastify 5.11.2 → 5.12.5, fast-uri → 3.1.8 / 4.2.1
+  (in-range); nodemailer 9.0.1 → 10.0.13 (major; only breaking change is Node ≥ 20,
+  already required). Desktop: react-router-dom 6.30.6, fflate 0.7.5 (in-range).
+- **MEDIUM** — backup import ran attacker-chosen scrypt parameters synchronously
+  (event-loop DoS); MFA codes could be brute-forced across re-logins (counter was
+  reset after the password step) and replayed within their window; logout-all
+  left access tokens and live shells alive; privileged user administration
+  (role/disable/lock/delete) was not audited; server-managed tunnels and SFTP
+  sessions survived disable/role change; Docker images ignored the lockfile.
+- **LOW** — refresh rotation is now an atomic claim; forgot/reset-password and
+  verify-password/step-up have login-grade rate limits; full 128-bit GCM tags are
+  required; WebSocket frames capped at 2 MiB; SFTP handles use a CSPRNG;
+  `APP_VERSION` is now mandatory in the production compose (no stale `1.6.0.1`).
+  Desktop (Rust): rustls 0.23.40 → 0.23.45, quinn-proto → 0.11.15 (patch-level).
+  `/readyz` now reports `audit_write_failures_total` (fail-open audit stays
+  available but is alertable; readiness is unaffected).
+
 ## [Unreleased] — Branding: Awamer Terminal
 
 User-facing and documentation branding is now consistently **"Awamer Terminal"**

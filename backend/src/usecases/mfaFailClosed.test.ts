@@ -32,6 +32,13 @@ function mfaWith(secretBox: SecretBox, secretEnc: Buffer, calls?: unknown[]): MF
     getPrimary: async () => device,
     listByUser: async () => [device],
     updateLastUsed: async () => { calls?.push("updateLastUsed"); },
+    // Mirrors the SQL claim: accept only a step strictly after the last one.
+    claimTotpStep: async (_id: string, stepStart: Date) => {
+      if (device.lastUsedAt && device.lastUsedAt >= stepStart) return false;
+      device.lastUsedAt = stepStart;
+      calls?.push("updateLastUsed");
+      return true;
+    },
   } as any;
   const audit = { log: async (e: unknown) => { calls?.push(e); } } as any;
   return new MFAUseCase({} as any, devices, audit, {} as any, {} as any, secretBox, {} as any);
@@ -113,4 +120,13 @@ test("MFA-FAILCLOSED-008: the secret never appears in the error or any log", asy
   const errText = `${(thrown as Error).name}: ${(thrown as Error).message}`;
   assert.ok(!errText.includes(secret), "error message must not contain the secret");
   assert.ok(!JSON.stringify(calls).includes(secret), "no log/audit call may contain the secret");
+});
+
+test("TOTP-REPLAY-001: an accepted code cannot be replayed within its window (SEC-TOTP-REPLAY-001)", async () => {
+  const secret = authenticator.generateSecret();
+  const enc = box.sealBytes(Buffer.from(secret, "utf8"));
+  const uc = mfaWith(box, enc);
+  const code = authenticator.generate(secret);
+  await assert.doesNotReject(() => uc.verifyCode("u1", code));
+  await assert.rejects(() => uc.verifyCode("u1", code)); // same code, same step → refused
 });

@@ -316,6 +316,9 @@ export class HelperCore {
       await writeFile(authPath, `${input.authUser ?? ""}\n${input.authPass ?? ""}\n`, { mode: 0o600 });
       args.push("--auth-user-pass", authPath, "--auth-nocache");
     }
+    // SEC-OVPN-FILE-001: this process shares the HOST network namespace — a
+    // (malicious) VPN server must not push a default-route takeover.
+    args.push("--pull-filter", "ignore", "redirect-gateway", "--pull-filter", "ignore", "redirect-private");
     // Force the strictest script sandbox LAST so a config cannot override it.
     args.push("--script-security", "1");
 

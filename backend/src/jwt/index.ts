@@ -61,6 +61,13 @@ export interface JwtService {
   verifyAccess(token: string): Promise<VerifiedClaims>;
   verifyRefresh(token: string): Promise<VerifiedClaims>;
   /**
+   * SEC-MFA-BYPASS-001 — verify the short-lived login-challenge token issued
+   * after a correct password for an MFA account. It carries `typ:"mfa_pending"`
+   * so `verifyAccess` (and therefore every authenticated route and WebSocket)
+   * rejects it: it can ONLY be exchanged at /auth/mfa/verify.
+   */
+  verifyMfaPending(token: string): Promise<VerifiedClaims>;
+  /**
    * SEC-MFA-002 — short-lived, single-purpose step-up token (signed w/ access
    * key). `authVersion` (focused fix) is pinned as claim `av` so a change to the
    * account's security version invalidates any outstanding step-up token.
@@ -132,6 +139,7 @@ export function createJwt(cfg: Config): JwtService {
     },
     verifyAccess(token) { return verify(token, accessKey, "access"); },
     verifyRefresh(token) { return verify(token, refreshKey, "refresh"); },
+    verifyMfaPending(token) { return verify(token, accessKey, "mfa_pending"); },
     async issueStepUp(userId, purpose, ttlSec, authVersion) {
       const jti = uuid();
       const now = Math.floor(Date.now() / 1000);

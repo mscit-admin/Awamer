@@ -38,6 +38,7 @@ import type {
 } from "../repos/sessionRepos.js";
 import { resolveSshConnection, SshResolveError, type SshAuth } from "./resolveAuth.js";
 import { makeHostVerifier } from "./hostKeys.js";
+import { resolveRemoteDestination, RemoteDestinationDenied } from "../usecases/remoteDestination.js";
 import { STATS_CMD, parseStats, type PrevSample } from "./serverStats.js";
 
 export interface SshGatewayDeps {
@@ -162,6 +163,13 @@ export function makeSshGateway(deps: SshGatewayDeps) {
         if (e instanceof SshResolveError) return fail(e.code, e.message);
         deps.log.warn({ err: e }, "ssh gateway: credential resolution failed");
         return fail("credential_error", "could not resolve credentials");
+      }
+
+      // SEC-REMOTE-DEST-001: resolve + policy-check once; connect to that IP.
+      let targetIp: string;
+      try { targetIp = await resolveRemoteDestination(host.hostname); }
+      catch (e) {
+        return fail("destination_denied", e instanceof RemoteDestinationDenied ? e.message : "destination could not be resolved");
       }
 
       // 3. Open the SSH connection.
@@ -377,7 +385,7 @@ export function makeSshGateway(deps: SshGatewayDeps) {
 
       sendJson(ws, { type: "status", status: "connecting" });
       conn.connect({
-        host: host.hostname,
+        host: targetIp,
         port: host.port,
         username,
         readyTimeout: 20_000,

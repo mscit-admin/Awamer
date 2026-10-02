@@ -22,6 +22,7 @@
  *   POST /upload      {session_id, path, content_base64}
  *   POST /disconnect  {session_id}
  */
+import { randomBytes } from "node:crypto";
 import { Client, type SFTPWrapper, type FileEntry } from "ssh2";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
@@ -31,6 +32,7 @@ import type { JwtService } from "../jwt/index.js";
 import type { Logger } from "../logger/index.js";
 import type { HostRepository, CredentialRepository } from "../repos/sessionRepos.js";
 import { makeHostVerifier, type HostKeyStore } from "./hostKeys.js";
+import { resolveRemoteDestination, RemoteDestinationDenied } from "../usecases/remoteDestination.js";
 
 export interface SftpGatewayDeps {
   jwt: JwtService;
@@ -39,6 +41,8 @@ export interface SftpGatewayDeps {
   credentials: CredentialRepository;
   log: Logger;
   hostKeys: HostKeyStore;
+  /** SEC-REVOKE-SFTP-001: live-session revocation (disable/lock/delete/role/company change). */
+  sessions?: Pick<import("../session/activeSessions.js").ActiveSessionManager, "register" | "unregister">;
 }
 
 interface SftpSession {
@@ -53,10 +57,8 @@ const IDLE_MS = 10 * 60 * 1000; // reap sessions idle for 10 minutes
 const MAX_READ_BYTES = 1024 * 1024; // 1 MB inline read/edit cap (matches desktop)
 
 function randomId(): string {
-  // 16 random bytes hex — collision-safe session handle.
-  const b = Buffer.allocUnsafe(16);
-  for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
-  return b.toString("hex");
+  // 16 CSPRNG bytes hex — unguessable session handle (was Math.random).
+  return randomBytes(16).toString("hex");
 }
 
 // POSIX file-type bits (Attributes only exposes the raw mode number).
@@ -81,13 +83,19 @@ function joinPath(dir: string, name: string): string {
 export function makeSftpGateway(deps: SftpGatewayDeps) {
   const sessions = new Map<string, SftpSession>();
 
+  /** Idempotent: close the SSH connection, forget the handle, unregister. */
+  function dropSession(id: string): void {
+    const s = sessions.get(id);
+    if (!s) return;
+    sessions.delete(id);
+    deps.sessions?.unregister(id);
+    try { s.conn.end(); } catch { /* ignore */ }
+  }
+
   const reaper = setInterval(() => {
     const now = Date.now();
     for (const [id, s] of sessions) {
-      if (now - s.lastUsed > IDLE_MS) {
-        try { s.conn.end(); } catch { /* ignore */ }
-        sessions.delete(id);
-      }
+      if (now - s.lastUsed > IDLE_MS) dropSession(id);
     }
   }, 60_000);
   reaper.unref?.();
@@ -103,6 +111,13 @@ export function makeSftpGateway(deps: SftpGatewayDeps) {
       reply.code(404).send({ error: { code: "session_not_found", message: "no such SFTP session" } });
       return null;
     }
+    // SEC-REVOKE-SFTP-001: re-check the LIVE role on every operation (auth
+    // middleware swaps in the current DB role), not only at /connect.
+    if (!can(req.auth!.role, "sessions:connect")) {
+      dropSession(sessionId);
+      reply.code(403).send({ error: { code: "forbidden", message: "your role cannot open sessions" } });
+      return null;
+    }
     s.lastUsed = Date.now();
     return s;
   }
@@ -111,10 +126,7 @@ export function makeSftpGateway(deps: SftpGatewayDeps) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
     app.addHook("onClose", async () => {
       clearInterval(reaper);
-      for (const s of sessions.values()) {
-        try { s.conn.end(); } catch { /* ignore */ }
-      }
-      sessions.clear();
+      for (const id of [...sessions.keys()]) dropSession(id);
     });
 
     // ---- connect ------------------------------------------------------
@@ -140,6 +152,13 @@ export function makeSftpGateway(deps: SftpGatewayDeps) {
         host = await deps.hosts.getById(userId, host_id);
       } catch {
         return reply.code(404).send({ error: { code: "host_not_found", message: "host not found" } });
+      }
+
+      // SEC-REMOTE-DEST-001: resolve + policy-check once; connect to that IP.
+      let targetIp: string;
+      try { targetIp = await resolveRemoteDestination(host.hostname); }
+      catch (e) {
+        return reply.code(403).send({ error: { code: "destination_denied", message: e instanceof RemoteDestinationDenied ? e.message : "destination could not be resolved" } });
       }
 
       // Resolve auth material (mirrors the SSH gateway).
@@ -189,13 +208,17 @@ export function makeSftpGateway(deps: SftpGatewayDeps) {
                 const initial = rpErr ? "/" : abs;
                 const id = randomId();
                 sessions.set(id, { conn, sftp, userId, host: host.hostname, lastUsed: Date.now() });
+                deps.sessions?.register({
+                  sessionId: id, userId, kind: "sftp", requiredPermission: "sessions:connect",
+                  close: () => dropSession(id),
+                });
                 resolve({ session_id: id, initial_path: initial });
               });
             });
           });
           conn.on("error", (e) => reject(e));
           conn.connect({
-            host: host.hostname,
+            host: targetIp,
             port: host.port,
             username,
             readyTimeout: 20_000,
@@ -361,10 +384,7 @@ export function makeSftpGateway(deps: SftpGatewayDeps) {
       const parsed = disconnectSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       const s = sessions.get(parsed.data.session_id);
-      if (s && s.userId === req.auth!.sub) {
-        try { s.conn.end(); } catch { /* ignore */ }
-        sessions.delete(parsed.data.session_id);
-      }
+      if (s && s.userId === req.auth!.sub) dropSession(parsed.data.session_id);
       return reply.send({ status: "ok" });
     });
   };

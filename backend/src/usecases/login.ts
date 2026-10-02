@@ -84,11 +84,17 @@ export class LoginUseCase {
       throw Errors.InvalidCredentials();
     }
 
-    await this.users.resetFailedAttempts(user.id);
+    // SEC-MFA-BRUTE-001: for an MFA account the failure counter is reset only
+    // after the SECOND factor succeeds (completeMFALogin). Resetting it here let
+    // an attacker who knows the password re-login between code guesses and
+    // never reach the lockout threshold.
+    if (!user.mfaEnabled) await this.users.resetFailedAttempts(user.id);
 
     // MFA challenge step
     if (user.mfaEnabled) {
-      const mfa = await this.jwt.issueOne(user.id, "mfa_pending", "access", 5 * 60);
+      // SEC-MFA-BYPASS-001: typed "mfa_pending" (not "access") so this challenge
+      // token is rejected by verifyAccess and cannot be used as a session.
+      const mfa = await this.jwt.issueOne(user.id, "mfa_pending", "mfa_pending", 5 * 60);
       await this.audit.log({
         userId: user.id, action: "login", success: true,
         ipAddress: input.ip, userAgent: input.ua, details: { step: "mfa_required" },
@@ -114,6 +120,24 @@ export class LoginUseCase {
       expiresAt: access.expiresAt,
       user,
     };
+  }
+
+  /**
+   * SEC-MFA-BRUTE-001 — a wrong code at the login MFA challenge counts toward
+   * the same per-account temporary lockout as a wrong password (per-account,
+   * so rotating source IPs does not help), and is audited.
+   */
+  async recordMfaFailure(userId: string, ip: string | null, ua: string | null): Promise<void> {
+    const newCount = await this.users.incrementFailedAttempts(userId);
+    if (newCount >= this.cfg.env.ACCOUNT_LOCKOUT_THRESHOLD) {
+      const until = new Date(Date.now() + this.cfg.env.ACCOUNT_LOCKOUT_MINUTES * 60_000);
+      await this.users.setLockedUntil(userId, until);
+      this.log.warn({ userId, attempts: newCount, until }, "account temporarily locked due to failed MFA attempts");
+    }
+    await this.audit.log({
+      userId, action: "login", success: false, ipAddress: ip, userAgent: ua,
+      details: { reason: "bad_mfa_code", attempts: newCount },
+    });
   }
 
   /** Same cost as a real verify, throwaway result. */
@@ -144,6 +168,7 @@ export async function completeMFALogin(
   const user = await users.getById(userId);
   if (!user.isActive) throw Errors.AccountInactive();
   if (isAccountLocked(user, new Date())) throw Errors.AccountLocked();
+  await users.resetFailedAttempts(user.id); // second factor passed (SEC-MFA-BRUTE-001)
   return uc.completeLogin(user, ip, ua);
 }
 

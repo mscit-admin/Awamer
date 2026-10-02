@@ -75,8 +75,20 @@ export class RefreshUseCase {
     }
 
     const { access, refresh: newRefresh } = await this.jwt.issuePair(user.id, user.role, user.authVersion);
+    // SEC-REFRESH-RACE-001: claim the rotation atomically BEFORE the new session
+    // becomes usable. Losing the claim means another request already rotated
+    // (or revoked) this token — treat it exactly like reuse.
+    const claimed = await this.refresh.markRotated(session.jti, newRefresh.jti);
+    if (!claimed) {
+      this.log.warn({ userId: session.userId, jti: session.jti }, "refresh token reuse detected (concurrent rotation)");
+      await this.refresh.revokeAllForUser(session.userId);
+      await this.audit.log({
+        userId: session.userId, action: "token_reuse_detected", success: false,
+        ipAddress: ip, userAgent: ua, details: { reason: "concurrent_rotation" },
+      });
+      throw Errors.RefreshReuse();
+    }
     await this.refresh.insert({ jti: newRefresh.jti, userId: user.id, expiresAt: newRefresh.expiresAt });
-    await this.refresh.markRotated(session.jti, newRefresh.jti);
     await this.audit.log({
       userId: user.id, action: "token_refresh", success: true,
       ipAddress: ip, userAgent: ua,
@@ -103,9 +115,15 @@ export class RefreshUseCase {
     }
   }
 
-  /** SEC-017 — revoke every active session for a user (logout everywhere). */
+  /**
+   * SEC-017 — revoke every active session for a user (logout everywhere).
+   * SEC-LOGOUT-ALL-001: also bump auth_version so every outstanding ACCESS
+   * token dies immediately (not after its 15-min TTL); the route additionally
+   * closes live SSH/Telnet/VNC/tunnel sessions.
+   */
   async logoutAll(userId: string, ip: string | null, ua: string | null): Promise<void> {
     await this.refresh.revokeAllForUser(userId);
+    await this.users.incrementAuthVersion(userId);
     await this.audit.log({ userId, action: "logout", success: true, ipAddress: ip, userAgent: ua, details: { scope: "all" } });
   }
 }

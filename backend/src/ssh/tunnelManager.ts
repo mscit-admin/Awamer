@@ -19,12 +19,15 @@ import type { HostRepository, CredentialRepository } from "../repos/sessionRepos
 import type { Logger } from "../logger/index.js";
 import { resolveSshConnection } from "./resolveAuth.js";
 import { makeHostVerifier, type HostKeyStore } from "./hostKeys.js";
+import { resolveRemoteDestination, RemoteDestinationDenied } from "../usecases/remoteDestination.js";
 
 export interface TunnelDeps {
   hosts: HostRepository;
   credentials: CredentialRepository;
   log: Logger;
   hostKeys: HostKeyStore;
+  /** SEC-REVOKE-TUNNEL-001: live-session revocation (disable/lock/delete/role/company change). */
+  sessions?: Pick<import("../session/activeSessions.js").ActiveSessionManager, "register" | "unregister">;
 }
 
 export interface CreateTunnelParams {
@@ -124,6 +127,12 @@ export class TunnelManager {
 
     const resolved = await resolveSshConnection(this.deps, userId, params.hostId);
     const { host, username, auth } = resolved;
+    // SEC-REMOTE-DEST-001: policy-check the SSH hop; connect to the checked IP.
+    let targetIp: string;
+    try { targetIp = await resolveRemoteDestination(host.hostname); }
+    catch (e) {
+      throw new TunnelError("destination_denied", e instanceof RemoteDestinationDenied ? e.message : "destination could not be resolved");
+    }
     const listenHost = params.bindPublic ? "0.0.0.0" : "127.0.0.1";
 
     const conn = new Client();
@@ -146,7 +155,7 @@ export class TunnelManager {
         resolve();
       });
       conn.connect({
-        host: host.hostname,
+        host: targetIp,
         port: host.port,
         username,
         readyTimeout: 20_000,
@@ -220,6 +229,11 @@ export class TunnelManager {
     });
 
     this.tunnels.set(id, runtime);
+    // A server-side listener must not outlive the owner's authorization.
+    this.deps.sessions?.register({
+      sessionId: id, userId, kind: "tunnel", requiredPermission: "tunnels:manage",
+      close: () => { this.stopById(id); },
+    });
     this.deps.log.info(
       { tunnel: id, listen: `${listenHost}:${params.listenPort}`, dst: `${params.dstHost}:${params.dstPort}`, via: host.hostname },
       "tunnel started",
@@ -230,7 +244,15 @@ export class TunnelManager {
   remove(userId: string, id: string): boolean {
     const t = this.tunnels.get(id);
     if (!t || t.userId !== userId) return false;
+    return this.stopById(id);
+  }
+
+  /** Idempotent stop used by remove() and by active-session revocation. */
+  private stopById(id: string): boolean {
+    const t = this.tunnels.get(id);
+    if (!t) return false;
     this.tunnels.delete(id);
+    this.deps.sessions?.unregister(id);
     try { t.server.close(); } catch { /* ignore */ }
     try { t.conn.end(); } catch { /* ignore */ }
     this.deps.log.info({ tunnel: id }, "tunnel stopped");

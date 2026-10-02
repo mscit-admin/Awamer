@@ -79,6 +79,21 @@ export class MFADeviceRepository {
     await this.pool.query(`UPDATE mfa_devices SET last_used_at = NOW() WHERE id = $1`, [id]);
   }
 
+  /**
+   * SEC-TOTP-REPLAY-001 — atomically consume the TOTP time step that starts at
+   * `stepStart`. Succeeds only if no code from this step (or a later one) was
+   * accepted before, so a captured code cannot be replayed within its window
+   * and two concurrent submissions of one code cannot both pass.
+   */
+  async claimTotpStep(id: string, stepStart: Date): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE mfa_devices SET last_used_at = $2
+        WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < $2)`,
+      [id, stepStart],
+    );
+    return (rowCount ?? 0) === 1;
+  }
+
   async delete(id: string, userId: string): Promise<void> {
     await this.pool.query(`DELETE FROM mfa_devices WHERE id = $1 AND user_id = $2`, [id, userId]);
   }
@@ -141,11 +156,19 @@ export class RefreshRepository {
     return rows[0] ? rowToSession(rows[0]) : null;
   }
 
-  async markRotated(oldJti: string, newJti: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE refresh_sessions SET rotated_to = $2 WHERE jti = $1`,
+  /**
+   * SEC-REFRESH-RACE-001 — atomically CLAIM the rotation of `oldJti`. Returns
+   * false when the session was already rotated or revoked (a concurrent refresh
+   * won, or the token is being replayed), so two parallel refreshes of one token
+   * can never both mint a valid chain.
+   */
+  async markRotated(oldJti: string, newJti: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE refresh_sessions SET rotated_to = $2
+        WHERE jti = $1 AND rotated_to IS NULL AND revoked_at IS NULL`,
       [oldJti, newJti],
     );
+    return (rowCount ?? 0) === 1;
   }
 
   async revokeAllForUser(userId: string): Promise<void> {

@@ -154,8 +154,13 @@ export class MFAUseCase {
     }
     if (!device) throw Errors.InvalidMFACode();
     const secret = this.openSecret(device.secretEnc);
-    if (!authenticator.check(code, secret)) throw Errors.InvalidMFACode();
-    await this.devices.updateLastUsed(device.id);
+    // checkDelta → which step (−1/0/+1) matched, so we can pin the exact step.
+    const delta = authenticator.checkDelta(code, secret);
+    if (delta === null) throw Errors.InvalidMFACode();
+    // SEC-TOTP-REPLAY-001: one acceptance per time step (RFC 6238 §5.2).
+    const stepMs = 30_000;
+    const stepStart = new Date((Math.floor(Date.now() / stepMs) + delta) * stepMs);
+    if (!(await this.devices.claimTotpStep(device.id, stepStart))) throw Errors.InvalidMFACode();
   }
 
   /**

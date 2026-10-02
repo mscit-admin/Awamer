@@ -29,6 +29,7 @@ import { makeVncGateway } from "../vnc/gateway.js";
 import { makeAdminRoutes } from "../routes/admin.js";
 import { makeOrganizationRoutes } from "../routes/organization.js";
 import { getPool, closePool, dbSkip } from "../test/db.js";
+import { configureRemoteDestinationPolicy } from "../usecases/remoteDestination.js";
 
 let app: FastifyInstance;
 let jwt: JwtService;
@@ -73,6 +74,9 @@ function openFrameChannel(pathAndQuery: string, tok: string, extra: Record<strin
 }
 
 before(async () => {
+  // These suites drive fake servers on 127.0.0.1 — opt in to loopback
+  // destinations (production default denies them, SEC-REMOTE-DEST-001).
+  configureRemoteDestinationPolicy({ allowLoopback: true });
   if (dbSkip) return;
   const cfg = loadConfig();
   jwt = createJwt(cfg);
@@ -108,7 +112,7 @@ before(async () => {
   await app.register(makeTelnetGateway({ sessions, jwt, users, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/telnet" });
   await app.register(makeWsTunnelGateway({ sessions, jwt, users, hosts: hosts as never, credentials: credentials as never, log, hostKeys: stub }), { prefix: "/api/v1/tunnel" });
   await app.register(makeVncGateway({ sessions, jwt, users, hosts: hosts as never, history: history as never, log }), { prefix: "/api/v1/vnc" });
-  await app.register(makeAdminRoutes({ sessions, users, register: stub, changePassword: stub, mfa: stub, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
+  await app.register(makeAdminRoutes({ audit: new AuditRepository(pool), sessions, users, register: stub, changePassword: stub, mfa: stub, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
   await app.register(makeOrganizationRoutes({ sessions, companies: new CompanyRepository(pool), units: new OrgUnitRepository(pool), users, audit: new AuditRepository(pool), jwt, roleService }), { prefix: "/api/v1/org" });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const addr = app.server.address() as net.AddressInfo;

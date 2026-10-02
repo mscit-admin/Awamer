@@ -19,7 +19,7 @@ import { createJwt } from "./jwt/index.js";
 
 import { UserRepository } from "./repos/userRepo.js";
 import { ActiveSessionManager } from "./session/activeSessions.js";
-import { MFADeviceRepository, RefreshRepository, AuditRepository } from "./repos/otherRepos.js";
+import { MFADeviceRepository, RefreshRepository, AuditRepository, getAuditWriteFailuresTotal } from "./repos/otherRepos.js";
 import {
   FolderRepository, TagRepository, CredentialRepository,
   HostRepository, ConnectionHistoryRepository,
@@ -37,6 +37,7 @@ import { resolveTrustedBaseUrl, assertResetEmailBaseUrl } from "./usecases/publi
 import { PasswordResetRepository } from "./repos/passwordResetRepo.js";
 import { MailService } from "./email/mailer.js";
 import { makePasswordResetRoutes } from "./routes/passwordReset.js";
+import { configureRemoteDestinationPolicy } from "./usecases/remoteDestination.js";
 import { makeSmtpRoutes } from "./routes/smtp.js";
 import { makeSessionSettingsRoutes } from "./routes/sessionSettings.js";
 
@@ -123,7 +124,6 @@ async function main() {
   // SSH host-key pinning (TOFU + change detection), shared by all ssh2 sites.
   const hostKeys = new HostKeyRepository(pool);
   // Phase 5 — server-managed SSH local tunnels (in-memory).
-  const tunnels = new TunnelManager({ hosts, credentials, log, hostKeys });
   // SEC-INFRA-001 — the backend never spawns OpenVPN; it delegates all
   // privileged VPN lifecycle work to the isolated awamer-vpn-helper over an
   // authenticated Unix socket. Fail-closed if the helper is unreachable.
@@ -157,7 +157,14 @@ async function main() {
   // AWM-SEC-022: registry of active long-lived remote sessions (SSH/Telnet/
   // tunnel/VNC). A security-relevant account change revokes matching sessions
   // immediately; a periodic loop revalidates live state as a fallback.
+  // SEC-REMOTE-DEST-001: destination policy for every remote-session gateway.
+  configureRemoteDestinationPolicy({
+    allowLoopback: cfg.env.REMOTE_SESSION_ALLOW_LOOPBACK,
+    denyCidrs: cfg.env.REMOTE_SESSION_DENY_CIDRS ?? null,
+    denyLocalSubnets: cfg.env.REMOTE_SESSION_DENY_LOCAL_SUBNETS,
+  });
   const activeSessions = new ActiveSessionManager({ users, log, audit });
+  const tunnels = new TunnelManager({ hosts, credentials, log, hostKeys, sessions: activeSessions });
   activeSessions.startPeriodic();
 
   // Use cases
@@ -202,7 +209,11 @@ async function main() {
     bodyLimit: 1024 * 100,
   });
 
-  await app.register(websocket);
+  // SEC-WS-LIMIT-001: cap a single inbound frame (the `ws` default is 100 MiB,
+  // accepted even before the first-frame auth). Terminal keystrokes, resize and
+  // VNC client messages are tiny; 2 MiB leaves ample room for tunnel chunks
+  // and clipboard pastes.
+  await app.register(websocket, { options: { maxPayload: 2 * 1024 * 1024 } });
   // Credential attachment uploads (vault Phase 3). 5 MB/file, single file.
   await app.register(multipart, {
     limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 4 },
@@ -270,21 +281,27 @@ async function main() {
   // when the DB returns (no restart needed).
   app.get("/readyz", async (_req, reply) => {
     const ok = await probeDb(pool);
-    return reply.code(ok ? 200 : 503).send({ status: ok ? "ready" : "not_ready" });
+    // SEC-AUDIT-ALERT-001: export the (fail-open) audit-write failure counter so
+    // monitoring can alert on it; it never affects readiness (availability).
+    return reply.code(ok ? 200 : 503).send({
+      status: ok ? "ready" : "not_ready",
+      audit_write_failures_total: getAuditWriteFailuresTotal(),
+    });
   });
 
   await app.register(makeAuthRoutes({
     login: loginUC, refresh: refreshUC, mfa: mfaUC, users, jwt,
     loginRateMax: cfg.env.RATE_LIMIT_LOGIN_PER_MIN,
     refreshCookieMaxAgeSec: cfg.jwtRefreshTtlSec,
+    sessions: activeSessions,
   }), { prefix: "/api/v1/auth" });
   // Public forgot/reset password (same prefix as auth).
-  await app.register(makePasswordResetRoutes({ reset: passwordResetUC }), { prefix: "/api/v1/auth" });
+  await app.register(makePasswordResetRoutes({ reset: passwordResetUC, rateMax: cfg.env.RATE_LIMIT_LOGIN_PER_MIN }), { prefix: "/api/v1/auth" });
 
   await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt, stepUp }), { prefix: "/api/v1" });
-  await app.register(makeAdminRoutes({ sessions: activeSessions, users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
-  await app.register(makeSmtpRoutes({ mailer, users, jwt }), { prefix: "/api/v1/admin/smtp" });
-  await app.register(makeSessionSettingsRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/admin/session-settings" });
+  await app.register(makeAdminRoutes({ audit, sessions: activeSessions, users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
+  await app.register(makeSmtpRoutes({ mailer, users, jwt, audit }), { prefix: "/api/v1/admin/smtp" });
+  await app.register(makeSessionSettingsRoutes({ settings: appSettings, users, jwt, audit }), { prefix: "/api/v1/admin/session-settings" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt, users }), { prefix: "/api/v1/roles" });
 
   // Phase 2 — Session Management routes
@@ -295,7 +312,7 @@ async function main() {
   await app.register(makeHistoryRoutes({ history, hosts, audit, users, jwt }), { prefix: "/api/v1/history" });
   await app.register(makeAuditRoutes({ audit, users, jwt }), { prefix: "/api/v1/audit" });
   await app.register(makeNetworkRoutes({ users, jwt, audit, policy: cfg.networkDiagnostic }), { prefix: "/api/v1/network" });
-  await app.register(makeBrandingRoutes({ settings: appSettings, users, jwt }), { prefix: "/api/v1/branding" });
+  await app.register(makeBrandingRoutes({ settings: appSettings, users, jwt, audit }), { prefix: "/api/v1/branding" });
   await app.register(makeOrganizationRoutes({ sessions: activeSessions, companies, units: orgUnits, users, audit, jwt, roleService }), { prefix: "/api/v1/org" });
   await app.register(makeAiRoutes({ ai: aiProviders, users, jwt }), { prefix: "/api/v1/ai" });
   await app.register(makeCommandHistoryRoutes({ commands, users, jwt }), { prefix: "/api/v1/command-history" });
@@ -305,7 +322,7 @@ async function main() {
   // Phase 5 — browser SSH gateway (WebSocket).
   await app.register(makeSshGateway({ sessions: activeSessions, users, jwt, hosts, credentials, history, settings: appSettings, log, hostKeys }), { prefix: "/api/v1/ssh" });
   // Phase 4 — browser SFTP gateway (REST, session-based).
-  await app.register(makeSftpGateway({ users, jwt, hosts, credentials, log, hostKeys }), { prefix: "/api/v1/sftp" });
+  await app.register(makeSftpGateway({ users, jwt, hosts, credentials, log, hostKeys, sessions: activeSessions }), { prefix: "/api/v1/sftp" });
   // Phase 6 — browser VNC gateway (WebSocket byte relay).
   await app.register(makeVncGateway({ sessions: activeSessions, users, jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
   // Browser Telnet gateway (WebSocket ↔ raw TCP relay).

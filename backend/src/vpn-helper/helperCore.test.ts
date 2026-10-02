@@ -59,6 +59,8 @@ test("valid client config spawns the fixed binary with an argument array, shell:
   assert.equal(s.calls[0]!.cmd, "/usr/sbin/openvpn"); // fixed path
   assert.ok(Array.isArray(s.calls[0]!.args));         // argument array, not a string
   assert.deepEqual(s.calls[0]!.args.slice(-2), ["--script-security", "1"]); // forced sandbox
+  // SEC-OVPN-FILE-001: server-pushed default-route takeover is filtered.
+  assert.ok(s.calls[0]!.args.join(" ").includes("--pull-filter ignore redirect-gateway"));
   assert.equal(s.calls[0]!.opts.shell, undefined);    // never shell:true
 });
 
