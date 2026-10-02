@@ -138,7 +138,7 @@ export function SmtpPage() {
 
             <div>
               <label className="block text-xs text-fg-muted mb-1">App base URL (for reset links)</label>
-              <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://161.97.78.116.nip.io:6655" className="input w-full" />
+              <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://awamer.example.com" className="input w-full" />
               <p className="text-2xs text-fg-muted mt-1">Reset links are built from this. If empty, the request's origin is used.</p>
             </div>
 

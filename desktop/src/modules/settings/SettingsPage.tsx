@@ -7,7 +7,7 @@ import { sessionSettingsApi } from "./sessionSettingsApi";
 import { useTerminalUi } from "@/modules/sessions/store/terminalUiStore";
 import { useTerminalPaste, type PasteButton } from "@/modules/sessions/store/terminalPastePref";
 import { useLockStore } from "@/modules/auth/store/lockStore";
-import { ApiError } from "@/shared/lib/api";
+import { ApiError, request } from "@/shared/lib/api";
 import { hasPerm } from "@/shared/lib/permissions";
 
 export function SettingsPage() {
@@ -63,11 +63,32 @@ export function SettingsPage() {
       )}
 
       <Section title="About">
-        <Row label="Version" value="1.0.0" mono />
-        <Row label="Phase" value="1 — Foundation" />
-        <Row label="Build" value="dev" mono small last />
+        <AboutRows />
       </Section>
     </div>
+  );
+}
+
+/** Release identity of this client build and of the connected server. */
+function AboutRows() {
+  const [server, setServer] = useState<{ version: string; commit: string } | null>(null);
+  useEffect(() => {
+    request<{ version: string; commit: string; build_date: string }>("/api/v1/version", { unauthenticated: true })
+      .then((v) => setServer({ version: v.version, commit: v.commit }))
+      .catch(() => setServer(null));
+  }, []);
+  const short = (c: string) => (/^[0-9a-f]{7,40}$/.test(c) ? c.slice(0, 12) : c);
+  return (
+    <>
+      <Row label="Version" value={__APP_VERSION__} mono />
+      <Row label="Commit" value={short(__GIT_COMMIT__)} mono small />
+      <Row label="Build date" value={__BUILD_DATE__} mono small />
+      <Row
+        label="Server"
+        value={server ? `${server.version} (${short(server.commit)})` : "—"}
+        mono small last
+      />
+    </>
   );
 }
 

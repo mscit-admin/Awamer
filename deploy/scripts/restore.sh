@@ -48,10 +48,32 @@ sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.prod
     psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER;"
 
 echo "Restoring backup..."
-gunzip -c "$BACKUP_FILE" | sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production exec -T postgres \
-    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+if [[ "$BACKUP_FILE" == *.gpg ]]; then
+    gpg --batch --decrypt "$BACKUP_FILE" | gunzip -c
+else
+    gunzip -c "$BACKUP_FILE"
+fi | sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production exec -T postgres \
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+
+# DB-LEAST-PRIVILEGE: the dump is taken --no-owner --no-acl, so the restored
+# objects belong to the cluster admin with no grants. Re-provision (ownership →
+# awamer_migrator, runtime grants) and run pending migrations BEFORE the
+# backend starts — otherwise awamer_app has no access (fails closed).
+echo "Re-applying least-privilege roles and grants..."
+sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production run --rm db-provision
+echo "Applying any pending migrations as the schema owner..."
+sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production run --rm migrate
 
 echo "Restarting auth-service..."
 sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production up -d auth-service
 
-echo "✓ Restore complete"
+# Recovery verification: the backend must report READY against the restored DB.
+for _ in $(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8081/readyz >/dev/null 2>&1; then
+        echo "✓ Restore complete — backend READY on the restored database"
+        exit 0
+    fi
+    sleep 2
+done
+echo "✗ Backend did not become READY after restore — check: docker compose logs auth-service migrate"
+exit 1

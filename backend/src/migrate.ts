@@ -11,7 +11,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "./config/index.js";
+import type { Config } from "./config/index.js";
 import { createPool } from "./db/index.js";
 import { createLogger } from "./logger/index.js";
 
@@ -177,8 +177,28 @@ async function appliedMap(pool: import("pg").Pool): Promise<Map<number, string>>
   return new Map(rows.map((r) => [Number(r.version), r.name]));
 }
 
+/**
+ * DB-LEAST-PRIVILEGE: the migration job needs ONLY its database connection —
+ * deliberately not the full application config (JWT secrets, the credential
+ * encryption key, the bootstrap password …). In production DATABASE_URL here is
+ * the schema owner (awamer_migrator); the backend runtime uses a separate,
+ * DML-only role and never runs migrations itself.
+ */
+function migrationConfig(): Config {
+  const env = process.env;
+  const url = (env.DATABASE_URL ?? "").trim();
+  if (!url) throw new Error("Invalid configuration:\n  DATABASE_URL: Required (the migration owner's connection)");
+  const appEnv = env.APP_ENV === "production" || env.APP_ENV === "staging" ? env.APP_ENV : "development";
+  const levels = ["fatal", "error", "warn", "info", "debug", "trace"];
+  const level = levels.includes(env.LOG_LEVEL ?? "") ? env.LOG_LEVEL! : "info";
+  return {
+    isProd: appEnv === "production",
+    env: { DATABASE_URL: url, DATABASE_MAX_CONNS: 2, APP_ENV: appEnv, LOG_LEVEL: level },
+  } as unknown as Config;
+}
+
 async function migrate(direction: "up" | "down") {
-  const cfg = loadConfig();
+  const cfg = migrationConfig();
   const log = createLogger(cfg);
   const pool = await createPool(cfg, log);
   await ensureTable(pool);

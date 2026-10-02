@@ -11,6 +11,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release:
+    name: Release consistency (single version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Fails if any first-party version declaration differs (and, on a tag,
+      # if it differs from the tag).
+      - run: node scripts/check-release-version.mjs ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+
   backend:
     name: Backend (typecheck · lint · test · integration)
     runs-on: ubuntu-latest
@@ -47,10 +59,18 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      # Migration gate: a failing migration fails the pipeline.
       - run: npm run migrate:up
+      # Includes the security regression suites (RBAC, tenant isolation, MFA,
+      # SSRF, VPN, DB least-privilege — see security-final/ and production-closure/).
       - run: npm run test:integration
-      # Advisory until the known advisories are remediated; then drop the flag.
-      - name: npm audit (high)
+      - run: npm run build
+      # BLOCKING: any CRITICAL runtime advisory fails the build.
+      - name: npm audit (critical, runtime) — gate
+        run: npm audit --omit=dev --audit-level=critical
+      # Informational: remaining HIGH runtime advisories are triaged in
+      # production-closure/DEPENDENCY_FINAL_STATUS.md (not reachable in production).
+      - name: npm audit (high, runtime) — report
         run: npm audit --omit=dev --audit-level=high
         continue-on-error: true
 
@@ -70,8 +90,11 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run lint
+      - run: npm test
       - run: npm run build
-      - name: npm audit (high)
+      - name: npm audit (critical, runtime) — gate
+        run: npm audit --omit=dev --audit-level=critical
+      - name: npm audit (high, runtime) — report
         run: npm audit --omit=dev --audit-level=high
         continue-on-error: true
 
@@ -91,7 +114,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev build-essential pkg-config
-      - run: cargo check
+      - run: cargo check --locked
+      # Live SSH regression (russh 0.63 migration): real OpenSSH on loopback.
+      - name: SSH live regression test
+        run: |
+          sudo apt-get install -y openssh-server openssh-client
+          eval "$(sudo sh tests/ssh-live-setup.sh /tmp/awamer-ssh-live 2222)"
+          sudo chmod -R a+r /tmp/awamer-ssh-live
+          eval "$(ssh-agent -s)" && ssh-add /tmp/awamer-ssh-live/user_ed25519
+          AWAMER_SSH_TEST_AGENT_SOCK="$SSH_AUTH_SOCK" cargo test --locked --lib ssh_live -- --nocapture
+      - name: cargo audit — report
+        run: cargo install cargo-audit --locked && cargo audit
+        continue-on-error: true
       # Advisory until the codebase is brought into fmt/clippy conformance.
       - name: cargo fmt --check
         run: cargo fmt --check
@@ -99,3 +133,41 @@ jobs:
       - name: cargo clippy
         run: cargo clippy -- -D warnings
         continue-on-error: true
+
+  images:
+    name: Production images (build + traceability)
+    runs-on: ubuntu-latest
+    needs: [release, backend]
+    steps:
+      - uses: actions/checkout@v4
+      # The Dockerfiles refuse an APP_VERSION that differs from package.json.
+      - name: Build backend + vpn-helper images
+        run: |
+          V=$(node -p "require('./backend/package.json').version")
+          for pair in auth-service:Dockerfile vpn-helper:Dockerfile.vpn-helper; do
+            name=${pair%%:*}; file=${pair#*:}
+            docker build backend -f backend/$file \
+              --build-arg APP_VERSION=$V --build-arg GIT_COMMIT=${{ github.sha }} \
+              --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+              -t netsphere/$name:$V
+            docker image inspect netsphere/$name:$V --format "$name {{json .Config.Labels}} user={{.Config.User}}"
+          done
+          # Release identity is baked into the backend image.
+          docker run --rm --entrypoint node netsphere/auth-service:$V -e \
+            "console.log(process.env.GIT_COMMIT, require('/app/package.json').version)"
+      - name: Compose contract (static)
+        run: docker compose -f deploy/docker-compose.production.yml config -q
+        env:
+          APP_VERSION: ci
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+          REDIS_PASSWORD: ci
+          JWT_ACCESS_SECRET: ci
+          JWT_REFRESH_SECRET: ci
+          CREDENTIAL_ENCRYPTION_KEY: ci
+          BOOTSTRAP_ADMIN_PASSWORD: ci
+          VPN_HELPER_SECRET: ci
+          AWAMER_MIGRATOR_DB_PASSWORD: ci
+          AWAMER_APP_DB_PASSWORD: ci
+          AWAMER_VPN_AUTH_DB_PASSWORD: ci

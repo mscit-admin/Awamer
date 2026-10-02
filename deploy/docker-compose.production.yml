@@ -73,10 +73,77 @@ services:
       timeout: 3s
       retries: 5
 
+  # ===================================================================
+  # DB-LEAST-PRIVILEGE — deployment sequence (each step must succeed):
+  #   postgres (healthy) → db-provision → migrate → auth-service
+  # db-provision (cluster ADMIN) creates/updates the three least-privilege
+  # roles; migrate applies the schema as the NON-superuser owner; the backend
+  # then runs as the DML-only awamer_app and REFUSES to start as anything more
+  # privileged (backend/src/db/runtimeRole.ts). The cluster-admin credentials
+  # (POSTGRES_USER/PASSWORD) are given to NO long-running service.
+  # ===================================================================
+  db-provision:
+    image: postgres:16-alpine
+    container_name: netsphere-db-provision
+    restart: "no"
+    user: "70:70"  # the image's unprivileged `postgres` OS user (psql client only)
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER missing — check .env.production}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing — check .env.production}
+      PGDATABASE: ${POSTGRES_DB:?POSTGRES_DB missing — check .env.production}
+      AWAMER_MIGRATOR_DB_PASSWORD: "${AWAMER_MIGRATOR_DB_PASSWORD:?AWAMER_MIGRATOR_DB_PASSWORD missing — openssl rand -hex 32}"
+      AWAMER_APP_DB_PASSWORD: "${AWAMER_APP_DB_PASSWORD:?AWAMER_APP_DB_PASSWORD missing — openssl rand -hex 32}"
+      AWAMER_VPN_AUTH_DB_PASSWORD: "${AWAMER_VPN_AUTH_DB_PASSWORD:?AWAMER_VPN_AUTH_DB_PASSWORD missing — openssl rand -hex 32}"
+    volumes:
+      - ./db/provision-roles.sh:/opt/awamer/provision-roles.sh:ro
+    entrypoint: ["sh", "/opt/awamer/provision-roles.sh"]
+    networks:
+      - internal
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  migrate:
+    # Same image as auth-service (built by it); never pulled from a registry.
+    image: netsphere/auth-service:${APP_VERSION:?APP_VERSION missing — set the release version in .env.production}
+    pull_policy: never
+    container_name: netsphere-migrate
+    restart: "no"
+    user: "10001:10001"
+    depends_on:
+      db-provision:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: production
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # The schema OWNER (DDL) — used only by this one-shot job.
+      DATABASE_URL: postgres://awamer_migrator:${AWAMER_MIGRATOR_DB_PASSWORD:?AWAMER_MIGRATOR_DB_PASSWORD missing}@postgres:5432/${POSTGRES_DB}
+    command: ["node", "--enable-source-maps", "dist/migrate.js", "up"]
+    networks:
+      - internal
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   auth-service:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      # GO-LIVE traceability (non-sensitive; exposed by /api/v1/version + OCI labels).
+      args:
+        APP_VERSION: ${APP_VERSION:?APP_VERSION missing}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     image: netsphere/auth-service:${APP_VERSION:?APP_VERSION missing — set the release version in .env.production}
     container_name: netsphere-auth
     restart: unless-stopped
@@ -94,9 +161,13 @@ services:
         condition: service_healthy
       vpn-helper:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       # ---- Database -------------------------------------------------
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # DB-LEAST-PRIVILEGE: the DML-only runtime role. Startup FAILS if this is
+      # ever pointed at the superuser or the migration owner.
+      DATABASE_URL: postgres://awamer_app:${AWAMER_APP_DB_PASSWORD:?AWAMER_APP_DB_PASSWORD missing}@postgres:5432/${POSTGRES_DB}
       # ---- Server ---------------------------------------------------
       # Variable names must match backend/src/config/index.ts exactly.
       APP_ENV: production
@@ -168,14 +239,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    # Run migrations on startup
-    command: >
-      sh -c "
-        echo 'Running database migrations...' &&
-        node /app/dist/migrate.js up || exit 1 ;
-        echo 'Starting server...' &&
-        exec node --enable-source-maps /app/dist/server.js
-      "
+    # Migrations are NOT run here any more: the one-shot `migrate` service
+    # applies them as the schema owner before this container starts (image CMD
+    # starts the server). Read-only root filesystem; /tmp is the only writable path.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
 
   # ===================================================================
   # SEC-INFRA-001 — awamer-vpn-helper: the ONLY privileged component.
@@ -189,6 +258,11 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile.vpn-helper
+      # GO-LIVE traceability (non-sensitive; exposed by /api/v1/version + OCI labels).
+      args:
+        APP_VERSION: ${APP_VERSION:?APP_VERSION missing}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     image: netsphere/vpn-helper:${APP_VERSION:?APP_VERSION missing — set the release version in .env.production}
     container_name: netsphere-vpn-helper
     restart: unless-stopped
@@ -213,7 +287,9 @@ services:
       # Host networking → the bridge DNS name `postgres` is unreachable; the
       # helper reaches PostgreSQL over the host loopback publish (see postgres
       # service). Used ONLY by the built-in server's per-user auth-verify child.
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}
+      # DB-LEAST-PRIVILEGE: dedicated role with SELECT on exactly the four
+      # vpn_server_clients columns auth-verify reads — nothing else.
+      DATABASE_URL: postgres://awamer_vpn_auth:${AWAMER_VPN_AUTH_DB_PASSWORD:?AWAMER_VPN_AUTH_DB_PASSWORD missing}@127.0.0.1:5432/${POSTGRES_DB}
       VPN_HELPER_SOCKET: /run/awamer/ipc/vpn-helper.sock
       VPN_HELPER_SECRET: "${VPN_HELPER_SECRET:?VPN_HELPER_SECRET missing — openssl rand -hex 32}"
       OPENVPN_PATH: /usr/sbin/openvpn

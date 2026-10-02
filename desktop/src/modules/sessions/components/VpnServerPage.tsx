@@ -85,7 +85,6 @@ export function VpnServerPage() {
     refresh().finally(() => setLoading(false));
     pollRef.current = setInterval(refresh, 5000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function openNew() {
@@ -369,7 +368,7 @@ function ClientPanel({ server, onError, onChanged }: {
     }
   }
 
-  useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [server.id]);
+  useEffect(() => { void load(); }, [server.id]);
 
   async function addClient(e: FormEvent) {
     e.preventDefault();

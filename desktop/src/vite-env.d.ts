@@ -8,3 +8,8 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Release identity baked in at build time (vite.config.ts `define`). */
+declare const __APP_VERSION__: string;
+declare const __GIT_COMMIT__: string;
+declare const __BUILD_DATE__: string;

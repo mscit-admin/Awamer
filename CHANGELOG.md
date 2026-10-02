@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.8.0] — Production go-live closure
+
+Closes the conditions of the final security assessment (`security-final/`);
+evidence in `production-closure/`. **No RBAC permission was added or changed**
+in this phase (`settings:manage` shipped in the security closure below).
+
+### Changed — release
+- **Single release version 1.8.0** across backend, frontend, Tauri config, the
+  Rust crate (+ lockfiles), installer and env template. `scripts/check-release-version.mjs`
+  fails CI on any drift. The About screen shows the client version/commit/build date
+  and the connected server's release; `GET /api/v1/version` exposes
+  `{version, commit, build_date}` (format-checked, nothing else). Docker images carry
+  OCI labels and refuse to build when `APP_VERSION` ≠ `package.json`.
+
+### Security
+- **Database least privilege.** New `deploy/db/provision-roles.sh` (run by the
+  one-shot `db-provision` service) creates `awamer_migrator` (schema owner, NOT
+  superuser), `awamer_app` (backend: DML only) and `awamer_vpn_auth` (vpn-helper:
+  SELECT on 4 columns of `vpn_server_clients`). Migrations run in a separate one-shot
+  `migrate` service; the backend no longer migrates and **refuses to start in
+  production as a superuser or as the migration owner** (`DB_ALLOW_PRIVILEGED_RUNTIME`
+  is an explicit, loudly-logged emergency override). Migration `029` applies the
+  object-dependent grants. Upgrades hand existing objects to the migrator; the
+  installer generates the three new passwords. Cluster-admin credentials reach no
+  long-running service.
+- **Desktop SSH: russh 0.45 → 0.63.3** (RUSTSEC-2026-0153/0154). Version-specific
+  calls are isolated in `ssh_auth.rs`; known_hosts entries stay byte-compatible. Verified
+  by a live test against OpenSSH, covering TOFU pinning, changed-key refusal, ed25519/RSA/
+  encrypted-key/password/agent auth, exec and SFTP (wired into CI).
+- **Production config gate:** `ENABLE_API_DOCS`, wildcard/`null`/plain-http CORS
+  origins, and a missing/short `VPN_HELPER_SECRET` now fail startup in production;
+  Swagger modules are loaded only when docs are enabled.
+- **Logging:** request logs carry method + path only (query strings such as the VNC
+  ticket are dropped); redaction extended to MFA/step-up/reset/refresh tokens, cookies,
+  tickets, secret envelopes and DB connection strings.
+- **Containers:** backend, migrate and db-provision run with a read-only root
+  filesystem (backend `/tmp` tmpfs).
+- **Backups:** owner-only permissions, optional GPG encryption (`BACKUP_GPG_RECIPIENT`);
+  `restore.sh` re-provisions roles, runs migrations and verifies `/readyz`.
+- **CI:** release-consistency gate, blocking critical runtime `npm audit`, backend
+  build, desktop tests, live SSH test, and image build + compose validation jobs.
+  Pre-existing lint errors that broke the lint step were fixed.
+
 ## [Unreleased] — Final security closure (FINAL-SEC)
 
 Independent final assessment of the current code; full evidence in

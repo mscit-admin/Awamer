@@ -33,7 +33,7 @@ sudo chown $USER /opt/netsphere
 cd /opt/netsphere
 
 # Extract the source tarball into this directory
-tar xzf ~/netsphere-1.6.0.1.tar.gz --strip-components=1
+tar xzf ~/netsphere-1.8.0.tar.gz --strip-components=1
 
 # Run the installer
 chmod +x deploy/scripts/install.sh
@@ -172,7 +172,7 @@ cd /opt/netsphere
 sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production down
 
 # Replace the source (NOT .env.production!)
-tar xzf ~/netsphere-1.7.0.tar.gz --strip-components=1 --no-overwrite-dir
+tar xzf ~/netsphere-1.8.0.tar.gz --strip-components=1 --no-overwrite-dir
 
 # Rebuild and start — migrations run automatically
 sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production build

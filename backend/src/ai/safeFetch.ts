@@ -236,7 +236,7 @@ export async function safeFetch(rawUrl: string, init: SafeFetchInit = {}, policy
   let url = assertSafeUrl(rawUrl, p.allowHttp, p.allowLoopback);
   let method = init.method ?? "GET";
   let body: string | undefined = init.body;
-  let headers: Record<string, string> = { ...(init.headers ?? {}) };
+  const headers: Record<string, string> = { ...(init.headers ?? {}) };
 
   for (let hop = 0; hop <= p.maxRedirects; hop++) {
     const res = await once(url, { method, headers, body }, p);

@@ -37,9 +37,19 @@ function newRsaKeys(): { forgePriv: forge.pki.rsa.PrivateKey; forgePub: forge.pk
   };
 }
 
-function serial(): string {
-  // Positive, unique-ish hex serial.
-  return "00" + randomBytes(16).toString("hex");
+/**
+ * Positive, MINIMALLY-encoded 128-bit serial (RFC 5280 §4.1.2.2; ≥120 bits of
+ * CSPRNG entropy). The first octet is forced into 0x01..0x7f, so the DER
+ * INTEGER needs no sign-padding byte and can never start with a redundant
+ * 0x00. The previous `"00" + 16 random bytes` produced a non-minimal INTEGER
+ * whenever the random part itself began with 0x00 (~1 in 256): OpenSSL (and so
+ * OpenVPN) refuses to parse such certificates ("asn1 illegal padding"), and a
+ * forge PEM round-trip re-encodes the serial so the signature no longer verifies.
+ */
+export function serial(): string {
+  const b = randomBytes(16);
+  b[0] = (b[0]! & 0x7f) | 0x01;
+  return b.toString("hex");
 }
 
 /** Build a self-signed CA plus a fresh tls-crypt key. */

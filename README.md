@@ -1,4 +1,4 @@
-# Awamer Terminal — v1.7.0
+# Awamer Terminal — v1.8.0
 
 > Enterprise Remote Administration & Terminal Management Platform
 
@@ -12,7 +12,7 @@ installer handles everything:
 
 ```bash
 cd /opt/netsphere
-tar xzf ~/netsphere-1.6.0.1.tar.gz --strip-components=1
+tar xzf ~/netsphere-1.8.0.tar.gz --strip-components=1
 chmod +x deploy/scripts/install.sh
 ./deploy/scripts/install.sh
 ```

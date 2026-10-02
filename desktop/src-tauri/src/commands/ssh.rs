@@ -30,10 +30,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use russh::client::{self, Config, Handle, Handler, Msg};
-use russh::keys::key::PublicKey;
+use russh::keys::PublicKeyOrCertificate;
 use russh::{ChannelMsg, Disconnect};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -107,20 +106,20 @@ pub(crate) static LAST_HOST_KEY_CHANGE: Lazy<StdMutex<Option<HostKeyChangedDetai
     Lazy::new(|| StdMutex::new(None));
 
 #[derive(Clone)]
-struct ClientHandler {
-    host: String,
-    port: u16,
+pub(crate) struct ClientHandler {
+    pub(crate) host: String,
+    pub(crate) port: u16,
 }
 
-#[async_trait]
 impl Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        presented: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         use crate::commands::known_hosts::{self, VerifyOutcome};
+        let server_public_key = &crate::commands::ssh_auth::presented_host_key(presented);
 
         // Obtain (or initialise) the global store.
         let store_arc = known_hosts::STORE.clone();
@@ -136,12 +135,8 @@ impl Handler for ClientHandler {
         }
         let store = guard.as_mut().unwrap();
 
-        let presented_b64 = {
-            // Same encoding the store uses (SSH wire-format → base64).
-            // Imported via russh_keys::PublicKeyBase64 below.
-            use russh_keys::PublicKeyBase64;
-            server_public_key.public_key_base64()
-        };
+        // Same encoding the store uses (SSH wire-format → base64).
+        let presented_b64 = crate::commands::ssh_auth::public_key_base64(server_public_key);
         let presented_fp = known_hosts::fingerprint_sha256(&presented_b64);
 
         match store.verify(&self.host, self.port, server_public_key) {
@@ -337,23 +332,13 @@ pub async fn ssh_connect(
     // 4. Authenticate using the resolved method.
     let auth_ok = match &auth_method {
         AuthMethod::Password(pw) => {
-            handle.authenticate_password(&username, pw).await
+            crate::commands::ssh_auth::authenticate_with_password(&mut handle, &username, pw).await
                 .map_err(|e| AppError::new("ssh_auth_failed", format!("authenticate: {e}")))?
         }
         AuthMethod::PrivateKey { pem, passphrase } => {
-            let key = russh_keys::decode_secret_key(pem, passphrase.as_deref())
-                .map_err(|e| {
-                    // Distinguish the most common cases for the renderer.
-                    let code = if let russh_keys::Error::KeyIsEncrypted = e {
-                        "key_passphrase_required"
-                    } else if matches!(e, russh_keys::Error::CouldNotReadKey) {
-                        "key_invalid_passphrase"
-                    } else {
-                        "key_decode_failed"
-                    };
-                    AppError::new(code, format!("decode key: {e}"))
-                })?;
-            handle.authenticate_publickey(&username, Arc::new(key)).await
+            // Distinguishes passphrase-required / wrong-passphrase / invalid key.
+            let key = crate::commands::ssh_auth::decode_private_key(pem, passphrase.as_deref())?;
+            crate::commands::ssh_auth::authenticate_with_key(&mut handle, &username, key).await
                 .map_err(|e| AppError::new("ssh_auth_failed", format!("authenticate: {e}")))?
         }
         AuthMethod::SshAgent => {
@@ -363,34 +348,7 @@ pub async fn ssh_connect(
                 AppError::new("ssh_agent_unavailable",
                     "SSH_AUTH_SOCK is not set — no ssh-agent in the environment")
             })?;
-            let mut agent = russh_keys::agent::client::AgentClient::connect_uds(&sock).await
-                .map_err(|e| AppError::new("ssh_agent_connect_failed",
-                    format!("could not connect to ssh-agent at {sock}: {e}")))?;
-            let identities = agent.request_identities().await
-                .map_err(|e| AppError::new("ssh_agent_query_failed",
-                    format!("failed to list agent identities: {e}")))?;
-            if identities.is_empty() {
-                return Err(AppError::new("ssh_agent_no_identities",
-                    "ssh-agent has no keys loaded (try `ssh-add ~/.ssh/id_ed25519`)"));
-            }
-            let mut accepted = false;
-            for ident in &identities {
-                // authenticate_future takes the agent BY VALUE and returns
-                // (agent_back, Result<bool, Error>) — we re-bind `agent`
-                // each iteration so we can keep trying with the next key.
-                let (agent_back, result) =
-                    handle.authenticate_future(&username, ident.clone(), agent).await;
-                agent = agent_back;
-                match result {
-                    Ok(true) => { accepted = true; break; }
-                    Ok(false) => { /* try the next identity */ }
-                    Err(e) => {
-                        return Err(AppError::new("ssh_agent_auth_failed",
-                            format!("authenticate via agent: {e}")));
-                    }
-                }
-            }
-            accepted
+            crate::commands::ssh_auth::authenticate_with_agent(&mut handle, &username, &sock).await?
         }
     };
     if !auth_ok {
