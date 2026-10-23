@@ -64,6 +64,8 @@ import { BackupRepository } from "./repos/backupRepo.js";
 import { RoleRepository } from "./repos/roleRepo.js";
 import { RoleService } from "./domain/roleService.js";
 import { loadMfaPolicy } from "./domain/mfaPolicy.js";
+import { registerNoStoreHeaders } from "./middleware/cacheControl.js";
+import { registerWsOriginCheck } from "./middleware/wsOrigin.js";
 import { makeRoleRoutes } from "./routes/roles.js";
 import { makeSshGateway } from "./ssh/gateway.js";
 import { makeSftpGateway } from "./ssh/sftpGateway.js";
@@ -225,6 +227,11 @@ async function main() {
     limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 4 },
   });
   await app.register(helmet, { contentSecurityPolicy: false });
+  // SEC-CACHE-001: no API response (secrets, per-user data) may be cached.
+  registerNoStoreHeaders(app);
+  // SEC-WS-ORIGIN-001: refuse cross-site WebSocket handshakes (CSWSH) on every
+  // gateway; same-origin, CORS-allowlisted (Tauri) and Origin-less clients pass.
+  registerWsOriginCheck(app, cfg.corsOrigins);
   await app.register(cors, {
     origin: cfg.corsOrigins,
     credentials: true,

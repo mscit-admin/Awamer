@@ -34,6 +34,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     To phase it in, a Super Admin can temporarily untick roles in the policy, after
     enrolling themselves.
 
+- **AI "Insert" can no longer run a command (SEC-AI-INSERT-001, ASVS V1.3.3).** Text inserted
+  at the terminal prompt (AI suggestion, command history) keeps only its first line, and CR/LF,
+  tabs and all C0/C1 control bytes are removed. Before, a prompt-injected answer such as
+  `ls\rrm -rf ~` executed without the user pressing Enter. Explicit pastes are unchanged.
+- **Password-reset links are single-use under concurrency (SEC-RESET-RACE-001, ASVS
+  V15.4.2).** The link is consumed with an atomic `UPDATE … WHERE used_at IS NULL` before the
+  password changes, so two parallel requests can no longer both succeed.
+- **API responses are never cached (SEC-CACHE-001, ASVS V14.3.2).** Every backend response
+  carries `Cache-Control: no-store` and `Pragma: no-cache`, including credential reveal, TOTP
+  seed, VPN profile and backup responses, unless a route sets its own policy.
+- **WebSocket Origin check (SEC-WS-ORIGIN-001, ASVS V4.4.2).** The SSH, Telnet, VNC and tunnel
+  gateways refuse a cross-site handshake with 403 before the upgrade (cross-site WebSocket
+  hijacking). Allowed: same-origin (`Origin` host = `Host`), origins in
+  `CORS_ALLOWED_ORIGINS` (Tauri, dev server) and clients that send no `Origin`. A deployment
+  that serves the web UI from a hostname other than the API's must list it in
+  `CORS_ALLOWED_ORIGINS`.
+
 ### Fixed
 - **MFA setup page** (`/settings/security/mfa`): enroll and disable failed against the
   server, which has required a step-up token since SEC-MFA-002. The page now asks for the

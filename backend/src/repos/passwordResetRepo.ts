@@ -33,8 +33,18 @@ export class PasswordResetRepository {
     return { id: rows[0].id, userId: rows[0].user_id, expiresAt: rows[0].expires_at, usedAt: rows[0].used_at };
   }
 
-  async markUsed(id: string): Promise<void> {
-    await this.pool.query(`UPDATE password_resets SET used_at = NOW() WHERE id = $1`, [id]);
+  /**
+   * SEC-RESET-RACE-001 (ASVS V15.4.2) — atomically consume a reset: only the
+   * request whose UPDATE flips `used_at` from NULL wins. Returns false when the
+   * reset was already used (e.g. a concurrent request) or has expired.
+   */
+  async claim(id: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE password_resets SET used_at = NOW()
+       WHERE id = $1 AND used_at IS NULL AND expires_at > NOW()`,
+      [id],
+    );
+    return rowCount === 1;
   }
 
   /** Invalidate any outstanding resets for a user (e.g. before issuing a new one). */

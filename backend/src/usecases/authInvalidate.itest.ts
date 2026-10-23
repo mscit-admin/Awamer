@@ -208,3 +208,21 @@ test("AUTH-INVALIDATE-015: auth_version cannot be downgraded by client input", {
   const forged = `${h}.${p}.invalidsignature`;
   assert.equal((await app.inject({ method: "GET", url: "/api/v1/t/priv", headers: bearer(forged) })).statusCode, 401);
 });
+
+test("RESET-RACE-001: two parallel resets with one link — exactly one succeeds (SEC-RESET-RACE-001)", { skip: dbSkip }, async () => {
+  const id = await mkUser();
+  const raw = "resettok_" + uuid().replace(/-/g, "");
+  const { createHash } = await import("node:crypto");
+  await resets.create(id, createHash("sha256").update(raw).digest("hex"), new Date(Date.now() + 30 * 60000));
+  const pwA = "Race-Str0ng-PassA!", pwB = "Race-Str0ng-PassB!";
+  const results = await Promise.allSettled([resetUC.resetPassword(raw, pwA), resetUC.resetPassword(raw, pwB)]);
+  const ok = results.filter((r) => r.status === "fulfilled");
+  const bad = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+  assert.equal(ok.length, 1, "exactly one reset wins");
+  assert.equal(bad.length, 1);
+  assert.match(String(bad[0]!.reason?.code ?? bad[0]!.reason), /invalid_token/);
+  // the stored password is the winner's, and the link is now dead
+  const winner = results[0]!.status === "fulfilled" ? pwA : pwB;
+  assert.equal(await argon2.verify((await users.getById(id)).passwordHash, winner), true);
+  await assert.rejects(() => resetUC.resetPassword(raw, "Third-Str0ng-Pass!"), /invalid or has expired/);
+});

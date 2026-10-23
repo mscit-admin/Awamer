@@ -115,8 +115,12 @@ export class PasswordResetUseCase {
     if (!validatePassword(newPassword)) throw Errors.WeakPassword();
 
     const hash = await this.argon2.hash(newPassword);
+    // SEC-RESET-RACE-001: consume the link atomically BEFORE changing the
+    // password, so two parallel requests with one link cannot both succeed.
+    if (!(await this.resets.claim(rec.id))) {
+      throw new DomainError("invalid_token", "this reset link is invalid or has expired");
+    }
     await this.users.updatePasswordHash(rec.userId, hash);
-    await this.resets.markUsed(rec.id);
     // SEC-SESSION-001: a reset invalidates ALL prior state — bump auth_version
     // (old access tokens fail), revoke refresh sessions, close live remote
     // sessions (SSH/Telnet/Tunnel/VNC).
