@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { JwtService, VerifiedClaims } from "../jwt/index.js";
 import { can, type Permission } from "../domain/permissions.js";
+import { mfaRequiredForRole } from "../domain/mfaPolicy.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -21,6 +22,8 @@ export interface AuthUserState {
   companyId: string | null;
   /** SEC-SESSION-001 — live account security version. */
   authVersion: number;
+  /** SEC-MFA-POLICY-001 — whether the account has an active TOTP device. */
+  mfaEnabled: boolean;
 }
 export interface AuthUserSource {
   getById(id: string): Promise<AuthUserState>;
@@ -70,6 +73,8 @@ export interface CurrentAccess {
  *        (`assertAuthState`);
  *   8.   rejects a token minted before a security-sensitive change by comparing
  *        the token's `av` (auth_version) with the live account version;
+ *   9.   rejects a role that requires MFA while none is enrolled
+ *        (SEC-MFA-POLICY-001), unless `allowMfaEnrollment` is set;
  *   returns the live user so callers authorize on `live.role`, never the role
  *   embedded in the (possibly stale) token.
  *
@@ -82,6 +87,7 @@ export async function verifyCurrentAccessToken(
   jwt: JwtService,
   users: AuthUserSource,
   token: string,
+  opts: { allowMfaEnrollment?: boolean } = {},
 ): Promise<CurrentAccess> {
   const claims = await jwt.verifyAccess(token); // (1-3) signature + type + expiry
   const live = await assertAuthState(users, claims.sub); // (4-7) live account state
@@ -90,7 +96,38 @@ export async function verifyCurrentAccessToken(
   if (claims.av !== live.authVersion) {
     throw new AuthStateError("session_invalidated", "credentials changed; please sign in again");
   }
+  // (9) SEC-MFA-POLICY-001: a role that requires MFA gets no access until the
+  // account has enrolled — except the enrollment endpoints themselves, which
+  // the HTTP middleware opts into (`allowMfaEnrollment`). WS gateways never do.
+  if (!opts.allowMfaEnrollment && mfaEnrollmentRequired(live)) {
+    throw new AuthStateError("mfa_enrollment_required", "your role requires two-factor authentication; enroll first");
+  }
   return { claims, live };
+}
+
+/** True when the live account's role requires MFA and none is enrolled. */
+export function mfaEnrollmentRequired(live: Pick<AuthUserState, "role" | "mfaEnabled">): boolean {
+  return !live.mfaEnabled && mfaRequiredForRole(live.role);
+}
+
+/**
+ * SEC-MFA-POLICY-001 — the only routes an account that still has to enroll MFA
+ * may reach: read itself, re-authenticate, enroll/activate a device, change its
+ * password, unlock the idle screen, and sign out. Matched on the registered
+ * route pattern (method + URL incl. prefix), never on the raw request path.
+ */
+const MFA_ENROLLMENT_ROUTES = new Set([
+  "GET /api/v1/users/me",
+  "POST /api/v1/auth/step-up",
+  "POST /api/v1/auth/mfa/enroll",
+  "POST /api/v1/auth/mfa/activate",
+  "POST /api/v1/auth/change-password",
+  "POST /api/v1/auth/verify-password",
+  "POST /api/v1/auth/logout-all",
+]);
+
+export function isMfaEnrollmentRoute(method: string, routeUrl: string | undefined): boolean {
+  return routeUrl !== undefined && MFA_ENROLLMENT_ROUTES.has(`${method.toUpperCase()} ${routeUrl}`);
 }
 
 export function makeAuthMiddleware(jwt: JwtService, users: AuthUserSource) {
@@ -108,10 +145,17 @@ export function makeAuthMiddleware(jwt: JwtService, users: AuthUserSource) {
     // auth_version. The live DB role replaces the (possibly stale) token role so a
     // downgraded/moved user cannot exercise an old privilege until token expiry.
     try {
-      const { claims, live } = await verifyCurrentAccessToken(jwt, users, token);
+      const allowMfaEnrollment = isMfaEnrollmentRoute(req.method, req.routeOptions?.url);
+      const { claims, live } = await verifyCurrentAccessToken(jwt, users, token, { allowMfaEnrollment });
       claims.role = live.role;
       req.auth = claims;
     } catch (e) {
+      // SEC-MFA-POLICY-001: valid session, but the role requires MFA first. 403
+      // (not 401) so the client does not try to refresh, and can route the user
+      // to enrollment.
+      if (e instanceof AuthStateError && e.code === "mfa_enrollment_required") {
+        return reply.code(403).send({ error: { code: e.code, message: e.message } });
+      }
       // Distinguish a bad/expired token (invalid_token) from a valid token whose
       // account state is no longer acceptable (session_invalidated), preserving
       // the existing response contract.

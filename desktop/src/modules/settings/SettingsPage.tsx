@@ -9,6 +9,7 @@ import { useTerminalPaste, type PasteButton } from "@/modules/sessions/store/ter
 import { useLockStore } from "@/modules/auth/store/lockStore";
 import { ApiError, request } from "@/shared/lib/api";
 import { hasPerm } from "@/shared/lib/permissions";
+import { rolesApi, type RoleRecord } from "@/modules/users/rolesApi";
 
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
@@ -43,7 +44,9 @@ export function SettingsPage() {
           to="/settings/security/mfa"
           icon={<Shield className="size-4" />}
           title="Two-factor authentication"
-          desc={user?.mfa_enabled ? "Enabled — manage your authenticator." : "Not enabled — set up TOTP now."}
+          desc={user?.mfa_enabled
+            ? "Enabled — manage your authenticator."
+            : user?.mfa_policy_required ? "Required for your role — set up TOTP now." : "Not enabled — set up TOTP now."}
           last
         />
       </Section>
@@ -59,6 +62,12 @@ export function SettingsPage() {
       {canInstanceSettings && (
         <Section title="SSH sessions" icon={<Clock className="size-4" />}>
           <AdminSessionSettings />
+        </Section>
+      )}
+
+      {canInstanceSettings && (
+        <Section title="Two-factor policy" icon={<Shield className="size-4" />}>
+          <AdminMfaPolicy />
         </Section>
       )}
 
@@ -221,6 +230,76 @@ function AdminSessionSettings() {
           Auto-disconnect a browser SSH terminal after this many minutes with no activity.
           <span className="font-medium"> 0 = never</span>. Sessions also use TCP keepalive so they don't drop on network idle.
         </p>
+      </div>
+      {error && <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded">{error}</div>}
+    </div>
+  );
+}
+
+/** SEC-MFA-POLICY-001 — which roles must enroll two-factor authentication. */
+function AdminMfaPolicy() {
+  const [roles, setRoles] = useState<RoleRecord[]>([]);
+  const [required, setRequired] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([sessionSettingsApi.get(), rolesApi.list()])
+      .then(([s, r]) => { setRequired(new Set(s.mfa_required_roles)); setRoles(r.data); })
+      .catch((e) => setError(e instanceof Error ? e.message : "failed to load"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  function toggle(key: string) {
+    setRequired((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  async function save() {
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      const r = await sessionSettingsApi.updateMfaRequiredRoles([...required]);
+      setRequired(new Set(r.mfa_required_roles));
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading) {
+    return <div className="px-4 py-4 text-sm text-fg-muted flex items-center gap-2"><Loader2 className="size-4 animate-spin" /> Loading…</div>;
+  }
+  return (
+    <div className="px-4 py-4 space-y-3">
+      <div>
+        <label className="block text-xs text-fg-muted mb-2">Require two-factor authentication for</label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {roles.map((r) => (
+            <label key={r.id} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={required.has(r.key)} onChange={() => toggle(r.key)} className="accent-accent" />
+              <span>{r.name}</span>
+              <span className="font-mono text-2xs text-fg-muted">{r.key}</span>
+            </label>
+          ))}
+        </div>
+        <p className="text-2xs text-fg-muted mt-2">
+          Members of a checked role without an authenticator are held at the setup screen until they
+          enroll, and cannot turn it off. Applies to the whole installation, immediately.
+          Recommended: at least <span className="font-mono">super_admin</span> and <span className="font-mono">admin</span>.
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <button onClick={save} disabled={busy} className="btn-primary">
+          {busy ? <><Loader2 className="size-4 animate-spin" /> Saving…</> : "Save"}
+        </button>
+        {saved && <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 className="size-3.5" /> Saved</span>}
       </div>
       {error && <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-300 text-xs rounded">{error}</div>}
     </div>

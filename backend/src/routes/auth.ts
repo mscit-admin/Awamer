@@ -9,6 +9,7 @@ import type { User } from "../domain/index.js";
 import { DomainError, isAccountLocked } from "../domain/index.js";
 import { permissionsFor } from "../domain/permissions.js";
 import { makeAuthMiddleware } from "../middleware/auth.js";
+import { mfaRequiredForRole } from "../domain/mfaPolicy.js";
 import { isWebClient, setRefreshCookie, clearRefreshCookie, readRefreshCookie } from "./authCookies.js";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -37,6 +38,10 @@ export function userView(u: User) {
     is_active: u.isActive,
     is_locked: u.isLocked,
     mfa_enabled: u.mfaEnabled,
+    // SEC-MFA-POLICY-001: the role must have MFA (so it cannot be disabled);
+    // when not yet enrolled the client routes the user to enrollment.
+    mfa_policy_required: mfaRequiredForRole(u.role),
+    mfa_enrollment_required: !u.mfaEnabled && mfaRequiredForRole(u.role),
     company_id: u.companyId,
     org_unit_id: u.orgUnitId,
     last_login_at: u.lastLoginAt,

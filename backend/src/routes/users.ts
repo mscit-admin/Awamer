@@ -7,9 +7,18 @@ import type { MFAUseCase } from "../usecases/mfa.js";
 import type { ChangePasswordUseCase } from "../usecases/changePassword.js";
 import { makeAuthMiddleware } from "../middleware/auth.js";
 import type { JwtService } from "../jwt/index.js";
-import type { StepUpService } from "../usecases/stepUp.js";
+import { STEP_UP_PURPOSES, type StepUpService } from "../usecases/stepUp.js";
 import { can } from "../domain/permissions.js";
 import { tenantScopeForActor } from "../domain/tenantScope.js";
+import { mfaRequiredForRole } from "../domain/mfaPolicy.js";
+import type { AuditRepository } from "../repos/otherRepos.js";
+import type { Logger } from "../logger/index.js";
+
+/** The slice of MailService used for the email-change notice. */
+export interface NoticeMailer {
+  isConfigured(): Promise<boolean>;
+  send(msg: { to: string; subject: string; text: string }): Promise<void>;
+}
 
 interface Deps {
   users: UserRepository;
@@ -17,11 +26,20 @@ interface Deps {
   changePassword: ChangePasswordUseCase;
   jwt: JwtService;
   stepUp: StepUpService;
+  audit: AuditRepository;
+  mailer?: NoticeMailer;
+  log?: Logger;
 }
 
 export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
   return async function (app: FastifyInstance) {
     app.addHook("preHandler", makeAuthMiddleware(deps.jwt, deps.users));
+
+    // Read a step-up token from the header or body.
+    const stepUpToken = (req: import("fastify").FastifyRequest): string | undefined =>
+      (req.headers["x-step-up-token"] as string | undefined) ||
+      (typeof req.body === "object" && req.body && "step_up_token" in req.body
+        ? String((req.body as Record<string, unknown>).step_up_token) : undefined);
 
     // ---------- /users/me -----------------------------------------------
     app.get("/users/me", async (req, reply) => {
@@ -47,9 +65,32 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       }
       const user = await deps.users.getById(req.auth!.sub);
+      const oldEmail = user.email;
+      const emailChanged = parsed.data.email !== undefined &&
+        parsed.data.email.trim().toLowerCase() !== (oldEmail ?? "").trim().toLowerCase();
+      // SEC-EMAIL-001 (ASVS V7.5.1): the email is the password-reset channel,
+      // so changing it needs a fresh step-up (password + current MFA), not just
+      // an access token — otherwise a stolen token becomes a permanent takeover.
+      if (emailChanged) {
+        try {
+          await deps.stepUp.consume(stepUpToken(req), user.id, "email_change");
+        } catch (e) {
+          const code = e instanceof DomainError ? e.code : "step_up_required";
+          return reply.code(401).send({ error: { code, message: "recent re-authentication required" } });
+        }
+      }
       if (parsed.data.full_name !== undefined) user.fullName = parsed.data.full_name;
       if (parsed.data.email !== undefined) user.email = parsed.data.email;
       await deps.users.update(user);
+      if (emailChanged) {
+        await deps.audit.log({
+          userId: user.id, action: "user_update", resourceType: "user", resourceId: user.id, success: true,
+          ipAddress: req.ip, userAgent: String(req.headers["user-agent"] ?? ""), details: { op: "email_change" },
+        });
+        // ASVS V6.3.7: tell the PREVIOUS address, so a hijacked change is noticed.
+        // Best-effort and off the request path; never blocks or fails the change.
+        if (oldEmail && deps.mailer) void notifyEmailChanged(deps, oldEmail, user.username);
+      }
       return reply.send(userView(user));
     });
 
@@ -121,6 +162,7 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
     const stepUpSchema = z.object({
       password: z.string().min(1).max(256),
       mfa_code: z.string().regex(/^\d{6}$/).optional(),
+      purpose: z.enum(STEP_UP_PURPOSES as [string, ...string[]]).default("mfa_change"),
     });
     app.post("/auth/step-up", oracleLimit, async (req, reply) => {
       const parsed = stepUpSchema.safeParse(req.body);
@@ -142,15 +184,9 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
           return reply.code(401).send({ error: { code: "invalid_mfa_code", message: "incorrect MFA code" } });
         }
       }
-      const t = await deps.stepUp.issue(uid, "mfa_change");
+      const t = await deps.stepUp.issue(uid, parsed.data.purpose as (typeof STEP_UP_PURPOSES)[number]);
       return reply.send({ step_up_token: t.token, expires_in: t.expiresInSec });
     });
-
-    // Read a step-up token from the header or body.
-    const stepUpToken = (req: import("fastify").FastifyRequest): string | undefined =>
-      (req.headers["x-step-up-token"] as string | undefined) ||
-      (typeof req.body === "object" && req.body && "step_up_token" in req.body
-        ? String((req.body as Record<string, unknown>).step_up_token) : undefined);
 
     // ---------- MFA enroll/activate -------------------------------------
     const enrollSchema = z.object({
@@ -217,6 +253,12 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: "validation_failed", message: parsed.error.message } });
       }
+      // SEC-MFA-POLICY-001: a role that requires MFA cannot switch it off. (An
+      // admin can still reset a lost device via /users/:id/disable-mfa; the
+      // user is then held at enrollment until they add a new one.)
+      if (mfaRequiredForRole(req.auth!.role)) {
+        return reply.code(403).send({ error: { code: "mfa_required_by_policy", message: "your role requires two-factor authentication" } });
+      }
       // SEC-MFA-002: require step-up re-authentication.
       try {
         await deps.stepUp.consume(stepUpToken(req), req.auth!.sub, "mfa_change");
@@ -238,4 +280,20 @@ export function makeAuthedRoutes(deps: Deps): FastifyPluginAsync {
       }
     });
   };
+}
+
+async function notifyEmailChanged(deps: Deps, to: string, username: string): Promise<void> {
+  try {
+    if (!(await deps.mailer!.isConfigured())) return;
+    await deps.mailer!.send({
+      to,
+      subject: "Your Awamer account email was changed",
+      text:
+        `The email address for the Awamer account "${username}" was just changed, and this ` +
+        `address will no longer receive password-reset links.\n\n` +
+        `If you did not make this change, contact your administrator immediately.`,
+    });
+  } catch (e) {
+    deps.log?.warn({ err: e instanceof Error ? e.message : String(e) }, "email-change notice failed");
+  }
 }

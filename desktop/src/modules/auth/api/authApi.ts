@@ -10,7 +10,8 @@
  *   POST /api/v1/auth/mfa/enroll     (auth)
  *   POST /api/v1/auth/mfa/activate   (auth, confirms enrollment)
  *   GET  /api/v1/users/me            (auth)
- *   PATCH /api/v1/users/me           (auth)
+ *   PATCH /api/v1/users/me           (auth; email change needs an email_change step-up)
+ *   POST /api/v1/auth/step-up        (auth, password [+ MFA code] → single-use token)
  */
 import { request } from "@/shared/lib/api";
 
@@ -22,6 +23,10 @@ export interface User {
   role: string;
   permissions?: string[];
   mfa_enabled: boolean;
+  /** SEC-MFA-POLICY-001: this user's role must have MFA (cannot disable it). */
+  mfa_policy_required?: boolean;
+  /** SEC-MFA-POLICY-001: role requires MFA and none is enrolled yet. */
+  mfa_enrollment_required?: boolean;
   company_id?: string | null;
   org_unit_id?: string | null;
 }
@@ -41,6 +46,9 @@ export interface TokenResponse {
   expires_at: string;
   user?: User;
 }
+
+/** Purposes a step-up token can be minted for (bound server-side). */
+export type StepUpPurpose = "mfa_change" | "email_change";
 
 export interface MFAEnrollResponse {
   device_id: string;
@@ -91,18 +99,31 @@ export const authApi = {
     );
   },
 
-  updateMe(input: { full_name?: string; email?: string }) {
+  /** Changing `email` requires `stepUpToken` minted for "email_change". */
+  updateMe(input: { full_name?: string; email?: string }, stepUpToken?: string) {
     return request<User>("/api/v1/users/me", {
       method: "PATCH",
-      body: input,
+      // In the body, not a header: X-Step-Up-Token is not a CORS-allowed header.
+      body: stepUpToken ? { ...input, step_up_token: stepUpToken } : input,
+    });
+  },
+
+  /**
+   * Re-authenticate (password, plus the current MFA code when MFA is on) for a
+   * single sensitive action. Returns a short-lived single-use token.
+   */
+  stepUp(password: string, purpose: StepUpPurpose, mfaCode?: string) {
+    return request<{ step_up_token: string; expires_in: number }>("/api/v1/auth/step-up", {
+      method: "POST",
+      body: { password, purpose, ...(mfaCode ? { mfa_code: mfaCode } : {}) },
     });
   },
 
   // MFA
-  mfaEnroll(deviceName?: string) {
+  mfaEnroll(stepUpToken: string, deviceName?: string) {
     return request<MFAEnrollResponse>("/api/v1/auth/mfa/enroll", {
       method: "POST",
-      body: { device_name: deviceName ?? "Authenticator" },
+      body: { device_name: deviceName ?? "Authenticator", step_up_token: stepUpToken },
     });
   },
 
@@ -123,11 +144,11 @@ export const authApi = {
     });
   },
 
-  /** Disable MFA for the current user. Requires current password. */
-  mfaDisable(password: string) {
+  /** Disable MFA for the current user. Requires an "mfa_change" step-up. */
+  mfaDisable(stepUpToken: string) {
     return request<void>("/api/v1/auth/mfa/disable", {
       method: "POST",
-      body: { password },
+      body: { step_up_token: stepUpToken },
     });
   },
 

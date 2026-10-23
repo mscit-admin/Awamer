@@ -5,6 +5,13 @@
  * unit suite (`*.test.ts`) is unaffected.
  */
 import { Pool } from "pg";
+import { setMfaRequiredRoles } from "../domain/mfaPolicy.js";
+
+// SEC-MFA-POLICY-001: production defaults to "super_admin + admin must enroll
+// MFA". The integration suites exercise RBAC/tenant/session behaviour with
+// MFA-less admin fixtures, so the harness starts with no role required; the
+// policy's own suite (mfaPolicy.itest.ts) turns enforcement on explicitly.
+setMfaRequiredRoles([]);
 
 export const DATABASE_URL = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
 

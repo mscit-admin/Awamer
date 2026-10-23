@@ -11,6 +11,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Email change requires re-authentication (SEC-EMAIL-001, ASVS V7.5.1).** Changing your
+  own email through `PATCH /api/v1/users/me` needs a single-use step-up token minted for the
+  new `email_change` purpose (`POST /auth/step-up` with `purpose: "email_change"`: password,
+  plus the current MFA code when MFA is on). Before this, an access token alone could
+  redirect password-reset mail, so a stolen token meant permanent account takeover. The
+  change is audited (`user_update` / `email_change`), and when SMTP is configured the
+  previous address is notified. Name-only and same-email updates are unchanged.
+- **MFA is required for privileged roles (SEC-MFA-POLICY-001, ASVS V6.3.3).** New
+  installation-wide policy `mfa_required_roles` (in `app_settings`), defaulting to
+  `super_admin` and `admin`. Members of those roles without an authenticator get
+  `403 mfa_enrollment_required` on every API route except the enrollment set (`GET
+  /users/me`, step-up, MFA enroll/activate, change/verify password, logout-all), and every
+  WebSocket gateway refuses them. They cannot self-disable MFA (`403
+  mfa_required_by_policy`); an admin can still reset a lost device. Super Admins edit the
+  policy under **Settings → Two-factor policy** (`PUT /admin/session-settings {
+  mfa_required_roles }`, gated by the existing `settings:manage`). Changes take effect
+  immediately and are audited. **No RBAC permission was added.**
+  - **Upgrade note:** after upgrading, an existing super_admin or admin without MFA is sent
+    to the setup page at their next request and must enroll before doing anything else.
+    To phase it in, a Super Admin can temporarily untick roles in the policy, after
+    enrolling themselves.
+
+### Fixed
+- **MFA setup page** (`/settings/security/mfa`): enroll and disable failed against the
+  server, which has required a step-up token since SEC-MFA-002. The page now asks for the
+  password (plus the current code when disabling), obtains a step-up token first, and signs
+  the user out afterwards, since both actions end all sessions. Step-up tokens travel in the
+  request body because `X-Step-Up-Token` is not a CORS-allowed header for the Tauri client.
+
 ### Added — security documentation
 - **OWASP ASVS 5.0.0 Level 3 verification matrix** (`security-final/OWASP_ASVS_5_L3_MATRIX.md`).
   All 345 requirements are mapped to code, test or document evidence at commit `35e84b6`. Met

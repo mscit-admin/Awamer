@@ -4,13 +4,26 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Copy, Loader2, ShieldCheck, Shiel
 
 import { authApi, type MFAEnrollResponse } from "@/modules/auth/api/authApi";
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { ApiError } from "@/shared/lib/api";
 
 type Phase = "intro" | "scanning" | "verifying" | "done" | "disable_confirm" | "disabled";
 
 export function MFASetupPage() {
   const navigate = useNavigate();
   const user = useAuthStore(s => s.user);
-  const refreshUser = useAuthStore(s => s.refreshUser);
+  const logout = useAuthStore(s => s.logout);
+  // SEC-MFA-POLICY-001: this role must have MFA. When not enrolled yet the user
+  // is held on this page (ProtectedRoute) and cannot go anywhere else.
+  const forced = !!user?.mfa_enrollment_required;
+  const policyRequired = !!user?.mfa_policy_required;
+
+  // Enabling or disabling MFA ends every session server-side (auth_version
+  // bump), so finish by signing out; the next sign-in uses the new state.
+  function finishAndSignOut() {
+    setTimeout(() => {
+      void logout().then(() => navigate("/login", { replace: true }));
+    }, 2200);
+  }
 
   // If MFA is already enabled, start in disable_confirm; else intro.
   const [phase, setPhase] = useState<Phase>(user?.mfa_enabled ? "disable_confirm" : "intro");
@@ -20,16 +33,22 @@ export function MFASetupPage() {
   const [busy, setBusy] = useState(false);
   const [secretCopied, setSecretCopied] = useState(false);
   const [disablePassword, setDisablePassword] = useState("");
+  const [disableCode, setDisableCode] = useState("");
+  const [password, setPassword] = useState("");
 
-  async function handleStart() {
+  async function handleStart(e: FormEvent) {
+    e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const res = await authApi.mfaEnroll();
+      // SEC-MFA-002: enrollment needs a fresh step-up, not just the session.
+      const { step_up_token } = await authApi.stepUp(password, "mfa_change");
+      setPassword("");
+      const res = await authApi.mfaEnroll(step_up_token);
       setEnrollment(res);
       setPhase("scanning");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start enrollment");
+      setError(stepUpMessage(err, "Failed to start enrollment"));
     } finally {
       setBusy(false);
     }
@@ -43,8 +62,7 @@ export function MFASetupPage() {
     try {
       await authApi.mfaActivate(enrollment.device_id, code);
       setPhase("done");
-      await refreshUser();
-      setTimeout(() => navigate("/settings"), 1800);
+      finishAndSignOut();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid code");
     } finally {
@@ -57,19 +75,14 @@ export function MFASetupPage() {
     setError(null);
     setBusy(true);
     try {
-      await authApi.mfaDisable(disablePassword);
+      const { step_up_token } = await authApi.stepUp(disablePassword, "mfa_change", disableCode);
       setDisablePassword("");
-      await refreshUser();
+      setDisableCode("");
+      await authApi.mfaDisable(step_up_token);
       setPhase("disabled");
-      setTimeout(() => navigate("/settings"), 1800);
+      finishAndSignOut();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to disable";
-      // Backend returns 401 with code=invalid_credentials on wrong password
-      if (msg.toLowerCase().includes("invalid") || msg.toLowerCase().includes("credentials")) {
-        setError("Wrong password — try again");
-      } else {
-        setError(msg);
-      }
+      setError(stepUpMessage(err, "Failed to disable"));
     } finally {
       setBusy(false);
     }
@@ -84,10 +97,22 @@ export function MFASetupPage() {
 
   return (
     <div className="max-w-lg mx-auto py-8 animate-slide-up">
-      <button onClick={() => navigate("/settings")} className="btn-ghost -ml-3 mb-4 text-xs">
-        <ArrowLeft className="size-3.5" />
-        Back to settings
-      </button>
+      {!forced && (
+        <button onClick={() => navigate("/settings")} className="btn-ghost -ml-3 mb-4 text-xs">
+          <ArrowLeft className="size-3.5" />
+          Back to settings
+        </button>
+      )}
+
+      {forced && (
+        <div role="status" className="mb-6 flex items-start gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm">
+          <AlertCircle className="size-4 mt-0.5 flex-shrink-0" />
+          <div>
+            Your role (<span className="font-mono">{user?.role}</span>) requires two-factor
+            authentication. Set it up to continue using Awamer.
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-3 mb-6">
         <div className="size-10 rounded-md bg-accent/10 border border-accent/30 grid place-items-center">
@@ -109,9 +134,37 @@ export function MFASetupPage() {
             <li>Have your phone or password manager open and ready.</li>
             <li>You'll scan a QR code, then enter a 6-digit code to confirm.</li>
           </ul>
-          <button onClick={handleStart} disabled={busy} className="btn-primary">
-            {busy ? <><Loader2 className="size-4 animate-spin" /> Starting…</> : "Begin enrollment"}
-          </button>
+          <form onSubmit={handleStart} className="space-y-3">
+            <div>
+              <label htmlFor="su-password" className="block text-sm font-medium mb-1.5">
+                Confirm with your current password
+              </label>
+              <div className="relative">
+                <Lock className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" />
+                <input
+                  id="su-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="input pl-9"
+                  placeholder="Password"
+                  required
+                  autoFocus
+                />
+              </div>
+            </div>
+            <button type="submit" disabled={busy || !password} className="btn-primary">
+              {busy ? <><Loader2 className="size-4 animate-spin" /> Starting…</> : "Begin enrollment"}
+            </button>
+            {forced && (
+              <div>
+                <button type="button" onClick={() => void logout().then(() => navigate("/login", { replace: true }))} className="btn-ghost text-xs -ml-3">
+                  Sign out instead
+                </button>
+              </div>
+            )}
+          </form>
           {error && (
             <div
               role="alert"
@@ -186,7 +239,7 @@ export function MFASetupPage() {
           <CheckCircle2 className="size-5 text-accent flex-shrink-0" />
           <div>
             <div className="font-medium">MFA enabled</div>
-            <div className="text-sm text-fg-muted">You'll need a code on your next sign-in.</div>
+            <div className="text-sm text-fg-muted">Signing you out — sign in again with a code from your app.</div>
           </div>
         </div>
       )}
@@ -207,6 +260,13 @@ export function MFASetupPage() {
 
           <div className="border-t border-border my-4" />
 
+          {policyRequired ? (
+            <div className="text-sm text-fg-muted">
+              Your role (<span className="font-mono">{user?.role}</span>) requires two-factor
+              authentication, so it can't be turned off here. If you lost your authenticator,
+              ask an administrator to reset it; you'll then set up a new one at sign-in.
+            </div>
+          ) : (<>
           <div className="flex items-start gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs mb-4">
             <AlertCircle className="size-4 mt-0.5 flex-shrink-0" />
             <div>
@@ -235,6 +295,24 @@ export function MFASetupPage() {
                 />
               </div>
             </div>
+            <div>
+              <label htmlFor="dis-code" className="block text-sm font-medium mb-1.5">
+                Current 6-digit code from your app
+              </label>
+              <input
+                id="dis-code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                value={disableCode}
+                onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, ""))}
+                className="input font-mono tracking-[0.3em]"
+                placeholder="000000"
+                required
+              />
+            </div>
             {error && (
               <div
                 role="alert"
@@ -246,7 +324,7 @@ export function MFASetupPage() {
             <div className="flex gap-2 pt-1">
               <button
                 type="submit"
-                disabled={busy || !disablePassword}
+                disabled={busy || !disablePassword || disableCode.length !== 6}
                 className="btn-primary bg-red-500 hover:bg-red-600 border-red-500 flex-1"
               >
                 {busy ? <><Loader2 className="size-4 animate-spin" /> Disabling…</> : "Disable two-factor authentication"}
@@ -260,6 +338,7 @@ export function MFASetupPage() {
               </button>
             </div>
           </form>
+          </>)}
         </div>
       )}
 
@@ -269,14 +348,28 @@ export function MFASetupPage() {
           <div>
             <div className="font-medium">MFA disabled</div>
             <div className="text-sm text-fg-muted">
-              Your authenticator has been removed. Set it up again from Settings
-              when you're ready.
+              Your authenticator has been removed and you are being signed out.
+              Set it up again from Settings when you're ready.
             </div>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+/** Map step-up / MFA API errors to a short, user-facing message. */
+function stepUpMessage(err: unknown, fallback: string): string {
+  const code = err instanceof ApiError
+    ? (err.payload as { error?: { code?: string } } | undefined)?.error?.code
+    : undefined;
+  switch (code) {
+    case "invalid_credentials": return "Wrong password — try again";
+    case "mfa_required": return "Enter the current code from your authenticator";
+    case "invalid_mfa_code": return "Incorrect authenticator code — try again";
+    case "mfa_required_by_policy": return "Your role requires two-factor authentication";
+    default: return err instanceof Error ? err.message : fallback;
+  }
 }
 
 // Helper: backend returns qr_code_png as a base64 string in the JSON body.

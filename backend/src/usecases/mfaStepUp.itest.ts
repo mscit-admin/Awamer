@@ -52,7 +52,7 @@ before(async () => {
   const changePassword = new ChangePasswordUseCase(users, new RefreshRepository(pool), audit, argon2);
   stepUp = new StepUpService(jwt, users);
   app = Fastify();
-  await app.register(makeAuthedRoutes({ users, mfa, changePassword, jwt, stepUp }), { prefix: "/api/v1" });
+  await app.register(makeAuthedRoutes({ users, mfa, changePassword, jwt, stepUp, audit }), { prefix: "/api/v1" });
   await app.ready();
 });
 after(async () => {

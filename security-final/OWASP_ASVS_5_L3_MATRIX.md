@@ -5,7 +5,8 @@ Source: the official `OWASP_Application_Security_Verification_Standard_5.0.0_en.
 **Target level:** L3. Awamer is a remote-administration platform that holds a credential vault, a root VPN
 helper, multi-tenant RBAC and live SSH/VNC/tunnel access, so ASVS treats it as a high-value application.
 **Code assessed:** commit `35e84b6` (release 1.8.0, after the `production-closure/` phase).
-**Assessment date:** 2026-10-23.
+**Assessment date:** 2026-10-23. **Updated:** 2026-10-23, after the fixes for findings 1 and 2
+(SEC-EMAIL-001, SEC-MFA-POLICY-001).
 **Scope:** `backend/`, `desktop/` (web build and Tauri shell) and `deploy/` (nginx, compose, DB roles).
 
 This matrix complements the existing awareness-level matrices (`OWASP_TOP10_MATRIX.md` and
@@ -41,8 +42,8 @@ Levels are cumulative: Level 2 includes every Level 1 requirement, and Level 3 i
 | Level | Requirements | PASS | PARTIAL | FAIL | NO EVIDENCE | N/A | Met (PASS ÷ applicable) |
 |---|---|---|---|---|---|---|---|
 | L1 | 70 | 46 | 12 | 5 | 1 | 6 | 46/64 (72%) |
-| L2 | 253 | 101 | 62 | 19 | 11 | 60 | 101/193 (52%) |
-| L3 | 345 | 124 | 80 | 41 | 20 | 80 | 124/265 (47%) |
+| L2 | 253 | 102 | 63 | 17 | 11 | 60 | 102/193 (53%) |
+| L3 | 345 | 125 | 83 | 37 | 20 | 80 | 125/265 (47%) |
 
 ## Summary by chapter (Level 3 scope)
 
@@ -53,9 +54,9 @@ Levels are cumulative: Level 2 includes every Level 1 requirement, and Level 3 i
 | V3 Web Frontend Security | 31 | 21 | 2 | 6 | 1 | 1 |
 | V4 API and Web Service | 16 | 11 | 1 | 2 | 0 | 2 |
 | V5 File Handling | 13 | 4 | 2 | 3 | 1 | 3 |
-| V6 Authentication | 47 | 16 | 5 | 10 | 2 | 14 |
-| V7 Session Management | 19 | 8 | 4 | 3 | 2 | 2 |
-| V8 Authorization | 13 | 5 | 4 | 2 | 2 | 0 |
+| V6 Authentication | 47 | 16 | 7 | 8 | 2 | 14 |
+| V7 Session Management | 19 | 9 | 4 | 2 | 2 | 2 |
+| V8 Authorization | 13 | 5 | 5 | 1 | 2 | 0 |
 | V9 Self-contained Tokens | 7 | 5 | 1 | 0 | 0 | 1 |
 | V10 OAuth and OIDC | 36 | 0 | 0 | 0 | 0 | 36 |
 | V11 Cryptography | 24 | 10 | 9 | 1 | 3 | 1 |
@@ -65,18 +66,18 @@ Levels are cumulative: Level 2 includes every Level 1 requirement, and Level 3 i
 | V15 Secure Coding and Architecture | 21 | 7 | 14 | 0 | 0 | 0 |
 | V16 Security Logging and Error Handling | 17 | 4 | 11 | 1 | 1 | 0 |
 | V17 WebRTC | 12 | 0 | 0 | 0 | 0 | 12 |
-| **Total** | **345** | **124** | **80** | **41** | **20** | **80** |
+| **Total** | **345** | **125** | **83** | **37** | **20** | **80** |
 
 ## Priority findings
 
 These are the gaps that matter most for a remote-administration platform. All of them were confirmed in
-code. Items marked **new** are not tracked in `REMAINING_RISKS.md` or `REMAINING_OPERATIONAL_RISKS.md`.
+code. Findings 1 and 2 have since been fixed; the matrix rows below reflect the fixes. Items marked **new** are not tracked in `REMAINING_RISKS.md` or `REMAINING_OPERATIONAL_RISKS.md`.
 Severities use the same scale as `security-final/` and are not inflated.
 
 | # | Sev. | ASVS | Finding | Where | Track |
 |---|---|---|---|---|---|
-| 1 | **High** | V7.5.1, V6.3.7 | `PATCH /users/me` changes the account **email**, which is the password-reset channel, with only an access token and no re-authentication. No notification goes to the old address. A stolen 15-minute access token becomes a permanent account takeover through forgot-password. | `backend/src/routes/users.ts:44-55` | **new** |
-| 2 | **High** | V6.3.3, V8.4.2 | MFA is **optional for every role**, including super_admin and admin. There is no org or role policy that requires it. | `backend/src/usecases/login.ts` | **new** |
+| 1 | ~~High~~ **Fixed** | V7.5.1, V6.3.7 | `PATCH /users/me` changed the account **email** (the password-reset channel) with only an access token. **Fixed (SEC-EMAIL-001):** an email change now needs a single-use `email_change` step-up (password + current MFA), is audited, and notifies the previous address. Tests EMAIL-STEPUP-001…006. | `backend/src/routes/users.ts` | closed |
+| 2 | ~~High~~ **Fixed** | V6.3.3, V8.4.2 | MFA was **optional for every role**, including super_admin and admin. **Fixed (SEC-MFA-POLICY-001):** an installation-wide policy (default super_admin + admin, editable by `settings:manage`) holds un-enrolled members at enrollment on every HTTP and WebSocket entry point, and blocks self-disable. Tests MFA-POLICY-001…008. | `backend/src/domain/mfaPolicy.ts`, `middleware/auth.ts` | closed |
 | 3 | Medium | V1.3.3 | The AI assistant's **Insert** button sends model output straight to the shell. `firstCommand` splits only on `\n`, so an embedded `\r` (for example from a prompt-injected answer) runs the command without the user pressing Enter. | `desktop/src/modules/ai/AiAssistPanel.tsx:25`, `sessions/components/WebTerminalPane.tsx:533` | **new** |
 | 4 | Medium | V15.4.2, V6.4.x | A **password-reset token is not single-use under concurrency**. `findValid` and the later unconditional `markUsed` are separate statements, so two parallel requests with the same link can both set a password. | `backend/src/repos/passwordResetRepo.ts:36`, `routes/passwordReset.ts:113-119` | **new** |
 | 5 | Medium | V14.3.2, V14.2.5 | **No `Cache-Control: no-store`** on any response, including credential reveal, TOTP seed, VPN profile and backup export. | `backend/src/server.ts`, `deploy/nginx/netsphere.conf` | **new** |
@@ -274,11 +275,11 @@ Requirement text is abbreviated. The full wording is in the official ASVS 5.0.0 
 | V6.2.12 | 2 | Passwords submitted during account registration or password changes are checked against a set of breached passwords. | **FAIL** | No breached-password (k-anon HIBP or offline corpus) check in register/changePassword/passwordReset/adminReset | Add breached-password check to all password-set paths |  |
 | V6.3.1 | 1 | Controls to prevent attacks such as credential stuffing and password brute force are implemented according to the application's security documentation. | PASS | routes/auth.ts:51 per-IP authRateLimit on /login,/mfa/verify,/refresh; login.ts:71-77 lockout 5/15min (config:104/107); MFA fails count login.ts:130; reset+step-up limited (passwordReset.ts:154, users.ts:107); proxyTrust.test.ts |  | R-13 |
 | V6.3.2 | 1 | Default user accounts (e.g., "root", "admin", or "sa") are not present in the application or are disabled. | **PARTIAL** | server.ts:379 bootstrapAdmin only when users table empty; prod rejects default/weak password (config/index.ts:45, AWM-CFG-001); username defaults to 'admin' (config:168) | Default super_admin username 'admin', no forced password change/MFA enrollment at first login; bootstrap account not disabled |  |
-| V6.3.3 | 2 | Either a multi-factor authentication mechanism or a combination of single-factor authentication mechanisms, must be used in order to access the application.… | **FAIL** | MFA (TOTP) is optional per user: usecases/mfa.ts enroll/activate; login.ts:94 only challenges if user.mfaEnabled; no org/role MFA enforcement setting (grep require_mfa none) | No mandatory MFA for any role (incl. super_admin/admin) of a remote-admin platform; no documented rationale |  |
+| V6.3.3 | 2 | Either a multi-factor authentication mechanism or a combination of single-factor authentication mechanisms, must be used in order to access the application.… | **PARTIAL** | SEC-MFA-POLICY-001: domain/mfaPolicy.ts role policy (default super_admin+admin), enforced in middleware/auth.ts verifyCurrentAccessToken (HTTP + WS); tests MFA-POLICY-001..008 | Default covers privileged roles only; other roles stay single-factor unless a Super Admin adds them to the policy |  |
 | V6.3.4 | 2 | Verify that, if the application includes multiple authentication pathways, there are no undocumented pathways and that security controls and authentication… | **PARTIAL** | Central verifyCurrentAccessToken (middleware/auth.ts:81) used by HTTP + ssh/telnet/tunnel gateways; MFA pending typed token (jwt:142, MFA-TYP tests); step-up requires MFA (users.ts:135) | Pathways undocumented; VPN client password auth (vpn/authVerify.ts) lacks lockout/rate limit; step-up MFA failures not counted toward lockout |  |
 | V6.3.5 | 3 | Users are notified of suspicious authentication attempts (successful or unsuccessful). This may include authentication attempts from an unusual location or… | **FAIL** | Failures only audit-logged (login.ts:79, 137); mailer only has sendTest/sendPasswordReset (email/mailer.ts:128-142) | No user notification of suspicious/failed/partial (password-ok, MFA-fail) attempts |  |
 | V6.3.6 | 3 | Email is not used as either a single-factor or multi-factor authentication mechanism. | PASS | Email used only for password-reset link (usecases/passwordReset.ts); not an MFA factor (MFAMethod totp/webauthn/backup_codes, domain/index.ts:54; only totp implemented) |  |  |
-| V6.3.7 | 3 | Users are notified after updates to authentication details, such as credential resets or modification of the username or email address. | **FAIL** | changePassword.ts / passwordReset.ts:112 / adminReset / MFA disable only audit-log; no notification email method in email/mailer.ts | Notify user on password change/reset, MFA change, admin reset/MFA disable, email change |  |
+| V6.3.7 | 3 | Users are notified after updates to authentication details, such as credential resets or modification of the username or email address. | **PARTIAL** | Email change notifies the previous address (routes/users.ts notifyEmailChanged; EMAIL-STEPUP-003); other changes are audit-logged only | No notification on password change/reset, MFA change, admin reset or admin MFA disable |  |
 | V6.3.8 | 3 | Valid users cannot be deduced from failed authentication challenges, such as by basing on error messages, HTTP response codes, or different response times.… | **FAIL** | login.ts:54-67 inactive/locked return distinct 403 account_inactive/account_locked (routes/auth.ts:105) before password check; forgot-password does work+SMTP only for known emails (timing); dummy hash only for unknown user | Return generic 401 until password verified; send reset mail asynchronously | R-16 |
 | V6.4.1 | 1 | System generated initial passwords or activation codes are securely randomly generated, follow the existing password policy, and expire after a short period… | **FAIL** | Initial passwords are admin-chosen (admin.ts:118 create, admin.ts:275 reset) and bootstrap password from env (server.ts:391); no must-change/expiry flag | Initial/admin-set secrets become long-term passwords; add forced change on first login or one-time activation link |  |
 | V6.4.2 | 1 | Password hints or knowledge-based authentication (so-called "secret questions") are not present. | PASS | No password hints or security questions in schema/routes (users/auth/passwordReset routes reviewed) |  |  |
@@ -323,7 +324,7 @@ Requirement text is abbreviated. The full wording is in the official ASVS 5.0.0 
 | V7.4.3 | 2 | The application gives the option to terminate all other active sessions after a successful change or removal of any authentication factor (including… | PASS | Password change/reset/admin reset and MFA enable/replace/disable all bump auth_version, revoke refresh, close live sessions (changePassword.ts:30-34, passwordReset.ts:123-125, mfa.ts:78-82); AUTH-INVALIDATE-001..012 |  |  |
 | V7.4.4 | 2 | All pages that require authentication have easy and visible access to logout functionality. | PASS | 'Sign out' in DashboardLayout.tsx:213 shared shell for all authenticated pages; IdleLock also offers sign-out (IdleLock.tsx:105) |  |  |
 | V7.4.5 | 2 | Application administrators are able to terminate active sessions for an individual user or for all users. | **PARTIAL** | Admin can kill a user's sessions only indirectly via disable/lock/role change/password reset (admin.ts:216-227, 276-290); revokeUser in session/activeSessions.ts:128 | No explicit admin 'terminate sessions' endpoint for one user, and no 'terminate all users' sessions' capability |  |
-| V7.5.1 | 2 | The application requires full re-authentication before allowing modifications to sensitive account attributes which may affect authentication such as email… | **FAIL** | MFA changes require step-up password+OTP (routes/users.ts:125-146, 168, 222); password change requires current password (changePassword.ts:70) | PATCH /users/me (routes/users.ts:44-55) changes email - the password-reset channel - with only an access token, no re-auth; enables takeover from a stolen token |  |
+| V7.5.1 | 2 | The application requires full re-authentication before allowing modifications to sensitive account attributes which may affect authentication such as email… | PASS | Email change needs an email_change step-up (password + current MFA), single-use (routes/users.ts PATCH /users/me; EMAIL-STEPUP-001..006); MFA changes need step-up; password change needs current password |  |  |
 | V7.5.2 | 2 | Users are able to view and (having authenticated again with at least one factor) terminate any or all currently active sessions. | **FAIL** | Only POST /auth/logout-all (routes/auth.ts:193-199) without re-auth; no session listing endpoint/UI | Users cannot view active sessions or terminate individual ones; logout-all requires no re-authentication |  |
 | V7.5.3 | 3 | The application requires further authentication with at least one factor or secondary verification before performing highly sensitive transactions or… | **PARTIAL** | Step-up (password+OTP, single-use, av-bound) only for MFA changes (stepUp.ts, users.ts:125); credential/VPN reveal gated by permission + audited only (sessionMeta.ts:290, vpn.ts:227) | No step-up for highly sensitive operations such as secret reveal, backup export with secrets, admin user/role changes | R-20 |
 | V7.6.1 | 2 | Session lifetime and termination between Relying Parties (RPs) and Identity Providers (IdPs) behave as documented, requiring re-authentication as necessary… | N/A | No RP/IdP federation |  |  |
@@ -345,7 +346,7 @@ Requirement text is abbreviated. The full wording is in the official ASVS 5.0.0 
 | V8.3.2 | 3 | Changes to values on which authorization decisions are made are applied immediately. Where changes cannot be applied immediately, (such as when relying on… | PASS | Live role/state re-read per request (auth.ts:46-57,112) and av check; WS revalidation on change + periodic loop (activeSessions.ts:139-187); AUTHZ-STATE-001..022 |  |  |
 | V8.3.3 | 3 | Access to an object is based on the originating subject's (e.g. consumer's) permissions, not on the permissions of any intermediary or service acting on… | PASS | Backend resolves hosts/credentials with the end user's id (e.g. hosts.getById(req.auth.sub,..) sessionRoutes.ts:347) and checks the user's permission before acting; vpn-helper only reached after user authz (VPN_HELPER_SECURITY_BOUNDARY.md) |  |  |
 | V8.4.1 | 2 | Multi-tenant applications use cross-tenant controls to ensure consumer operations will never affect tenants with which they do not have permissions to interact. | **PARTIAL** | domain/tenantScope.ts explicit global/company/none scope; sameCompany + mayAssignRoleTenant (admin.ts:201); tenantIsolation/tenantNullScope/tenantShares itests | R-10: global role-key and SSH host-key-pin namespaces allow cross-tenant oracle/DoS; R-08 audit company scoping | R-10,R-08,OR-13 |
-| V8.4.2 | 3 | Access to administrative interfaces incorporates multiple layers of security, including continuous consumer identity verification, device security posture… | **FAIL** | Admin access = JWT + live state + permission; MFA available but not enforced for admins; no device posture or contextual risk analysis | Enforce MFA for privileged roles; add device posture/contextual risk evaluation for admin interfaces |  |
+| V8.4.2 | 3 | Access to administrative interfaces incorporates multiple layers of security, including continuous consumer identity verification, device security posture… | **PARTIAL** | MFA enforced for super_admin/admin by default (SEC-MFA-POLICY-001); live account state + permission re-checked on every request | No device posture or contextual risk evaluation for admin interfaces |  |
 
 ### V9 Self-contained Tokens
 

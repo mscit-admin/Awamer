@@ -132,7 +132,7 @@ before(async () => {
 
   app = Fastify();
   await app.register(makeAuthRoutes({ login, refresh: refreshUC, mfa, users, jwt, loginRateMax: 1000, refreshCookieMaxAgeSec: 3600, sessions }), { prefix: "/api/v1/auth" });
-  await app.register(makeAuthedRoutes({ users, mfa, changePassword, jwt, stepUp: new StepUpService(jwt, users) }), { prefix: "/api/v1" });
+  await app.register(makeAuthedRoutes({ users, mfa, changePassword, jwt, stepUp: new StepUpService(jwt, users), audit }), { prefix: "/api/v1" });
   await app.register(makeAdminRoutes({ audit, sessions, users, register, changePassword, mfa, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
   await app.register(makeOrganizationRoutes({ sessions, companies: new CompanyRepository(pool), units: new OrgUnitRepository(pool), users, audit, jwt, roleService }), { prefix: "/api/v1/org" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt, users }), { prefix: "/api/v1/roles" });

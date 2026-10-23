@@ -3,6 +3,8 @@ import { Navigate, useLocation } from "react-router-dom";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
 
+const MFA_SETUP_PATH = "/settings/security/mfa";
+
 interface Props {
   children: ReactNode;
 }
@@ -14,6 +16,7 @@ interface Props {
  */
 export function ProtectedRoute({ children }: Props) {
   const status = useAuthStore((s) => s.status);
+  const user = useAuthStore((s) => s.user);
   const location = useLocation();
 
   if (status === "idle" || status === "authenticating") {
@@ -29,6 +32,12 @@ export function ProtectedRoute({ children }: Props) {
 
   if (status !== "authenticated") {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // SEC-MFA-POLICY-001: the server refuses everything but enrollment until a
+  // role that requires MFA has it — keep the user on the enrollment page.
+  if (user?.mfa_enrollment_required && location.pathname !== MFA_SETUP_PATH) {
+    return <Navigate to={MFA_SETUP_PATH} replace />;
   }
 
   return <>{children}</>;

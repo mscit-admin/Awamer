@@ -1,7 +1,8 @@
 /**
  * SEC-MFA-002 — step-up (recent re-authentication) for sensitive actions.
  *
- * A normal access token is NOT sufficient to enroll/replace/disable MFA. The
+ * A normal access token is NOT sufficient to enroll/replace/disable MFA, or to
+ * change the account email (the password-reset channel, SEC-EMAIL-001). The
  * user must prove recent possession of their password (and current MFA, when
  * enabled) to obtain a short-lived, single-purpose, single-use step-up token,
  * which the sensitive endpoints then require.
@@ -12,7 +13,8 @@
 import type { JwtService } from "../jwt/index.js";
 import { DomainError } from "../domain/index.js";
 
-export type StepUpPurpose = "mfa_change";
+export type StepUpPurpose = "mfa_change" | "email_change";
+export const STEP_UP_PURPOSES: readonly StepUpPurpose[] = ["mfa_change", "email_change"];
 
 export class StepUpError extends DomainError {
   constructor(message = "recent re-authentication required") {
