@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added — security documentation
+- **OWASP ASVS 5.0.0 Level 3 verification matrix** (`security-final/OWASP_ASVS_5_L3_MATRIX.md`).
+  All 345 requirements are mapped to code, test or document evidence at commit `35e84b6`. Met
+  (PASS ÷ applicable): L1 72%, L2 52%, L3 47%. It lists 18 priority findings, 13 of them not
+  previously tracked. Top items: email change without re-authentication (`PATCH /users/me`),
+  MFA not enforceable for privileged roles, AI "Insert" can auto-execute an embedded `\r`, a
+  password-reset token race, and no `Cache-Control: no-store` on secret responses. Documentation
+  only: no code or RBAC permission changed.
+
+---
+
 ## [1.8.0] — Production go-live closure
 
 Closes the conditions of the final security assessment (`security-final/`);
