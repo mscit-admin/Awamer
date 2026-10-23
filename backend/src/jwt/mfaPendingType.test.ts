@@ -24,7 +24,7 @@ const REFRESH = "b".repeat(48);
 const ISSUER = "netsphere";
 const cfg = {
   env: { JWT_ACCESS_SECRET: ACCESS, JWT_REFRESH_SECRET: REFRESH, JWT_ISSUER: ISSUER },
-  jwtAccessTtlSec: 900, jwtRefreshTtlSec: 3600,
+  jwtAccessTtlSec: 900, jwtRefreshTtlSec: 3600, sessionAbsoluteLifetimeSec: 86400,
 } as unknown as Config;
 
 const jwt = createJwt(cfg);

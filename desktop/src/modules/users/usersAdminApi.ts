@@ -48,6 +48,10 @@ export const usersAdminApi = {
   resetPassword(id: string, password: string) {
     return request<{ ok: true }>(`/api/v1/admin/users/${id}/reset-password`, { method: "POST", body: { password } });
   },
+  /** ASVS V6.4.6: email the user a single-use reset link (the admin never picks the password). */
+  sendResetLink(id: string) {
+    return request<{ ok: boolean }>(`/api/v1/admin/users/${id}/send-reset-link`, { method: "POST" });
+  },
   disableMfa(id: string) {
     return request<{ ok: true }>(`/api/v1/admin/users/${id}/disable-mfa`, { method: "POST" });
   },

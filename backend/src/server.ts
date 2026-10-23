@@ -109,7 +109,7 @@ async function main() {
   const users = new UserRepository(pool);
   const mfaDevices = new MFADeviceRepository(pool);
   const refresh = new RefreshRepository(pool);
-  const audit = new AuditRepository(pool, log);
+  const audit = new AuditRepository(pool, log, cfg.env.AUDIT_LOG_STDOUT);
 
   // Phase 2 repos
   const folders = new FolderRepository(pool);
@@ -177,11 +177,11 @@ async function main() {
 
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
-  const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log);
+  const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log, cfg.sessionAbsoluteLifetimeSec);
   const stepUp = new StepUpService(jwt, users);
   const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, secretBox, appSettings, refresh, activeSessions);
-  const registerUC = new RegisterUseCase(users, audit, argon2);
-  const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2, activeSessions);
+  const registerUC = new RegisterUseCase(users, audit, argon2, cfg.tempPasswordTtlSec);
+  const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2, activeSessions, cfg.tempPasswordTtlSec);
   // Email + forgot/reset password.
   const passwordResets = new PasswordResetRepository(pool);
   const mailer = new MailService(appSettings, secretBox, log);
@@ -322,7 +322,7 @@ async function main() {
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC, rateMax: cfg.env.RATE_LIMIT_LOGIN_PER_MIN }), { prefix: "/api/v1/auth" });
 
   await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt, stepUp, audit, mailer, log }), { prefix: "/api/v1" });
-  await app.register(makeAdminRoutes({ audit, sessions: activeSessions, users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
+  await app.register(makeAdminRoutes({ audit, sessions: activeSessions, users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh, passwordReset: passwordResetUC }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, users, jwt, audit }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeSessionSettingsRoutes({ settings: appSettings, users, jwt, audit }), { prefix: "/api/v1/admin/session-settings" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt, users }), { prefix: "/api/v1/roles" });
@@ -406,6 +406,9 @@ async function bootstrapAdmin(
     passwordHash,
     fullName: "Bootstrap Administrator",
     role: "super_admin",
+    // SEC-PW-TEMP-001: the operator-supplied bootstrap password must be replaced
+    // at first sign-in (no expiry, so a fresh install is never locked out).
+    temporaryPassword: { expiresAt: null },
   });
   log.warn(
     { username, email: cfg.env.BOOTSTRAP_ADMIN_EMAIL },

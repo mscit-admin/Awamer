@@ -27,6 +27,8 @@ export interface User {
   mfa_policy_required?: boolean;
   /** SEC-MFA-POLICY-001: role requires MFA and none is enrolled yet. */
   mfa_enrollment_required?: boolean;
+  /** SEC-PW-TEMP-001: the password was set by an admin and must be replaced first. */
+  password_change_required?: boolean;
   company_id?: string | null;
   org_unit_id?: string | null;
 }

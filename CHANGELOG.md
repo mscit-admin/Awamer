@@ -51,6 +51,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that serves the web UI from a hostname other than the API's must list it in
   `CORS_ALLOWED_ORIGINS`.
 
+- **Password policy follows ASVS 5 (SEC-PW-POLICY-001, V6.2.4/6.2.5/6.2.11).** A password
+  must be 12 to 128 characters long. The upper/lower/digit/symbol requirement is gone, so long
+  passphrases are accepted. Every path that sets a password (admin create, admin reset, self
+  change, reset link) now refuses the 10,000 most common leaked passwords of that length
+  (bundled offline from SecLists, MIT) and passwords containing the username, the email's
+  local part or domain, a name part, or the product name. The refusal message names the rule
+  that failed. Existing passwords are not affected. A full breached-password corpus check
+  (V6.2.12) is not included.
+- **Admin-set passwords are temporary (SEC-PW-TEMP-001, V6.4.1/6.4.6).** Migration `031` adds
+  `users.password_must_change` and `temp_password_expires_at`. A password chosen by an admin
+  (create or reset), and the bootstrap password on a new install, must be replaced before
+  anything else: the API returns `403 password_change_required` except for `GET /users/me`,
+  change-password and logout-all, and WebSocket gateways refuse the session. An unused
+  temporary password stops working after `TEMP_PASSWORD_TTL` (default 72h; login then returns
+  `403 temporary_password_expired`). The bootstrap password does not expire. New
+  `POST /api/v1/admin/users/:id/send-reset-link` lets an admin email a single-use reset link
+  without choosing the password (`409 smtp_not_configured` without SMTP); the Users page
+  offers it first. The admin password generator now uses `crypto.getRandomValues` instead of
+  `Math.random`. No RBAC permission was added: these routes keep the existing admin gating.
+- **Absolute session lifetime (SEC-SESSION-ABS-001, V7.3.2).** Refresh tokens carry the
+  original sign-in time in a signed `at` claim. Rotation keeps it, caps the new token's expiry
+  at `at + SESSION_ABSOLUTE_LIFETIME` (default 168h), and after that the refresh is refused,
+  the session is revoked and the event is audited (`token_refresh_denied` /
+  `absolute_lifetime`). Refresh tokens issued before this change count from their own `iat`.
+- **Append-only audit trail (SEC-AUDIT-APPEND-001, V16.4.2).** The runtime DB role `awamer_app`
+  can no longer `UPDATE`, `DELETE` or `TRUNCATE` `audit_logs`. This is applied by
+  `deploy/db/provision-roles.sh` on every deploy and by migration `030`. Deleting a user still
+  nulls its audit rows (the referential action runs as the table owner).
+- **Audit events leave the host (SEC-AUDIT-EXPORT-001, V16.4.3).** Every audit event is also
+  written to stdout as one JSON line with `"event":"audit"`, before the DB insert, so it
+  survives a failed write (`AUDIT_LOG_STDOUT`, default `true`). Secret-named detail fields are
+  redacted by the logger. The production compose file now rotates container logs (json-file,
+  20 MB × 10) and documents switching the driver to syslog/fluentd/a SIEM agent.
+- **Deployment / upgrade notes for the items above:** new env settings
+  `SESSION_ABSOLUTE_LIFETIME`, `TEMP_PASSWORD_TTL` and `AUDIT_LOG_STDOUT` are in
+  `.env.production.example` and passed through by the compose file. Existing accounts are not
+  marked temporary, so nobody is forced to change a password by the upgrade alone.
+  `backend/scripts/smoke-production.mjs` now walks the bootstrap admin through the forced
+  password change and MFA enrolment (66 checks; set `SMOKE_ADMIN_NEW_PASS` to choose the new
+  password).
+
 ### Fixed
 - **MFA setup page** (`/settings/security/mfa`): enroll and disable failed against the
   server, which has required a step-up token since SEC-MFA-002. The page now asks for the

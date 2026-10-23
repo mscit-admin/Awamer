@@ -1,5 +1,5 @@
 import { v4 as uuid } from "uuid";
-import { Errors, isAccountLocked, type User } from "../domain/index.js";
+import { DomainError, Errors, isAccountLocked, type User } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
 import type { RefreshRepository, AuditRepository } from "../repos/otherRepos.js";
 import type { JwtService } from "../jwt/index.js";
@@ -82,6 +82,16 @@ export class LoginUseCase {
         details: { reason: "bad_password", attempts: newCount },
       });
       throw Errors.InvalidCredentials();
+    }
+
+    // SEC-PW-TEMP-001: an admin-set temporary password that was never used in
+    // time is dead. Checked only AFTER the password verified (no oracle).
+    if (user.passwordMustChange && user.tempPasswordExpiresAt && user.tempPasswordExpiresAt.getTime() <= Date.now()) {
+      await this.audit.log({
+        userId: user.id, action: "login", success: false,
+        ipAddress: input.ip, userAgent: input.ua, details: { reason: "temporary_password_expired" },
+      });
+      throw new DomainError("temporary_password_expired", "this temporary password has expired — ask an administrator to reset it");
     }
 
     // SEC-MFA-BRUTE-001: for an MFA account the failure counter is reset only

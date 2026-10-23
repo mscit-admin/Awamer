@@ -28,8 +28,23 @@
 #
 # =====================================================================
 
+# SEC-AUDIT-EXPORT-001 / ASVS V16.4.3 — container logs are rotated (they no
+# longer grow without bound) and are the off-host channel for the audit trail:
+# the backend writes every audit event to stdout as a JSON line with
+# "event":"audit" (AUDIT_LOG_STDOUT, default on). To ship them to a separate
+# log host / SIEM, replace the driver below, e.g.
+#   driver: syslog
+#   options: { syslog-address: "tcp+tls://siem.example.com:6514", tag: "awamer/{{.Name}}" }
+# (or fluentd / gelf / a node-level agent reading the json-file logs).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "10"
+
 services:
   postgres:
+    logging: *default-logging
     image: postgres:16-alpine
     container_name: netsphere-postgres
     restart: unless-stopped
@@ -136,6 +151,7 @@ services:
       - no-new-privileges:true
 
   auth-service:
+    logging: *default-logging
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -192,6 +208,10 @@ services:
       # ---- Crypto secrets (REQUIRED — no defaults) -----------------
       JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET missing — openssl rand -hex 64}"
       JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET missing}"
+      # Session / account policy (ASVS V7.3.2, V6.4.1, V16.4.3) — see .env.production.example.
+      SESSION_ABSOLUTE_LIFETIME: ${SESSION_ABSOLUTE_LIFETIME:-168h}
+      TEMP_PASSWORD_TTL: ${TEMP_PASSWORD_TTL:-72h}
+      AUDIT_LOG_STDOUT: ${AUDIT_LOG_STDOUT:-true}
       # Phase 10 — encrypts credential secrets at rest (32 bytes, base64 or hex).
       CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY missing — openssl rand -base64 32}"
       # ---- Bootstrap admin ------------------------------------------
@@ -255,6 +275,7 @@ services:
   # in the backend FAIL CLOSED — the backend never falls back to local OpenVPN.
   # ===================================================================
   vpn-helper:
+    logging: *default-logging
     build:
       context: ../backend
       dockerfile: Dockerfile.vpn-helper

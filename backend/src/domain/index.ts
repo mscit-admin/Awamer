@@ -37,6 +37,13 @@ export interface User {
    * (password/MFA) increments it, invalidating every previously issued token.
    */
   authVersion: number;
+  /**
+   * SEC-PW-TEMP-001 — the current password was set by an admin (or is the
+   * bootstrap password) and must be replaced before the account can be used.
+   */
+  passwordMustChange: boolean;
+  /** When an unused temporary password stops working; null = no expiry. */
+  tempPasswordExpiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -102,7 +109,7 @@ export const Errors = {
   InvalidCredentials: () => new DomainError("invalid_credentials", "invalid username or password"),
   AccountLocked: () => new DomainError("account_locked", "account locked"),
   AccountInactive: () => new DomainError("account_inactive", "account inactive"),
-  WeakPassword: () => new DomainError("weak_password", "password must be ≥12 chars with upper, lower, digit, symbol"),
+  WeakPassword: (message = "password does not meet the password policy") => new DomainError("weak_password", message),
   InvalidRole: () => new DomainError("invalid_role", "invalid role"),
   InvalidMFACode: () => new DomainError("invalid_mfa_code", "invalid mfa code"),
   RefreshReuse: () => new DomainError("refresh_reuse", "refresh token reuse detected"),

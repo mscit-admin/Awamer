@@ -16,6 +16,9 @@ interface Session {
 function makeDeps(opts: {
   user?: { id: string; role: string; isActive: boolean; isLocked: boolean; lockedUntil: Date | null } | null;
   session?: Partial<Session> | null;
+  /** Original sign-in time carried by the refresh token (epoch s); default: now. */
+  authTime?: number | undefined;
+  absoluteLifetimeSec?: number;
 } = {}) {
   const uid = "u1";
   const user = opts.user === undefined
@@ -26,7 +29,8 @@ function makeDeps(opts: {
     expiresAt: new Date(Date.now() + 60_000),
     ...opts.session,
   };
-  const state = { revokedAll: 0, inserted: 0, rotated: 0, audits: [] as any[] };
+  const state = { revokedAll: 0, revoked: [] as string[], inserted: 0, rotated: 0, audits: [] as any[], issuedAuthTime: undefined as number | undefined };
+  const at = "authTime" in opts ? opts.authTime : Math.floor(Date.now() / 1000);
 
   const users = {
     async getById(id: string) {
@@ -39,11 +43,13 @@ function makeDeps(opts: {
     async insert(_r: any) { state.inserted++; },
     async markRotated(_a: string, _b: string) { state.rotated++; return true; },
     async revokeAllForUser(_id: string) { state.revokedAll++; },
+    async revoke(jti: string) { state.revoked.push(jti); },
   };
   const audit = { async log(e: any) { state.audits.push(e); } };
   const jwt = {
-    async verifyRefresh(_t: string) { return { sub: uid, jti: "jti-old" }; },
-    async issuePair(id: string, _role: string) {
+    async verifyRefresh(_t: string) { return { sub: uid, jti: "jti-old", at }; },
+    async issuePair(id: string, _role: string, _av?: number, authTime?: number) {
+      state.issuedAuthTime = authTime;
       return {
         access: { token: "access-tok", expiresAt: new Date(Date.now() + 900_000) },
         refresh: { jti: "jti-new", token: "refresh-tok", expiresAt: new Date(Date.now() + 3_600_000) },
@@ -51,7 +57,7 @@ function makeDeps(opts: {
     },
   };
   const log = { warn() {}, info() {}, error() {} };
-  const uc = new RefreshUseCase(users as any, refresh as any, audit as any, jwt as any, log as any);
+  const uc = new RefreshUseCase(users as any, refresh as any, audit as any, jwt as any, log as any, opts.absoluteLifetimeSec);
   return { uc, state };
 }
 
@@ -117,6 +123,35 @@ test("reused (already-rotated) token → DENY and revoke all", async () => {
 
 test("unknown session (no record) → DENY as reuse", async () => {
   const { uc, state } = makeDeps({ session: null });
+  await assert.rejects(() => uc.execute("refresh-tok", null, null), hasCode("refresh_reuse"));
+  assert.equal(state.inserted, 0);
+});
+
+// SEC-SESSION-ABS-001 (ASVS V7.3.2) — absolute session lifetime. SESSION-ABS-001..004.
+
+test("SESSION-ABS-001: rotation carries the ORIGINAL sign-in time forward", async () => {
+  const signedIn = Math.floor(Date.now() / 1000) - 3600;
+  const { uc, state } = makeDeps({ authTime: signedIn, absoluteLifetimeSec: 86400 });
+  await uc.execute("refresh-tok", null, null);
+  assert.equal(state.issuedAuthTime, signedIn, "new refresh keeps the first sign-in time, not 'now'");
+});
+
+test("SESSION-ABS-002: past the absolute lifetime → DENY, revoke this session, audit", async () => {
+  const { uc, state } = makeDeps({ authTime: Math.floor(Date.now() / 1000) - 86401, absoluteLifetimeSec: 86400 });
+  await assert.rejects(() => uc.execute("refresh-tok", null, null), hasCode("refresh_reuse"));
+  assert.equal(state.inserted, 0, "no new token issued");
+  assert.deepEqual(state.revoked, ["jti-old"]);
+  assert.ok(state.audits.some((a) => a.action === "token_refresh_denied" && a.details?.reason === "absolute_lifetime"));
+});
+
+test("SESSION-ABS-003: just inside the lifetime still refreshes", async () => {
+  const { uc, state } = makeDeps({ authTime: Math.floor(Date.now() / 1000) - 86000, absoluteLifetimeSec: 86400 });
+  await uc.execute("refresh-tok", null, null);
+  assert.equal(state.inserted, 1);
+});
+
+test("SESSION-ABS-004: a token without a usable sign-in time fails closed", async () => {
+  const { uc, state } = makeDeps({ authTime: undefined, absoluteLifetimeSec: 86400 });
   await assert.rejects(() => uc.execute("refresh-tok", null, null), hasCode("refresh_reuse"));
   assert.equal(state.inserted, 0);
 });

@@ -224,10 +224,35 @@ let auditWriteFailuresTotal = 0;
 export function getAuditWriteFailuresTotal(): number { return auditWriteFailuresTotal; }
 
 export class AuditRepository {
-  constructor(private readonly pool: Pool, private readonly logger?: import("../logger/index.js").Logger) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly logger?: import("../logger/index.js").Logger,
+    /** SEC-AUDIT-EXPORT-001: mirror each event to the structured app log. */
+    private readonly exportToLog = false,
+  ) {}
 
   async log(evt: AuditEvent): Promise<void> {
     const action = mapAction(evt.action, evt.success);
+    if (this.exportToLog) {
+      // Off-host copy of the audit trail (container log driver → syslog/SIEM),
+      // so a compromised app/DB host cannot silently erase what happened. Emitted
+      // before the DB write so it survives a failed insert. `details` stays a
+      // top-level key so the logger's `*.<secret>` redaction paths apply.
+      this.logger?.info(
+        {
+          event: "audit",
+          action,
+          success: evt.success,
+          userId: evt.userId,
+          resourceType: evt.resourceType ?? null,
+          resourceId: evt.resourceId ?? null,
+          ip: evt.ipAddress || null,
+          requestId: evt.requestId ?? null,
+          details: evt.details ?? {},
+        },
+        "audit",
+      );
+    }
     try {
       await this.pool.query(
         `INSERT INTO audit_logs

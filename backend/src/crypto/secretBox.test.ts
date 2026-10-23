@@ -107,6 +107,8 @@ function fakeCfg(over: Partial<Config["env"]> & { isProd?: boolean }): Config {
     isDev: !(isProd ?? false),
     jwtAccessTtlSec: 900,
     jwtRefreshTtlSec: 3600,
+    sessionAbsoluteLifetimeSec: 604800,
+    tempPasswordTtlSec: 259200,
     corsOrigins: [],
     trustProxy: "loopback, uniquelocal",
     publicBaseUrl: null,
