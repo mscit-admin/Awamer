@@ -111,6 +111,14 @@ ALTER DEFAULT PRIVILEGES FOR ROLE awamer_migrator IN SCHEMA public
 SELECT 'REVOKE ALL ON public.schema_migrations FROM awamer_app'
  WHERE to_regclass('public.schema_migrations') IS NOT NULL \gexec
 
+-- SEC-AUDIT-APPEND-001: the audit trail is append-only for the runtime role, so a
+-- compromised backend cannot rewrite or erase its own tracks (also re-applied by
+-- migration 030; repeated here because the blanket GRANT above re-adds DML).
+-- `ON DELETE SET NULL` from users still works: referential actions run as the
+-- table owner (awamer_migrator).
+SELECT 'REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM awamer_app'
+ WHERE to_regclass('public.audit_logs') IS NOT NULL \gexec
+
 -- vpn-helper auth-verify: exactly the columns its single query reads.
 SELECT 'GRANT SELECT (server_id, username, password_hash, revoked) ON public.vpn_server_clients TO awamer_vpn_auth'
  WHERE to_regclass('public.vpn_server_clients') IS NOT NULL \gexec

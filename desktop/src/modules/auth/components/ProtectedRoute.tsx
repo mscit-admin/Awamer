@@ -3,6 +3,9 @@ import { Navigate, useLocation } from "react-router-dom";
 
 import { useAuthStore } from "@/modules/auth/store/authStore";
 
+const MFA_SETUP_PATH = "/settings/security/mfa";
+const PASSWORD_CHANGE_PATH = "/settings/security/password";
+
 interface Props {
   children: ReactNode;
 }
@@ -14,6 +17,7 @@ interface Props {
  */
 export function ProtectedRoute({ children }: Props) {
   const status = useAuthStore((s) => s.status);
+  const user = useAuthStore((s) => s.user);
   const location = useLocation();
 
   if (status === "idle" || status === "authenticating") {
@@ -29,6 +33,15 @@ export function ProtectedRoute({ children }: Props) {
 
   if (status !== "authenticated") {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // SEC-PW-TEMP-001: an admin-set password must be replaced first, then
+  // SEC-MFA-POLICY-001: a role that requires MFA must enroll. The server refuses
+  // everything else until then — keep the user on the page that fixes it.
+  if (user?.password_change_required) {
+    if (location.pathname !== PASSWORD_CHANGE_PATH) return <Navigate to={PASSWORD_CHANGE_PATH} replace />;
+  } else if (user?.mfa_enrollment_required && location.pathname !== MFA_SETUP_PATH) {
+    return <Navigate to={MFA_SETUP_PATH} replace />;
   }
 
   return <>{children}</>;

@@ -63,6 +63,9 @@ import { makeNotesRoutes } from "./routes/notes.js";
 import { BackupRepository } from "./repos/backupRepo.js";
 import { RoleRepository } from "./repos/roleRepo.js";
 import { RoleService } from "./domain/roleService.js";
+import { loadMfaPolicy } from "./domain/mfaPolicy.js";
+import { registerNoStoreHeaders } from "./middleware/cacheControl.js";
+import { registerWsOriginCheck } from "./middleware/wsOrigin.js";
 import { makeRoleRoutes } from "./routes/roles.js";
 import { makeSshGateway } from "./ssh/gateway.js";
 import { makeSftpGateway } from "./ssh/sftpGateway.js";
@@ -106,7 +109,7 @@ async function main() {
   const users = new UserRepository(pool);
   const mfaDevices = new MFADeviceRepository(pool);
   const refresh = new RefreshRepository(pool);
-  const audit = new AuditRepository(pool, log);
+  const audit = new AuditRepository(pool, log, cfg.env.AUDIT_LOG_STDOUT);
 
   // Phase 2 repos
   const folders = new FolderRepository(pool);
@@ -153,6 +156,8 @@ async function main() {
   // permissions are always granted to them without a per-permission migration.
   await roleService.syncBuiltins();
   await roleService.reload();
+  // SEC-MFA-POLICY-001: which roles must have MFA (default super_admin + admin).
+  await loadMfaPolicy(appSettings);
 
   // SEC-MFA-001: encrypt any legacy plaintext TOTP secrets at rest (idempotent).
   await reencryptLegacyMfaSecrets(mfaDevices, secretBox, log);
@@ -172,11 +177,11 @@ async function main() {
 
   // Use cases
   const loginUC = new LoginUseCase(users, refresh, audit, jwt, argon2, cfg, log);
-  const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log);
+  const refreshUC = new RefreshUseCase(users, refresh, audit, jwt, log, cfg.sessionAbsoluteLifetimeSec);
   const stepUp = new StepUpService(jwt, users);
   const mfaUC = new MFAUseCase(users, mfaDevices, audit, cfg, argon2, secretBox, appSettings, refresh, activeSessions);
-  const registerUC = new RegisterUseCase(users, audit, argon2);
-  const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2, activeSessions);
+  const registerUC = new RegisterUseCase(users, audit, argon2, cfg.tempPasswordTtlSec);
+  const changePasswordUC = new ChangePasswordUseCase(users, refresh, audit, argon2, activeSessions, cfg.tempPasswordTtlSec);
   // Email + forgot/reset password.
   const passwordResets = new PasswordResetRepository(pool);
   const mailer = new MailService(appSettings, secretBox, log);
@@ -222,6 +227,11 @@ async function main() {
     limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 4 },
   });
   await app.register(helmet, { contentSecurityPolicy: false });
+  // SEC-CACHE-001: no API response (secrets, per-user data) may be cached.
+  registerNoStoreHeaders(app);
+  // SEC-WS-ORIGIN-001: refuse cross-site WebSocket handshakes (CSWSH) on every
+  // gateway; same-origin, CORS-allowlisted (Tauri) and Origin-less clients pass.
+  registerWsOriginCheck(app, cfg.corsOrigins);
   await app.register(cors, {
     origin: cfg.corsOrigins,
     credentials: true,
@@ -311,8 +321,8 @@ async function main() {
   // Public forgot/reset password (same prefix as auth).
   await app.register(makePasswordResetRoutes({ reset: passwordResetUC, rateMax: cfg.env.RATE_LIMIT_LOGIN_PER_MIN }), { prefix: "/api/v1/auth" });
 
-  await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt, stepUp }), { prefix: "/api/v1" });
-  await app.register(makeAdminRoutes({ audit, sessions: activeSessions, users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh }), { prefix: "/api/v1/admin" });
+  await app.register(makeAuthedRoutes({ users, mfa: mfaUC, changePassword: changePasswordUC, jwt, stepUp, audit, mailer, log }), { prefix: "/api/v1" });
+  await app.register(makeAdminRoutes({ audit, sessions: activeSessions, users, register: registerUC, changePassword: changePasswordUC, mfa: mfaUC, roleService, jwt, refresh, passwordReset: passwordResetUC }), { prefix: "/api/v1/admin" });
   await app.register(makeSmtpRoutes({ mailer, users, jwt, audit }), { prefix: "/api/v1/admin/smtp" });
   await app.register(makeSessionSettingsRoutes({ settings: appSettings, users, jwt, audit }), { prefix: "/api/v1/admin/session-settings" });
   await app.register(makeRoleRoutes({ roles, roleService, audit, jwt, users }), { prefix: "/api/v1/roles" });
@@ -396,6 +406,9 @@ async function bootstrapAdmin(
     passwordHash,
     fullName: "Bootstrap Administrator",
     role: "super_admin",
+    // SEC-PW-TEMP-001: the operator-supplied bootstrap password must be replaced
+    // at first sign-in (no expiry, so a fresh install is never locked out).
+    temporaryPassword: { expiresAt: null },
   });
   log.warn(
     { username, email: cfg.env.BOOTSTRAP_ADMIN_EMAIL },

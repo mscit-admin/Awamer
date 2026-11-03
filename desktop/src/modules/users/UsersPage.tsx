@@ -15,6 +15,7 @@ import { orgApi, type Company, type OrgUnit } from "@/modules/org/orgApi";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { useCan } from "@/shared/lib/permissions";
 import { ApiError } from "@/shared/lib/api";
+import { generatePassword } from "@/modules/sessions/lib/passwordGenerator";
 
 export interface RoleOption { key: string; name: string }
 
@@ -314,15 +315,14 @@ function EditUserModal({ user, roleOpts, onClose, onSaved, onError }: {
   );
 }
 
-// Password policy mirror: ≥12 chars with upper, lower, digit and symbol.
+// Temporary password for an admin reset — CSPRNG (crypto.getRandomValues), not
+// Math.random (ASVS V11.5.1). The server enforces the policy (SEC-PW-POLICY-001).
 function strongPassword(): string {
-  const U = "ABCDEFGHJKLMNPQRSTUVWXYZ", L = "abcdefghijkmnpqrstuvwxyz", D = "23456789", S = "!@#$%^&*-_=+";
-  const all = U + L + D + S;
-  const pick = (set: string) => set[Math.floor(Math.random() * set.length)];
-  let out = pick(U) + pick(L) + pick(D) + pick(S);
-  for (let i = 0; i < 12; i++) out += pick(all);
-  return out.split("").sort(() => Math.random() - 0.5).join("");
+  return generatePassword({ length: 20 });
 }
+
+/** SEC-PW-POLICY-001 mirror: the server also refuses common and account-derived passwords. */
+const PASSWORD_HINT = "At least 12 characters. Long passphrases work well; common passwords and ones containing the username, email or product name are refused.";
 
 function ResetPasswordModal({ user, onClose, onError }: {
   user: AdminUser;
@@ -333,8 +333,19 @@ function ResetPasswordModal({ user, onClose, onError }: {
   const [show, setShow] = useState(true);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
 
-  const ok = password.length >= 12;
+  const ok = [...password].length >= 12;
+
+  async function sendLink() {
+    setBusy(true);
+    try {
+      await usersAdminApi.sendResetLink(user.id);
+      setLinkSent(true);
+    } catch (e) {
+      onError(e instanceof ApiError ? humanize(e.message) : e instanceof Error ? e.message : "could not send the reset link");
+    } finally { setBusy(false); }
+  }
 
   async function save() {
     if (!ok) return;
@@ -354,31 +365,44 @@ function ResetPasswordModal({ user, onClose, onError }: {
           <KeyRound className="size-4 text-accent" />
           <h2 className="text-base font-semibold">Reset password — {user.username}</h2>
         </div>
-        {done ? (
+        {linkSent ? (
+          <>
+            <div className="px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs rounded mb-4 flex items-center gap-2">
+              <Check className="size-3.5" /> A single-use reset link was emailed to {user.email}. The user chooses their own password.
+            </div>
+            <div className="flex justify-end"><button onClick={onClose} className="btn-primary text-sm">Done</button></div>
+          </>
+        ) : done ? (
           <>
             <div className="px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs rounded mb-3 flex items-center gap-2">
-              <Check className="size-3.5" /> Password updated. All of the user's sessions were signed out.
+              <Check className="size-3.5" /> Temporary password set. All of the user's sessions were signed out.
             </div>
-            <p className="text-xs text-fg-muted mb-4">Share this password with the user securely — it isn't stored in plain text and can't be shown again:</p>
+            <p className="text-xs text-fg-muted mb-4">Share it with the user securely. They must replace it at their next sign-in, and it stops working if unused for a few days. It isn't stored in plain text and can't be shown again:</p>
             <div className="font-mono text-sm bg-bg-elevated border border-border rounded px-3 py-2 mb-4 break-all select-all">{password}</div>
             <div className="flex justify-end"><button onClick={onClose} className="btn-primary text-sm">Done</button></div>
           </>
         ) : (
           <>
-            <p className="text-xs text-fg-muted mb-3">Set a new password for this account. The user's other sessions are signed out, and a locked account is unlocked.</p>
+            <p className="text-xs text-fg-muted mb-3">
+              Recommended: email the user a reset link so only they know the new password.
+            </p>
+            <button type="button" onClick={sendLink} disabled={busy} className="btn-secondary text-sm w-full mb-4 inline-flex gap-1 justify-center">
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />} Email a reset link
+            </button>
+            <p className="text-xs text-fg-muted mb-3">Or set a temporary password. The user must replace it at next sign-in; their sessions are signed out, and a locked account is unlocked.</p>
             <div className="flex items-center gap-2 mb-1">
               <input type={show ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="New password (min 12 chars)" className="input font-mono w-full" autoFocus />
+                placeholder="Temporary password (min 12 chars)" className="input font-mono w-full" />
               <button type="button" onClick={() => setShow((v) => !v)} className="btn-ghost text-xs px-2">{show ? "Hide" : "Show"}</button>
             </div>
             <button type="button" onClick={() => { setPassword(strongPassword()); setShow(true); }} className="btn-ghost text-xs mb-1">Generate strong password</button>
             <p className={"text-2xs mb-4 " + (ok ? "text-emerald-400" : "text-fg-muted")}>
-              At least 12 characters with upper & lower case, a digit and a symbol.
+              {PASSWORD_HINT}
             </p>
             <div className="flex justify-end gap-2">
               <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
               <button onClick={save} disabled={busy || !ok} className="btn-primary text-sm inline-flex gap-1">
-                {busy ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />} Reset
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />} Set temporary password
               </button>
             </div>
           </>
@@ -503,7 +527,7 @@ function CreateUserModal({ roleOpts, onClose, onCreated, onError }: {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (password.length < 12) { setErr("Password must be at least 12 characters (with upper, lower, digit, symbol)."); return; }
+    if ([...password].length < 12) { setErr("Password must be at least 12 characters."); return; }
     setBusy(true);
     try {
       await usersAdminApi.create({ username, email, password, full_name: fullName || undefined, role });
@@ -539,7 +563,8 @@ function CreateUserModal({ roleOpts, onClose, onCreated, onError }: {
         <div>
           <label className="block text-xs text-fg-muted mb-1">Temporary password</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="input w-full" required
-            placeholder="≥12 chars, mixed classes" autoComplete="new-password" />
+            placeholder="At least 12 characters" autoComplete="new-password" />
+          <p className="text-2xs text-fg-muted mt-1">The user must replace it at first sign-in. {PASSWORD_HINT}</p>
         </div>
         <div>
           <label className="block text-xs text-fg-muted mb-1">Role</label>
@@ -565,7 +590,8 @@ function humanize(code: string): string {
   switch (code) {
     case "username_taken": return "That username is already taken.";
     case "email_taken": return "That email is already in use.";
-    case "weak_password": return "Password must be ≥12 chars with upper, lower, digit, and symbol.";
+    case "weak_password": return PASSWORD_HINT;
+    case "smtp_not_configured": return "Email is not configured — set up SMTP, or set a temporary password instead.";
     case "invalid_role": return "Invalid role.";
     case "forbidden": return "You don't have permission to manage users.";
     default: return code || "Request failed.";

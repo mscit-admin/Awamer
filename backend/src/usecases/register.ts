@@ -3,6 +3,7 @@ import { Errors, type Role, isRole } from "../domain/index.js";
 import type { UserRepository } from "../repos/userRepo.js";
 import type { AuditRepository } from "../repos/otherRepos.js";
 import type { Argon2Service } from "../crypto/argon2.js";
+import { checkPassword, validatePassword, PASSWORD_PROBLEM_MESSAGE, type PasswordContext } from "../domain/passwordPolicy.js";
 
 export interface RegisterInput {
   username: string;
@@ -19,10 +20,12 @@ export class RegisterUseCase {
     private readonly users: UserRepository,
     private readonly audit: AuditRepository,
     private readonly argon2: Argon2Service,
+    /** SEC-PW-TEMP-001: lifetime of the initial (admin-chosen) password. */
+    private readonly tempPasswordTtlSec = 72 * 3600,
   ) {}
 
   async execute(input: RegisterInput) {
-    if (!validatePassword(input.password)) throw Errors.WeakPassword();
+    assertPasswordPolicy(input.password, { username: input.username, email: input.email, fullName: input.fullName });
 
     const role: Role = input.role ? (isRole(input.role) ? input.role : (() => { throw Errors.InvalidRole(); })()) : "user";
 
@@ -37,6 +40,9 @@ export class RegisterUseCase {
       role,
       companyId: input.companyId ?? null,
       orgUnitId: input.orgUnitId ?? null,
+      // SEC-PW-TEMP-001: accounts are created by an admin, so the initial
+      // password is temporary — the user replaces it at first sign-in.
+      temporaryPassword: { expiresAt: new Date(Date.now() + this.tempPasswordTtlSec * 1000) },
     });
     await this.audit.log({
       userId: user.id, action: "user_create", success: true,
@@ -46,15 +52,14 @@ export class RegisterUseCase {
   }
 }
 
-/** Phase 1 password policy: ≥12 chars with mixed classes. */
-export function validatePassword(p: string): boolean {
-  if (p.length < 12) return false;
-  let upper = false, lower = false, digit = false, sym = false;
-  for (const c of p) {
-    if (c >= "A" && c <= "Z") upper = true;
-    else if (c >= "a" && c <= "z") lower = true;
-    else if (c >= "0" && c <= "9") digit = true;
-    else if (`!@#$%^&*()-_=+[]{};:,.<>/?\\|\`~"'`.includes(c)) sym = true;
-  }
-  return upper && lower && digit && sym;
+/**
+ * SEC-PW-POLICY-001: throw `weak_password` (with the specific reason) unless the
+ * password satisfies the policy in domain/passwordPolicy.ts.
+ */
+export function assertPasswordPolicy(password: string, ctx: PasswordContext = {}): void {
+  const problem = checkPassword(password, ctx);
+  if (problem) throw Errors.WeakPassword(PASSWORD_PROBLEM_MESSAGE[problem]);
 }
+
+/** Kept for callers that only need a yes/no answer. */
+export { validatePassword };

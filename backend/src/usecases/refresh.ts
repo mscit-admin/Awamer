@@ -17,6 +17,8 @@ export class RefreshUseCase {
     private readonly audit: AuditRepository,
     private readonly jwt: JwtService,
     private readonly log: Logger,
+    /** SEC-SESSION-ABS-001: seconds from sign-in after which refresh is refused. */
+    private readonly absoluteLifetimeSec = 168 * 3600,
   ) {}
 
   async execute(refreshToken: string, ip: string | null, ua: string | null): Promise<RefreshResult> {
@@ -74,7 +76,20 @@ export class RefreshUseCase {
       throw user.isActive ? Errors.AccountLocked() : Errors.AccountInactive();
     }
 
-    const { access, refresh: newRefresh } = await this.jwt.issuePair(user.id, user.role, user.authVersion);
+    // SEC-SESSION-ABS-001 (ASVS V7.3.2): the chain may slide, but never past the
+    // absolute lifetime measured from the ORIGINAL sign-in (`at`, signed).
+    const now = Math.floor(Date.now() / 1000);
+    // Fail closed: a missing/garbled sign-in time counts as expired.
+    if (!Number.isFinite(claims.at) || now - claims.at >= this.absoluteLifetimeSec) {
+      await this.refresh.revoke(session.jti);
+      await this.audit.log({
+        userId: user.id, action: "token_refresh_denied", success: false,
+        ipAddress: ip, userAgent: ua, details: { reason: "absolute_lifetime" },
+      });
+      throw Errors.RefreshReuse();
+    }
+
+    const { access, refresh: newRefresh } = await this.jwt.issuePair(user.id, user.role, user.authVersion, claims.at);
     // SEC-REFRESH-RACE-001: claim the rotation atomically BEFORE the new session
     // becomes usable. Losing the claim means another request already rotated
     // (or revoked) this token — treat it exactly like reuse.

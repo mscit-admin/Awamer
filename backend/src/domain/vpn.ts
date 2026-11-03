@@ -10,8 +10,6 @@ import { DomainError } from "./index.js";
 
 export const VPN_RUNTIMES = ["desktop", "backend"] as const;
 export type VpnRuntime = typeof VPN_RUNTIMES[number];
-export const isVpnRuntime = (s: string): s is VpnRuntime =>
-  (VPN_RUNTIMES as readonly string[]).includes(s);
 
 export const VPN_SOURCES = ["config", "manual"] as const;
 export type VpnSource = typeof VPN_SOURCES[number];

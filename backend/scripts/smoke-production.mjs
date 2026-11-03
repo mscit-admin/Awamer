@@ -8,7 +8,10 @@
  *
  * Env:
  *   SMOKE_BASE_URL          e.g. http://127.0.0.1:18081
- *   SMOKE_ADMIN_USER/PASS   bootstrap super_admin (fresh install)
+ *   SMOKE_ADMIN_USER/PASS   bootstrap super_admin (fresh install). The run REPLACES the
+ *                           bootstrap password (SEC-PW-TEMP-001) with SMOKE_ADMIN_NEW_PASS
+ *                           (default: random) and enrols MFA for it (SEC-MFA-POLICY-001),
+ *                           so use a disposable install.
  *   SMOKE_SSH_HOST/PORT     an SSH server reachable FROM the backend
  *   SMOKE_SSH_USER          account on it
  *   SMOKE_SSH_KEY_FILE      private key (OpenSSH) authorised for that account
@@ -88,6 +91,41 @@ function sshExec(token, hostId, command, timeoutMs = 20_000) {
   });
 }
 
+// ---- account activation (SEC-PW-TEMP-001 temp passwords, SEC-MFA-POLICY-001) ----
+/** Replace a temporary password; returns the HTTP status and the new password. */
+async function changeTempPassword(token, oldPw, newPw = strongPw()) {
+  const r = await api("POST", "/api/v1/auth/change-password", { token, body: { current_password: oldPw, new_password: newPw } });
+  return { status: r.status, password: newPw };
+}
+/** Step up, enrol and activate a TOTP device; returns its secret. */
+async function enrollMfa(token, password) {
+  const su = await api("POST", "/api/v1/auth/step-up", { token, body: { password } });
+  const enr = await api("POST", "/api/v1/auth/mfa/enroll", { token, body: { device_name: "smoke" }, headers: { "x-step-up-token": su.json?.step_up_token } });
+  const act = await api("POST", "/api/v1/auth/mfa/activate", { token, body: { device_id: enr.json?.device_id, code: authenticator.generate(enr.json?.secret ?? "") } });
+  return { ok: enr.status === 200 && act.status === 204, secret: enr.json?.secret, detail: `enroll ${enr.status} activate ${act.status}` };
+}
+/** Password login, completing the MFA challenge when one is required. */
+async function mfaLogin(username, password, secret) {
+  const l = await login(username, password);
+  if (!l.json?.mfa_required) return l;
+  await nextTotpStep(); // the previous code (activation / last login) consumed this step
+  return api("POST", "/api/v1/auth/mfa/verify", { token: l.json.mfa_token, body: { code: authenticator.generate(secret) } });
+}
+/** Take a freshly created account (temporary password) to a usable session. */
+async function activate(username, tempPw) {
+  let l = await login(username, tempPw);
+  let password = tempPw;
+  if (l.json?.user?.password_change_required) {
+    password = (await changeTempPassword(l.json.access_token, tempPw)).password;
+    l = await login(username, password);
+  }
+  if (l.json?.user?.mfa_enrollment_required) {
+    const m = await enrollMfa(l.json.access_token, password);
+    l = await mfaLogin(username, password, m.secret);
+  }
+  return { token: l.json?.access_token, password };
+}
+
 // ---------------------------------------------------------------- health ----
 {
   const h = await api("GET", "/healthz");
@@ -106,7 +144,20 @@ function sshExec(token, hostId, command, timeoutMs = 20_000) {
 // ------------------------------------------------------- auth + MFA flow ----
 const admin = await login(env.SMOKE_ADMIN_USER, env.SMOKE_ADMIN_PASS);
 check("auth: bootstrap super_admin login", admin.status === 200 && admin.json?.access_token, `status ${admin.status}`);
-let superTok = admin.json.access_token;
+check("REGRESSION temp-password: the bootstrap password must be replaced before anything else",
+  admin.json?.user?.password_change_required === true &&
+  (await api("GET", "/api/v1/admin/users", { token: admin.json?.access_token })).json?.error?.code === "password_change_required");
+const adminPw = await changeTempPassword(admin.json.access_token, env.SMOKE_ADMIN_PASS, env.SMOKE_ADMIN_NEW_PASS || strongPw());
+check("auth: bootstrap password replaced", adminPw.status === 200, `status ${adminPw.status}`);
+const held = await login(env.SMOKE_ADMIN_USER, adminPw.password);
+check("REGRESSION mfa-policy: super_admin is held at MFA enrolment",
+  held.json?.user?.mfa_enrollment_required === true &&
+  (await api("GET", "/api/v1/admin/users", { token: held.json?.access_token })).json?.error?.code === "mfa_enrollment_required");
+const adminMfa = await enrollMfa(held.json.access_token, adminPw.password);
+check("mfa: super_admin enrols MFA", adminMfa.ok, adminMfa.detail);
+const superLogin = await mfaLogin(env.SMOKE_ADMIN_USER, adminPw.password, adminMfa.secret);
+check("auth: super_admin MFA sign-in", superLogin.status === 200 && superLogin.json?.access_token, `status ${superLogin.status}`);
+let superTok = superLogin.json.access_token;
 const me = await api("GET", "/api/v1/users/me", { token: superTok });
 check("auth: /users/me as super_admin", me.status === 200 && me.json?.role === "super_admin");
 check("rbac: super_admin effective permissions include settings:manage + companies:manage",
@@ -116,6 +167,10 @@ check("rbac: super_admin effective permissions include settings:manage + compani
 const mfaUser = { username: `smoke_mfa_${run}`, password: strongPw() };
 const created = await api("POST", "/api/v1/admin/users", { token: superTok, body: { ...mfaUser, email: `${mfaUser.username}@smoke.local`, role: "user" } });
 check("users: super_admin creates a user", created.status === 201, `status ${created.status}`);
+const firstLogin = await login(mfaUser.username, mfaUser.password);
+check("REGRESSION temp-password: an admin-created user must choose a new password first",
+  firstLogin.json?.user?.password_change_required === true);
+mfaUser.password = (await changeTempPassword(firstLogin.json.access_token, mfaUser.password)).password;
 let mfaTok = (await login(mfaUser.username, mfaUser.password)).json.access_token;
 const noStep = await api("POST", "/api/v1/auth/mfa/enroll", { token: mfaTok, body: { device_name: "smoke" } });
 check("mfa: enrolment without step-up is refused", noStep.status === 401);
@@ -157,8 +212,9 @@ async function mkUser(prefix, role, company) {
   const c = await api("POST", "/api/v1/admin/users", { token: superTok, body: { ...u, email: `${u.username}@smoke.local`, role } });
   const id = c.json?.id;
   await api("PUT", `/api/v1/org/users/${id}/assignment`, { token: superTok, body: { company_id: company, role } });
-  const t = (await login(u.username, u.password)).json?.access_token;
-  return { id, token: t, ...u };
+  // New accounts start with a temporary password; admins must also enrol MFA.
+  const a = await activate(u.username, u.password);
+  return { id, ...u, token: a.token, password: a.password };
 }
 const adminA = await mkUser("adminA", "admin", compA);
 const userA = await mkUser("userA", "user", compA);

@@ -19,6 +19,8 @@ interface UserRow {
   company_id: string | null;
   org_unit_id: string | null;
   auth_version: number;
+  password_must_change: boolean;
+  temp_password_expires_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -27,7 +29,8 @@ const COLS = `
   id, username, email, password_hash, full_name, role,
   is_active, is_locked, locked_until, failed_attempts,
   last_login_at, last_login_ip::text AS last_login_ip,
-  mfa_enabled, company_id, org_unit_id, auth_version, created_at, updated_at
+  mfa_enabled, company_id, org_unit_id, auth_version,
+  password_must_change, temp_password_expires_at, created_at, updated_at
 `;
 
 function rowToUser(r: UserRow): User {
@@ -49,6 +52,8 @@ function rowToUser(r: UserRow): User {
     companyId: r.company_id,
     orgUnitId: r.org_unit_id,
     authVersion: r.auth_version,
+    passwordMustChange: r.password_must_change,
+    tempPasswordExpiresAt: r.temp_password_expires_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -63,6 +68,8 @@ export interface CreateUserInput {
   role: Role;
   companyId?: string | null;
   orgUnitId?: string | null;
+  /** SEC-PW-TEMP-001: the password was chosen by an admin/operator, not the user. */
+  temporaryPassword?: { expiresAt: Date | null };
 }
 
 export class UserRepository {
@@ -71,10 +78,12 @@ export class UserRepository {
   async create(input: CreateUserInput): Promise<User> {
     try {
       const { rows } = await this.pool.query<UserRow>(
-        `INSERT INTO users (id, username, email, password_hash, full_name, role, is_active, company_id, org_unit_id)
-         VALUES ($1, lower($2), lower($3), $4, $5, $6, TRUE, $7, $8)
+        `INSERT INTO users (id, username, email, password_hash, full_name, role, is_active, company_id, org_unit_id,
+                            password_must_change, temp_password_expires_at)
+         VALUES ($1, lower($2), lower($3), $4, $5, $6, TRUE, $7, $8, $9, $10)
          RETURNING ${COLS}`,
-        [input.id, input.username, input.email, input.passwordHash, input.fullName ?? null, input.role, input.companyId ?? null, input.orgUnitId ?? null],
+        [input.id, input.username, input.email, input.passwordHash, input.fullName ?? null, input.role, input.companyId ?? null, input.orgUnitId ?? null,
+          input.temporaryPassword !== undefined, input.temporaryPassword?.expiresAt ?? null],
       );
       return rowToUser(rows[0]!);
     } catch (e) {
@@ -177,10 +186,17 @@ export class UserRepository {
     );
   }
 
-  async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
+  /**
+   * Set the password. SEC-PW-TEMP-001: `temporary` marks a password chosen by
+   * someone other than the owner (must be changed at next sign-in, optionally
+   * expiring); without it the password is the owner's own and the flag clears.
+   */
+  async updatePasswordHash(id: string, passwordHash: string, temporary?: { expiresAt: Date | null }): Promise<void> {
     const r = await this.pool.query(
-      `UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1`,
-      [id, passwordHash],
+      `UPDATE users SET password_hash = $2, password_must_change = $3,
+                        temp_password_expires_at = $4, updated_at = NOW()
+       WHERE id = $1`,
+      [id, passwordHash, temporary !== undefined, temporary?.expiresAt ?? null],
     );
     if (r.rowCount === 0) throw Errors.UserNotFound();
   }

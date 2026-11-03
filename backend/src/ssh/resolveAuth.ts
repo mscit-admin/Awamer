@@ -18,11 +18,6 @@ export interface ResolvedSsh {
   auth: SshAuth;
 }
 
-export interface ResolveError {
-  code: string;
-  message: string;
-}
-
 export class SshResolveError extends Error {
   constructor(public readonly code: string, message: string) {
     super(message);

@@ -9,6 +9,7 @@ import type { User } from "../domain/index.js";
 import { DomainError, isAccountLocked } from "../domain/index.js";
 import { permissionsFor } from "../domain/permissions.js";
 import { makeAuthMiddleware } from "../middleware/auth.js";
+import { mfaRequiredForRole } from "../domain/mfaPolicy.js";
 import { isWebClient, setRefreshCookie, clearRefreshCookie, readRefreshCookie } from "./authCookies.js";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -37,6 +38,12 @@ export function userView(u: User) {
     is_active: u.isActive,
     is_locked: u.isLocked,
     mfa_enabled: u.mfaEnabled,
+    // SEC-MFA-POLICY-001: the role must have MFA (so it cannot be disabled);
+    // when not yet enrolled the client routes the user to enrollment.
+    mfa_policy_required: mfaRequiredForRole(u.role),
+    // SEC-PW-TEMP-001: the password was set by an admin; replace it first.
+    password_change_required: u.passwordMustChange,
+    mfa_enrollment_required: !u.mfaEnabled && mfaRequiredForRole(u.role),
     company_id: u.companyId,
     org_unit_id: u.orgUnitId,
     last_login_at: u.lastLoginAt,
@@ -102,7 +109,7 @@ export function makeAuthRoutes(deps: Deps): FastifyPluginAsync {
         return emitTokens(req, reply, result, { user: result.user ? userView(result.user) : undefined });
       } catch (e) {
         if (e instanceof DomainError) {
-          const status = e.code === "account_inactive" || e.code === "account_locked" ? 403 : 401;
+          const status = e.code === "account_inactive" || e.code === "account_locked" || e.code === "temporary_password_expired" ? 403 : 401;
           return reply.code(status).send({ error: { code: e.code, message: e.message } });
         }
         req.log.error({ err: e }, "login failed unexpectedly");

@@ -4,7 +4,8 @@
  *
  *   DBLP-001 provisioning creates non-superuser roles; validates its inputs
  *   DBLP-002 FRESH install: migrations succeed as the NON-superuser migrator
- *   DBLP-003 awamer_app: DML works (incl. BIGSERIAL), DDL / schema_migrations denied
+ *   DBLP-003 awamer_app: DML works (incl. BIGSERIAL), DDL / schema_migrations denied,
+ *            audit_logs is append-only (SEC-AUDIT-APPEND-001)
  *   DBLP-004 awamer_vpn_auth: only the 4 auth-verify columns; nothing else
  *   DBLP-005 runtime guard: app passes; migrator + superuser are refused in prod
  *   DBLP-006 UPGRADE path: superuser-owned schema is handed to the migrator,
@@ -114,8 +115,15 @@ test("DBLP-003: awamer_app has DML only — no DDL, no migration bookkeeping", {
   await app.query(`UPDATE users SET full_name = 'LP' WHERE id = $1`, [u.rows[0].id]);
   const a = await app.query(`INSERT INTO audit_logs (user_id, action, success) VALUES ($1, 'lp_test', TRUE) RETURNING id`, [u.rows[0].id]);
   assert.ok(Number(a.rows[0].id) > 0);
-  await app.query(`DELETE FROM audit_logs WHERE id = $1`, [a.rows[0].id]);
+  // SEC-AUDIT-APPEND-001: the audit trail is append-only for the runtime role.
+  for (const sql of [`UPDATE audit_logs SET action = 'tampered' WHERE id = $1`, `DELETE FROM audit_logs WHERE id = $1`]) {
+    await assert.rejects(() => app.query(sql, [a.rows[0].id]), /permission denied/, sql);
+  }
+  await assert.rejects(() => app.query(`TRUNCATE audit_logs`), /permission denied/);
+  // Deleting the user still works: ON DELETE SET NULL runs as the table owner.
   await app.query(`DELETE FROM users WHERE id = $1`, [u.rows[0].id]);
+  const kept = await app.query(`SELECT user_id, action FROM audit_logs WHERE id = $1`, [a.rows[0].id]);
+  assert.deepEqual(kept.rows[0], { user_id: null, action: "lp_test" });
   await app.query(`SELECT pg_advisory_xact_lock(42)`);
 
   for (const ddl of [

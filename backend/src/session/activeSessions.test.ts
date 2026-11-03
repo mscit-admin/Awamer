@@ -23,7 +23,7 @@ function fakeUsers(states: Record<string, UserState | "not_found" | "db_error">)
     },
   };
 }
-const active = (role = "user"): UserState => ({ role, isActive: true, isLocked: false, lockedUntil: null, companyId: null, authVersion: 1 });
+const active = (role = "user"): UserState => ({ role, isActive: true, isLocked: false, lockedUntil: null, companyId: null, authVersion: 1, mfaEnabled: true, passwordMustChange: false });
 
 /** A fake session whose close records the reason and is idempotent. */
 function fakeSession(userId: string, kind: SessionKind, perm: ActiveRemoteSession["requiredPermission"]) {

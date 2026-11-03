@@ -18,7 +18,7 @@ export function ResetPasswordPage() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (password.length < 12) { setError("Password must be at least 12 characters with upper, lower, digit and symbol."); return; }
+    if ([...password].length < 12) { setError("Password must be at least 12 characters."); return; }
     if (password !== confirm) { setError("Passwords do not match."); return; }
     setBusy(true);
     try {
@@ -27,9 +27,9 @@ export function ResetPasswordPage() {
       setTimeout(() => navigate("/login"), 2500);
     } catch (err) {
       const code = err instanceof ApiError ? err.message : "";
-      setError(code === "weak_password"
-        ? "Password must be at least 12 characters with upper, lower, digit and symbol."
-        : code === "invalid_token"
+      // The server explains a policy refusal (too short / too common / contains
+      // your username or email — SEC-PW-POLICY-001); show its message as-is.
+      setError(code === "invalid_token"
           ? "This reset link is invalid or has expired. Request a new one."
           : err instanceof Error ? err.message : "Reset failed");
     } finally {

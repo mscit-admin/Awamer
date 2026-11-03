@@ -15,8 +15,8 @@ import type { RefreshRepository, AuditRepository } from "../repos/otherRepos.js"
 import type { Argon2Service } from "../crypto/argon2.js";
 import type { MailService } from "../email/mailer.js";
 import type { Logger } from "../logger/index.js";
-import { Errors, DomainError } from "../domain/index.js";
-import { validatePassword } from "./register.js";
+import { DomainError } from "../domain/index.js";
+import { assertPasswordPolicy } from "./register.js";
 import { resolveTrustedBaseUrl } from "./publicBaseUrl.js";
 import type { SessionRevoker } from "../session/activeSessions.js";
 
@@ -43,6 +43,11 @@ export class PasswordResetUseCase {
     private readonly cfg: ResetBaseUrlConfig,
     private readonly sessions?: SessionRevoker,
   ) {}
+
+  /** Whether reset links can actually be delivered (SMTP configured). */
+  async emailConfigured(): Promise<boolean> {
+    return this.mailer.isConfigured();
+  }
 
   /**
    * Issue + email a reset token. Never throws on unknown email.
@@ -112,11 +117,15 @@ export class PasswordResetUseCase {
   async resetPassword(token: string, newPassword: string): Promise<void> {
     const rec = await this.resets.findValid(hashToken(token));
     if (!rec) throw new DomainError("invalid_token", "this reset link is invalid or has expired");
-    if (!validatePassword(newPassword)) throw Errors.WeakPassword();
+    assertPasswordPolicy(newPassword, await this.users.getById(rec.userId));
 
     const hash = await this.argon2.hash(newPassword);
+    // SEC-RESET-RACE-001: consume the link atomically BEFORE changing the
+    // password, so two parallel requests with one link cannot both succeed.
+    if (!(await this.resets.claim(rec.id))) {
+      throw new DomainError("invalid_token", "this reset link is invalid or has expired");
+    }
     await this.users.updatePasswordHash(rec.userId, hash);
-    await this.resets.markUsed(rec.id);
     // SEC-SESSION-001: a reset invalidates ALL prior state — bump auth_version
     // (old access tokens fail), revoke refresh sessions, close live remote
     // sessions (SSH/Telnet/Tunnel/VNC).

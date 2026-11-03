@@ -20,7 +20,7 @@
  *  - Concurrency, config-size, startup/shutdown-timeout and log-tail caps.
  *  - Secret temp files are 0600 and removed on exit; secrets are never logged.
  */
-import { spawn as realSpawn, type ChildProcess } from "node:child_process";
+import { spawn as realSpawn } from "node:child_process";
 import net from "node:net";
 import dgram from "node:dgram";
 import { mkdir, writeFile, rm, realpath, access } from "node:fs/promises";
@@ -455,7 +455,7 @@ export class HelperCore {
     } catch (e) {
       session.state = "error";
       session.error = e instanceof Error ? e.message : String(e);
-      try { session.proc?.kill("SIGTERM"); } catch { /* ignore */ }
+      this.terminate(session.proc);
       await this.cleanup(session);
       this.sessions.delete(k);
       throw e;
@@ -480,11 +480,28 @@ export class HelperCore {
     const s = this.sessions.get(k);
     if (!s) return false;
     this.sessions.delete(k);
-    try { s.proc?.kill("SIGTERM"); } catch { /* ignore */ }
+    this.terminate(s.proc);
     s.state = "stopped";
     void this.cleanup(s);
     this.log({ kind, ref }, "vpn session stopped");
     return true;
+  }
+
+  /**
+   * SIGTERM the child, then SIGKILL it if it has not exited within
+   * shutdownTimeoutMs — a wedged openvpn must not outlive its session.
+   */
+  private terminate(proc: ChildLike | null): void {
+    if (!proc) return;
+    let exited = false;
+    proc.once("exit", () => { exited = true; });
+    try { proc.kill("SIGTERM"); } catch { /* ignore */ }
+    const t = setTimeout(() => {
+      if (exited) return;
+      this.log({ pid: proc.pid }, "vpn process ignored SIGTERM; sending SIGKILL");
+      try { proc.kill("SIGKILL"); } catch { /* ignore */ }
+    }, this.shutdownTimeoutMs);
+    t.unref?.();
   }
 
   private async cleanup(s: Session): Promise<void> {
@@ -496,7 +513,7 @@ export class HelperCore {
 
   stopAll(): void {
     for (const s of this.sessions.values()) {
-      try { s.proc?.kill("SIGTERM"); } catch { /* ignore */ }
+      this.terminate(s.proc);
       void this.cleanup(s);
     }
     this.sessions.clear();

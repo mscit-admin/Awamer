@@ -39,6 +39,11 @@ export interface VerifiedClaims {
   exp: number;
   /** SEC-SESSION-001 — account security version pinned into access tokens. */
   av: number;
+  /**
+   * SEC-SESSION-ABS-001 — original sign-in time (epoch seconds) carried along
+   * the refresh chain. Legacy tokens without it fall back to `iat`.
+   */
+  at: number;
 }
 
 export class JwtError extends Error {}
@@ -56,7 +61,11 @@ export interface JwtService {
    * version) so callers that don't track it still mint currently-valid tokens.
    * Real flows (login/refresh) pass the account's live version.
    */
-  issuePair(userId: string, role: string, authVersion?: number): Promise<TokenPair>;
+  /**
+   * `authTime` = original sign-in (epoch s); omitted on a fresh login (now).
+   * The refresh token never outlives `authTime + SESSION_ABSOLUTE_LIFETIME`.
+   */
+  issuePair(userId: string, role: string, authVersion?: number, authTime?: number): Promise<TokenPair>;
   issueOne(userId: string, role: string, type: TokenType, ttlSec: number): Promise<IssuedToken>;
   verifyAccess(token: string): Promise<VerifiedClaims>;
   verifyRefresh(token: string): Promise<VerifiedClaims>;
@@ -81,12 +90,16 @@ export function createJwt(cfg: Config): JwtService {
   const refreshKey = new TextEncoder().encode(cfg.env.JWT_REFRESH_SECRET);
   const issuer = cfg.env.JWT_ISSUER;
 
-  async function sign(userId: string, role: string, type: TokenType, key: Uint8Array, ttlSec: number, authVersion?: number): Promise<IssuedToken> {
+  async function sign(userId: string, role: string, type: TokenType, key: Uint8Array, ttlSec: number, authVersion?: number, authTime?: number): Promise<IssuedToken> {
     const jti = uuid();
     const now = Math.floor(Date.now() / 1000);
-    const exp = now + ttlSec;
+    let exp = now + ttlSec;
     const claims: Record<string, unknown> = { typ: type, role };
     if (authVersion !== undefined) claims.av = authVersion;
+    if (authTime !== undefined) {
+      claims.at = authTime;
+      exp = Math.min(exp, authTime + cfg.sessionAbsoluteLifetimeSec);
+    }
     const token = await new SignJWT(claims)
       .setProtectedHeader({ alg: "HS256" })
       .setIssuer(issuer)
@@ -123,14 +136,15 @@ export function createJwt(cfg: Config): JwtService {
       // Legacy tokens without `av` map to 1 (the fresh-user version) so an
       // account that never changed its credentials keeps working until expiry.
       av: Number(payload["av"] ?? 1),
+      at: Number(payload["at"] ?? payload.iat ?? 0),
     };
   }
 
   return {
-    issuePair(userId, role, authVersion = 1) {
+    issuePair(userId, role, authVersion = 1, authTime = Math.floor(Date.now() / 1000)) {
       return Promise.all([
         sign(userId, role, "access", accessKey, cfg.jwtAccessTtlSec, authVersion),
-        sign(userId, role, "refresh", refreshKey, cfg.jwtRefreshTtlSec),
+        sign(userId, role, "refresh", refreshKey, cfg.jwtRefreshTtlSec, undefined, authTime),
       ]).then(([access, refresh]) => ({ access, refresh }));
     },
     issueOne(userId, role, type, ttlSec) {

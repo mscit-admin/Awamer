@@ -26,6 +26,7 @@ import { commandHistoryApi } from "../api/commandHistoryApi";
 import { CommandHistoryPanel } from "./CommandHistoryPanel";
 import { NotesPanel } from "@/modules/notes/NotesPanel";
 import { AiAssistPanel } from "@/modules/ai/AiAssistPanel";
+import { sanitizeInsertedCommand } from "@/shared/lib/terminalInput";
 import { useCan } from "@/shared/lib/permissions";
 import { useBranding } from "@/shared/branding";
 
@@ -530,7 +531,12 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
     setAttempt((n) => n + 1);
   }
 
-  function insertCommand(command: string) {
+  // Type a command at the prompt WITHOUT running it (AI suggestion / history).
+  // SEC-AI-INSERT-001: strip CR/LF and control bytes so untrusted text can't
+  // press Enter or drive the line editor.
+  function insertCommand(raw: string) {
+    const command = sanitizeInsertedCommand(raw);
+    if (!command) return;
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(new TextEncoder().encode(command));

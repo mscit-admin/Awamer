@@ -613,7 +613,7 @@ fn spawn_session_task(
 }
 
 // ---------------------------------------------------------------------
-// Tiny HTTP helper (reqwest would add a heavy dep; we use std + tokio)
+// Backend API helpers (reqwest, rustls)
 // ---------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
@@ -664,12 +664,7 @@ async fn touch_host(base: &str, token: &str, id: &str) -> Result<(), AppError> {
     http_post_no_response(&format!("{base}/api/v1/hosts/{id}/touch"), token, "").await
 }
 
-// Use reqwest via the tauri-plugin-http? No — keep deps light. We use
-// std::net + tokio for simple HTTP; for production we'd reach for hyper/reqwest.
-// For now, build a tiny client using tokio + native-tls — but to skip the TLS
-// crate burden, we use a minimal blocking-style approach via std for now.
-// However that blocks async tasks. Best fix: bring in reqwest.
-// Adding reqwest as a dep:
+// Minimal JSON GET/POST helpers over reqwest (rustls TLS).
 
 async fn http_get_json<T: serde::de::DeserializeOwned>(url: &str, token: &str) -> Result<T, AppError> {
     let client = reqwest::Client::new();

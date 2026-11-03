@@ -10,8 +10,6 @@ export const HOST_PROTOCOLS = [
   "ssh", "sftp", "rdp", "vnc", "telnet", "serial", "http", "https", "custom",
 ] as const;
 export type HostProtocol = typeof HOST_PROTOCOLS[number];
-export const isHostProtocol = (s: string): s is HostProtocol =>
-  (HOST_PROTOCOLS as readonly string[]).includes(s);
 
 /** Default port per protocol — overridable per host. */
 export const DEFAULT_PORTS: Record<HostProtocol, number> = {
@@ -23,8 +21,6 @@ export const CREDENTIAL_TYPES = [
   "password", "private_key", "certificate", "agent", "kerberos", "none",
 ] as const;
 export type CredentialType = typeof CREDENTIAL_TYPES[number];
-export const isCredentialType = (s: string): s is CredentialType =>
-  (CREDENTIAL_TYPES as readonly string[]).includes(s);
 
 export const CONNECTION_STATUSES = [
   "started", "connected", "authenticated", "closed", "failed", "timeout",

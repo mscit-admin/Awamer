@@ -23,6 +23,8 @@ interface Deps {
   refresh: RefreshRepository;
   sessions: import("../session/activeSessions.js").ActiveSessionManager;
   audit: import("../repos/otherRepos.js").AuditRepository;
+  /** SEC-PW-TEMP-001 / ASVS V6.4.6: emailed reset links, so admins need not choose passwords. */
+  passwordReset?: Pick<import("../usecases/passwordReset.js").PasswordResetUseCase, "requestReset" | "emailConfigured">;
 }
 
 export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
@@ -287,6 +289,36 @@ export function makeAdminRoutes(deps: Deps): FastifyPluginAsync {
       } catch (e) {
         if (e instanceof DomainError) {
           const status = e.code === "weak_password" ? 400 : 404;
+          return reply.code(status).send({ error: { code: e.code, message: e.message } });
+        }
+        throw e;
+      }
+    });
+
+    // ---------- email a reset link (ASVS V6.4.6) -------------------------
+    // The admin starts the reset but never chooses or sees the new password:
+    // the user sets it through the emailed single-use link.
+    app.post("/users/:id/send-reset-link", async (req, reply) => {
+      const idP = idSchema.safeParse(req.params);
+      if (!idP.success) return reply.code(400).send({ error: { code: "invalid_id", message: "" } });
+      try {
+        const u = await deps.users.getById(idP.data.id);
+        const s = await scope(req);
+        if (!sameCompany(s, { companyId: u.companyId })) return reply.code(404).send({ error: { code: "user_not_found", message: "not found" } });
+        if (!mayActOnTarget(req.auth!.role, u)) return targetTooPrivileged(req, reply, u, "admin_reset_link");
+        if (!deps.passwordReset || !(await deps.passwordReset.emailConfigured())) {
+          return reply.code(409).send({ error: { code: "smtp_not_configured", message: "email is not configured; set up SMTP or set a temporary password instead" } });
+        }
+        if (!u.isActive) return reply.code(409).send({ error: { code: "account_inactive", message: "the account is disabled" } });
+        await deps.passwordReset.requestReset(u.email);
+        await deps.audit.log({
+          userId: req.auth!.sub, action: "password_change", success: true,
+          resourceType: "user", resourceId: u.id, ipAddress: req.ip, details: { admin_reset_link: true },
+        });
+        return reply.send({ ok: true });
+      } catch (e) {
+        if (e instanceof DomainError) {
+          const status = e.code === "reset_unavailable" ? 409 : 404;
           return reply.code(status).send({ error: { code: e.code, message: e.message } });
         }
         throw e;

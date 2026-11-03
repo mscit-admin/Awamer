@@ -107,6 +107,32 @@ test("INFRA-VPN-033: stop maps a ref to a helper-started process (no arbitrary P
   assert.equal(child.killed, true, "the tracked child was signalled");
 });
 
+test("INFRA-VPN-033b: a child that ignores SIGTERM is SIGKILLed after shutdownTimeoutMs", async () => {
+  const s = makeFakeSpawn();
+  const c = new HelperCore({ openvpnPath: "/usr/sbin/openvpn", runtimeDir, spawnFn: s.fn, startupTimeoutMs: 1000, shutdownTimeoutMs: 30 });
+  await c.clientConnect({ sessionRef: "sess-wedged", config: VALID_CONFIG });
+  const child = s.children[0]!;
+  const signals: unknown[] = [];
+  child.kill = (sig) => { signals.push(sig); return true; }; // wedged: never exits
+  assert.equal(c.clientStop("sess-wedged"), true);
+  assert.deepEqual(signals, ["SIGTERM"]);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("INFRA-VPN-033c: a child that exits on SIGTERM is not SIGKILLed", async () => {
+  const s = makeFakeSpawn();
+  const c = new HelperCore({ openvpnPath: "/usr/sbin/openvpn", runtimeDir, spawnFn: s.fn, startupTimeoutMs: 1000, shutdownTimeoutMs: 30 });
+  await c.clientConnect({ sessionRef: "sess-clean", config: VALID_CONFIG });
+  const child = s.children[0]!;
+  const signals: unknown[] = [];
+  const orig = child.kill.bind(child);
+  child.kill = (sig) => { signals.push(sig); return orig(sig); };
+  c.clientStop("sess-clean");
+  await new Promise((r) => setTimeout(r, 80));
+  assert.deepEqual(signals, ["SIGTERM"]);
+});
+
 test("INFRA-VPN-034: stopping an unknown/unstarted session is a safe no-op", async () => {
   const s = makeFakeSpawn();
   const c = core(s.fn);

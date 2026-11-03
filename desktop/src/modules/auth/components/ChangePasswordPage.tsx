@@ -13,7 +13,9 @@ import { ApiError } from "@/shared/lib/api";
  * refresh sessions, so we sign the user out and send them to login to
  * re-authenticate with the new password.
  */
-const POLICY = "At least 12 characters with upper- and lower-case letters, a digit, and a symbol.";
+// SEC-PW-POLICY-001 mirror — the server is the source of truth (it also refuses
+// common passwords and ones containing your username, email or the product name).
+const POLICY = "At least 12 characters. A long passphrase works well; common passwords and ones containing your username, email or the product name are refused.";
 
 function messageFor(err: unknown): string {
   if (err instanceof ApiError) {
@@ -30,6 +32,9 @@ function messageFor(err: unknown): string {
 export function ChangePasswordPage() {
   const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
+  // SEC-PW-TEMP-001: an admin set this password; the user is held here until
+  // they choose their own (ProtectedRoute).
+  const forced = useAuthStore((s) => !!s.user?.password_change_required);
 
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -45,7 +50,7 @@ export function ChangePasswordPage() {
       setError("The new password and confirmation don't match.");
       return;
     }
-    if (next.length < 12) {
+    if ([...next].length < 12) {
       setError(POLICY);
       return;
     }
@@ -84,10 +89,17 @@ export function ChangePasswordPage() {
 
   return (
     <div className="max-w-md mx-auto py-8 animate-slide-up">
-      <button onClick={() => navigate("/settings")} className="btn-ghost -ml-3 mb-4 text-xs">
-        <ArrowLeft className="size-3.5" />
-        Back to settings
-      </button>
+      {forced ? (
+        <div role="status" className="mb-6 flex items-start gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm">
+          <Info className="size-4 mt-0.5 flex-shrink-0" />
+          <div>Your password was set by an administrator. Choose your own password to continue.</div>
+        </div>
+      ) : (
+        <button onClick={() => navigate("/settings")} className="btn-ghost -ml-3 mb-4 text-xs">
+          <ArrowLeft className="size-3.5" />
+          Back to settings
+        </button>
+      )}
 
       <div className="flex items-center gap-3 mb-6">
         <div className="size-10 rounded-md bg-bg-elevated border border-border grid place-items-center">
@@ -148,6 +160,11 @@ export function ChangePasswordPage() {
         <button type="submit" disabled={busy} className="btn-primary w-full">
           {busy ? <><Loader2 className="size-4 animate-spin" /> Changing…</> : "Change password"}
         </button>
+        {forced && (
+          <button type="button" onClick={() => void logout().then(() => navigate("/login", { replace: true }))} className="btn-ghost text-xs w-full">
+            Sign out instead
+          </button>
+        )}
       </form>
     </div>
   );

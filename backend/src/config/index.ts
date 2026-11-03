@@ -87,6 +87,13 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(32, "JWT_REFRESH_SECRET must be ≥32 chars"),
   JWT_ACCESS_TTL: z.string().default("15m"),
   JWT_REFRESH_TTL: z.string().default("168h"),
+  // SEC-SESSION-ABS-001 (ASVS V7.3.2): absolute session lifetime. Refresh
+  // rotation slides by JWT_REFRESH_TTL, but never past this long after the
+  // original sign-in — then the user must authenticate again.
+  SESSION_ABSOLUTE_LIFETIME: z.string().default("168h"),
+  // SEC-PW-TEMP-001 (ASVS V6.4.1): an admin-set (temporary) password must be
+  // replaced at first sign-in and stops working if unused for this long.
+  TEMP_PASSWORD_TTL: z.string().default("72h"),
   JWT_ISSUER: z.string().default("netsphere"),
 
   // Credential encryption (Phase 10) — 32 bytes, base64 or hex.
@@ -108,6 +115,10 @@ const envSchema = z.object({
   // Expose the OpenAPI docs UI at /docs (off by default; it lists the API
   // surface, so enable it deliberately — e.g. in staging/dev).
   ENABLE_API_DOCS: z.string().optional().transform((v) => v === "true"),
+  // SEC-AUDIT-EXPORT-001 (ASVS V16.4.3): also write every audit event to stdout
+  // as a structured `event:"audit"` line, so the container log driver (syslog,
+  // fluentd, a SIEM agent…) ships it OFF the host. Default on; "false" disables.
+  AUDIT_LOG_STDOUT: z.string().optional().transform((v) => v !== "false"),
 
   // DB-LEAST-PRIVILEGE: emergency override ONLY — lets production start while
   // DATABASE_URL is still an over-privileged role (superuser / migration
@@ -187,6 +198,10 @@ export interface Config {
   isDev: boolean;
   jwtAccessTtlSec: number;
   jwtRefreshTtlSec: number;
+  /** SEC-SESSION-ABS-001: max seconds from sign-in to the end of the session. */
+  sessionAbsoluteLifetimeSec: number;
+  /** SEC-PW-TEMP-001: lifetime of an unused admin-set password. */
+  tempPasswordTtlSec: number;
   corsOrigins: string[];
   /** SEC-PROXY-001: Fastify `trustProxy` value (proxy-addr syntax). */
   trustProxy: string;
@@ -281,6 +296,8 @@ export function loadConfig(): Config {
     isDev: env.APP_ENV === "development",
     jwtAccessTtlSec: parseDuration(env.JWT_ACCESS_TTL),
     jwtRefreshTtlSec: parseDuration(env.JWT_REFRESH_TTL),
+    sessionAbsoluteLifetimeSec: parseDuration(env.SESSION_ABSOLUTE_LIFETIME),
+    tempPasswordTtlSec: parseDuration(env.TEMP_PASSWORD_TTL),
     corsOrigins: env.CORS_ALLOWED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean),
     trustProxy: env.TRUST_PROXY.trim(),
     publicBaseUrl,

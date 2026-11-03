@@ -10,7 +10,7 @@ import type { RefreshRepository, AuditRepository } from "../repos/otherRepos.js"
 import type { Argon2Service } from "../crypto/argon2.js";
 import type { SessionRevoker } from "../session/activeSessions.js";
 import { Errors, DomainError } from "../domain/index.js";
-import { validatePassword } from "./register.js";
+import { assertPasswordPolicy } from "./register.js";
 
 export class ChangePasswordUseCase {
   constructor(
@@ -19,6 +19,8 @@ export class ChangePasswordUseCase {
     private readonly audit: AuditRepository,
     private readonly argon2: Argon2Service,
     private readonly sessions?: SessionRevoker,
+    /** SEC-PW-TEMP-001: lifetime of an unused admin-set password. */
+    private readonly tempPasswordTtlSec = 72 * 3600,
   ) {}
 
   /**
@@ -37,12 +39,16 @@ export class ChangePasswordUseCase {
    * Admin reset: set another user's password without their current password.
    * Enforces the policy, unlocks the account, and revokes all their sessions so
    * they must sign in again with the new password. The acting admin is recorded.
+   * SEC-PW-TEMP-001: the admin-chosen password is TEMPORARY — the user must
+   * replace it at next sign-in, and it expires if unused.
    */
   async adminReset(adminId: string, userId: string, newPassword: string): Promise<void> {
-    if (!validatePassword(newPassword)) throw Errors.WeakPassword();
     const user = await this.users.getById(userId);
+    assertPasswordPolicy(newPassword, user);
     const passwordHash = await this.argon2.hash(newPassword);
-    await this.users.updatePasswordHash(userId, passwordHash);
+    await this.users.updatePasswordHash(userId, passwordHash, {
+      expiresAt: new Date(Date.now() + this.tempPasswordTtlSec * 1000),
+    });
     // Unlock + clear failed attempts so a locked-out user can log in again.
     user.isLocked = false;
     user.failedAttempts = 0;
@@ -76,7 +82,7 @@ export class ChangePasswordUseCase {
       throw Errors.InvalidCredentials();
     }
 
-    if (!validatePassword(newPassword)) throw Errors.WeakPassword();
+    assertPasswordPolicy(newPassword, user);
 
     // Reject a no-op change (new password identical to the current one).
     if (await this.argon2.verify(user.passwordHash, newPassword)) {

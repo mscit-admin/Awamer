@@ -11,7 +11,7 @@
  * VNC password is handled by noVNC on the client.
  */
 import net from "node:net";
-import { resolveRemoteDestination, RemoteDestinationDenied } from "../usecases/remoteDestination.js";
+import { resolveRemoteDestination } from "../usecases/remoteDestination.js";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { JwtService } from "../jwt/index.js";

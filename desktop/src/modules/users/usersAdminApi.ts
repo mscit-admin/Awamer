@@ -4,11 +4,6 @@
  */
 import { request } from "@/shared/lib/api";
 
-// Role keys are dynamic (admin-managed). These built-ins are only a fallback
-// for the create form when the roles list hasn't loaded.
-export const ROLES = ["super_admin", "admin", "user", "readonly", "auditor"] as const;
-export type Role = string;
-
 export interface AdminUser {
   id: string;
   username: string;
@@ -47,6 +42,10 @@ export const usersAdminApi = {
   },
   resetPassword(id: string, password: string) {
     return request<{ ok: true }>(`/api/v1/admin/users/${id}/reset-password`, { method: "POST", body: { password } });
+  },
+  /** ASVS V6.4.6: email the user a single-use reset link (the admin never picks the password). */
+  sendResetLink(id: string) {
+    return request<{ ok: boolean }>(`/api/v1/admin/users/${id}/send-reset-link`, { method: "POST" });
   },
   disableMfa(id: string) {
     return request<{ ok: true }>(`/api/v1/admin/users/${id}/disable-mfa`, { method: "POST" });
