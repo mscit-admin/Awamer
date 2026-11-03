@@ -101,11 +101,6 @@ if (typeof document !== "undefined" && CACHED) {
   if (CACHED.favicon) applyFavicon(CACHED.favicon);
 }
 
-/** Reactive terminal watermark image (data URI / URL), empty if unset. */
-export function useTerminalWatermark(): string {
-  return useBranding((s) => s.terminalWatermark);
-}
-
 /** Reactive login background image (data URI / URL), empty if unset. */
 export function useLoginImage(): string {
   return useBranding((s) => s.loginImage);

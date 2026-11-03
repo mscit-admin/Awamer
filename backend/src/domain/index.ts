@@ -3,7 +3,6 @@
 export type Role = string;
 
 export const BUILTIN_ROLE_KEYS = ["super_admin", "admin", "user", "readonly", "auditor"] as const;
-export const ALL_ROLES: string[] = [...BUILTIN_ROLE_KEYS];
 
 export function isBuiltinRole(s: string): boolean {
   return (BUILTIN_ROLE_KEYS as readonly string[]).includes(s);

@@ -31,8 +31,3 @@ export function tenantScopeForActor(actor: {
   if (actor.companyId) return { kind: "company", companyId: actor.companyId };
   return { kind: "none" };
 }
-
-/** True only for an explicit global scope. */
-export function isGlobalScope(s: TenantScope): boolean {
-  return s.kind === "global";
-}

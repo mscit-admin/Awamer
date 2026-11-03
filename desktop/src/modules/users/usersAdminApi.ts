@@ -4,11 +4,6 @@
  */
 import { request } from "@/shared/lib/api";
 
-// Role keys are dynamic (admin-managed). These built-ins are only a fallback
-// for the create form when the roles list hasn't loaded.
-export const ROLES = ["super_admin", "admin", "user", "readonly", "auditor"] as const;
-export type Role = string;
-
 export interface AdminUser {
   id: string;
   username: string;

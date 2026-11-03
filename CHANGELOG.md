@@ -98,6 +98,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   password (plus the current code when disabling), obtains a step-up token first, and signs
   the user out afterwards, since both actions end all sessions. Step-up tokens travel in the
   request body because `X-Step-Up-Token` is not a CORS-allowed header for the Tauri client.
+- **vpn-helper shutdown timeout is now enforced.** `shutdownTimeoutMs` (default 5 s) was
+  accepted but never used: stopping a session only sent SIGTERM, so a wedged `openvpn`
+  could outlive its session. The helper now sends SIGKILL if the process has not exited
+  within the timeout (tests INFRA-VPN-033b/033c).
+
+### Removed — leftover code cleanup
+- Unused code: backend `ALL_ROLES`, `isHostProtocol`, `isCredentialType`, `isGlobalScope`,
+  `isVpnRuntime`, `ResolveError` and two unused imports; frontend `useTerminalWatermark` and
+  the static `ROLES` / `Role` list from before roles became dynamic.
+- Unused dependencies: backend `@fastify/sensible`; frontend `react-hook-form`, `zod`,
+  `@tauri-apps/plugin-shell` (the Rust shell plugin stays: it opens external links) and
+  `@tauri-apps/plugin-store`; Rust `async-trait` and `tauri-plugin-store`, together with the
+  desktop app's `store:default` permission. Lockfiles change by removals only.
+- Outdated comments in `desktop/src-tauri/src/commands/ssh.rs` that argued against `reqwest`,
+  which the code uses. No behaviour change apart from the helper shutdown fix above.
 
 ### Added — security documentation
 - **OWASP ASVS 5.0.0 Level 3 verification matrix** (`security-final/OWASP_ASVS_5_L3_MATRIX.md`).
