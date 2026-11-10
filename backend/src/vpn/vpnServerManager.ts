@@ -41,10 +41,22 @@ interface ServerRuntime {
   startedAt: string | null;
 }
 
+/** Per-client network facts the helper needs for the internet policy. */
+export interface VpnServerClientNet {
+  username: string;
+  internetAccess: boolean;
+  revoked: boolean;
+}
+
 export class VpnServerManager {
   private readonly servers = new Map<string, ServerRuntime>();
 
-  constructor(private readonly log: Logger, private readonly helper: VpnHelperClient) {}
+  constructor(
+    private readonly log: Logger,
+    private readonly helper: VpnHelperClient,
+    /** Looks up a server's clients when its internet policy is on. */
+    private readonly clientsFor: (serverId: string) => Promise<VpnServerClientNet[]> = async () => [],
+  ) {}
 
   status(serverId: string): PublicVpnServerStatus {
     const s = this.servers.get(serverId);
@@ -64,13 +76,25 @@ export class VpnServerManager {
     const runtime: ServerRuntime = { serverId: server.id, state: "starting", error: null, startedAt: null };
     this.servers.set(server.id, runtime);
     try {
+      // Internet policy: the helper pins each active client to a fixed address
+      // and installs the allow/block firewall rules for those addresses.
+      const clients = server.internetAccess
+        ? (await this.clientsFor(server.id)).filter((c) => !c.revoked).map((c) => ({ username: c.username, internetAccess: c.internetAccess }))
+        : [];
       const res = await this.helper.request("server_start", {
         serverId: server.id,
         port: server.port, proto: server.proto, subnet: server.subnet, dns: server.dns,
         clientToClient: server.clientToClient, cipher: server.cipher,
         caCert: server.caCert, serverCert: server.serverCert, serverKey: server.serverKey,
         tlsCrypt: server.tlsCrypt,
+        internetAccess: server.internetAccess === true, clients,
       });
+      if (server.internetAccess && res.internet && typeof res.internet === "object") {
+        const inet = res.internet as { applied?: unknown; detail?: unknown };
+        if (inet.applied !== true) {
+          this.log.warn({ server: server.id, detail: String(inet.detail ?? "") }, "VPN server internet policy not applied");
+        }
+      }
       if (res.state !== "running") {
         throw new Error(typeof res.error === "string" && res.error ? res.error : "the VPN helper did not start the server");
       }

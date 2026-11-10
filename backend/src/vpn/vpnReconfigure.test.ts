@@ -21,7 +21,7 @@ const S = "srv-1";
 function baseServer(over: Partial<VpnServer> = {}): VpnServer {
   return {
     id: S, userId: U, name: "vpn-a", description: null, publicHost: "vpn.example.com",
-    port: 20001, proto: "udp", subnet: "10.8.1.0/24", dns: null, clientToClient: false,
+    port: 20001, proto: "udp", subnet: "10.8.1.0/24", dns: null, clientToClient: false, internetAccess: false,
     cipher: "AES-256-GCM", caCert: "ca", caKey: "cak", serverCert: "sc", serverKey: "sk",
     tlsCrypt: "tc", createdAt: new Date(), updatedAt: new Date(), ...over,
   };

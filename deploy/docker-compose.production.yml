@@ -88,6 +88,28 @@ services:
       timeout: 3s
       retries: 5
 
+  # Apache Guacamole proxy daemon for the in-app RDP viewer. Only the backend
+  # talks to it, over the internal network; it is never published on the host.
+  # It must reach the RDP hosts on their RDP port (3389). The backend tells it
+  # which already-policy-checked IP to connect to; host RDP options are
+  # allow-listed (no drive redirection, recording or RD Gateway).
+  guacd:
+    logging: *default-logging
+    image: guacamole/guacd:1.5.5
+    container_name: netsphere-guacd
+    restart: unless-stopped
+    networks:
+      - internal
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   # ===================================================================
   # DB-LEAST-PRIVILEGE — deployment sequence (each step must succeed):
   #   postgres (healthy) → db-provision → migrate → auth-service
@@ -223,6 +245,9 @@ services:
       # ---- Rate limiting --------------------------------------------
       RATE_LIMIT_LOGIN_PER_MIN: ${RATE_LIMIT_LOGIN_PER_MIN:-10}
       RATE_LIMIT_API_PER_MIN: ${RATE_LIMIT_API_PER_MIN:-120}
+      # ---- RDP viewer: guacd on the internal network ----------------
+      GUACD_HOST: guacd
+      GUACD_PORT: 4822
       # ---- SEC-INFRA-001: privileged VPN helper IPC ----------------
       # The backend never spawns OpenVPN; it talks to awamer-vpn-helper over
       # this shared Unix socket, authenticated with a high-entropy shared secret.

@@ -43,6 +43,7 @@ export interface ReconfigPatch {
   subnet?: string;
   dns?: string | null;
   clientToClient?: boolean;
+  internetAccess?: boolean;
   cipher?: string;
 }
 
@@ -71,7 +72,7 @@ interface Deps {
 function revertPatch(s: VpnServer): Required<ReconfigPatch> {
   return {
     description: s.description, publicHost: s.publicHost, port: s.port, proto: s.proto,
-    subnet: s.subnet, dns: s.dns, clientToClient: s.clientToClient, cipher: s.cipher,
+    subnet: s.subnet, dns: s.dns, clientToClient: s.clientToClient, internetAccess: s.internetAccess, cipher: s.cipher,
   };
 }
 

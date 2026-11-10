@@ -125,6 +125,12 @@ const envSchema = z.object({
   // owner). Logged as an error on every start; never set it in a normal deploy.
   DB_ALLOW_PRIVILEGED_RUNTIME: z.string().optional().transform((v) => v === "true"),
 
+  // RDP gateway → guacd (Apache Guacamole proxy daemon), which speaks RDP to
+  // the target host. In production guacd is its own container (service
+  // "guacd") on the internal network.
+  GUACD_HOST: z.string().default("127.0.0.1"),
+  GUACD_PORT: z.coerce.number().int().positive().default(4822),
+
   // CORS
   CORS_ALLOWED_ORIGINS: z.string().default("http://localhost:1420,tauri://localhost,https://tauri.localhost"),
 

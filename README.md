@@ -221,8 +221,9 @@ Open `http://localhost:1420`. Login works; the catch is that token persistence a
 | **SSH tunnels / port forwarding (local `ssh -L` + WebSocket TCP tunnel)** | ✅ Phase 5 (1.21.0) |
 | **VPN — OpenVPN client profiles (desktop or backend runtime, folder/asset association, auto-connect)** | ✅ Phase 12 (1.51.0) |
 | **VPN Server — Awamer as an OpenVPN hub (self-signed PKI, per-user cert + username/password, downloadable .ovpn, start/stop)** | ✅ Phase 12 (1.52.0) |
+| **VPN Server internet policy (full tunnel; allow or block internet per user)** | ✅ Phase 12 (1.8.0) |
 | **VNC remote desktop** | ✅ Phase 6 (1.18.0) |
-| RDP | ❌ Phase 6 (needs a Guacamole/guacd gateway) |
+| **RDP remote desktop (in-app via guacd gateway; native client launch from the desktop app)** | ✅ Phase 6 (1.8.0) |
 | Serial | ❌ Phase 7 |
 | **Telnet (browser terminal)** | ✅ (1.27.0) |
 | **Encrypted credential secrets at rest (AES-256-GCM)** | ✅ Phase 10 |

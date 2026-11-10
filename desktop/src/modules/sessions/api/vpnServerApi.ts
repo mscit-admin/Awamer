@@ -31,6 +31,7 @@ export interface VpnServerProfile {
   subnet: string;
   dns: string | null;
   client_to_client: boolean;
+  internet_access: boolean;
   cipher: string;
   ca_cert: string;
   client_count: number;
@@ -51,6 +52,7 @@ export interface VpnServerInput {
   subnet?: string;
   dns?: string | null;
   client_to_client?: boolean;
+  internet_access?: boolean;
   cipher?: string;
 }
 
@@ -60,6 +62,7 @@ export interface VpnServerClient {
   username: string;
   revoked: boolean;
   revoked_at: string | null;
+  internet_access: boolean;
   created_at: string;
 }
 
@@ -73,6 +76,8 @@ export interface VpnServerClientInput {
   username: string;
   /** Optional — the server auto-generates a strong one when omitted. */
   password?: string;
+  /** May reach the internet through the server (when its internet policy is on). */
+  internet_access?: boolean;
 }
 
 export const vpnServerApi = {
@@ -115,6 +120,12 @@ export const vpnServerApi = {
     return request<{ ok: boolean; revoked: boolean }>(
       `/api/v1/vpn-server/servers/${serverId}/clients/${clientId}/revoke`,
       { method: "POST", body: { revoked } },
+    );
+  },
+  setInternet(serverId: string, clientId: string, enabled: boolean) {
+    return request<{ ok: boolean; internet_access: boolean }>(
+      `/api/v1/vpn-server/servers/${serverId}/clients/${clientId}/internet`,
+      { method: "POST", body: { enabled } },
     );
   },
   removeClient(serverId: string, clientId: string) {

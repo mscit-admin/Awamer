@@ -29,6 +29,7 @@ pub fn run() {
             commands::keyring::keyring_delete,
             commands::app::app_version,
             commands::app::app_log,
+            commands::rdp::rdp_launch,
             commands::dialog::dialog_save_file,
             commands::dialog::dialog_open_file,
             commands::dialog::dialog_pick_folder,

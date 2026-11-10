@@ -1,6 +1,7 @@
 pub mod app;
 pub mod dialog;
 pub mod keyring;
+pub mod rdp;
 pub mod ssh;
 pub mod ssh_auth;
 pub mod known_hosts;

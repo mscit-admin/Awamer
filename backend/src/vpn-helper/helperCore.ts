@@ -23,11 +23,14 @@
 import { spawn as realSpawn } from "node:child_process";
 import net from "node:net";
 import dgram from "node:dgram";
-import { mkdir, writeFile, rm, realpath, access } from "node:fs/promises";
+import { mkdir, writeFile, rm, realpath, access, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { assertSafeOvpnConfig, VpnErrors } from "../domain/vpn.js";
-import { assembleServerConfig } from "../domain/vpnServer.js";
+import {
+  assembleServerConfig, assignClientIps, cidrNetmask, clientIpCcd, internetFirewallSpecs, isSafeVpnUsername,
+  type FirewallSpec,
+} from "../domain/vpnServer.js";
 import { isValidRef } from "../vpn/helperProtocol.js";
 
 const READY_MARKER = "Initialization Sequence Completed";
@@ -60,6 +63,8 @@ export interface HelperCoreOptions {
   /** Per-server host firewall management (multi-VPN-server). */
   firewallBackend?: "iptables" | "none";
   iptablesPath?: string;
+  /** Where the host's IPv4 forwarding flag is read (tests override). */
+  ipForwardPath?: string;
   /** Allowed port window for firewall ops (must match the app's VPN policy). */
   portMin?: number;
   portMax?: number;
@@ -87,6 +92,8 @@ interface Session {
   startedAt: string | null;
   proc: ChildLike | null;
   dir: string;
+  /** Internet-policy iptables rules installed for this server (removed on stop/exit). */
+  inetRules?: FirewallSpec[];
 }
 
 export interface HelperError extends Error { code: string; }
@@ -112,7 +119,14 @@ export interface ServerStartInput {
   serverCert: string;
   serverKey: string;
   tlsCrypt: string;
+  /** Internet policy on: route clients through the server, allow/block per client. */
+  internetAccess?: boolean;
+  /** Active (non-revoked) clients and whether each may reach the internet. */
+  clients?: { username: string; internetAccess: boolean }[];
 }
+
+/** Outcome of installing the internet-policy firewall rules. */
+export interface InternetPolicyResult { applied: boolean; detail: string }
 
 export class HelperCore {
   private readonly openvpnPath: string;
@@ -127,6 +141,7 @@ export class HelperCore {
   private readonly log: (obj: Record<string, unknown>, msg: string) => void;
   private readonly firewallBackend: "iptables" | "none";
   private iptablesPath: string;
+  private readonly ipForwardPath: string;
   private readonly iptablesCandidates: string[];
   /** Resolved once at startup by probeFirewall(): whether automatic firewall
    *  operations are actually usable. undefined = not probed yet. */
@@ -148,6 +163,7 @@ export class HelperCore {
     this.log = opts.log ?? (() => {});
     this.firewallBackend = opts.firewallBackend ?? "iptables";
     this.iptablesPath = opts.iptablesPath ?? "/usr/sbin/iptables";
+    this.ipForwardPath = opts.ipForwardPath ?? "/proc/sys/net/ipv4/ip_forward";
     // Candidate locations tried if the configured path is absent. Alpine (the
     // production helper image) installs /sbin/iptables; Debian /usr/sbin/iptables.
     this.iptablesCandidates = opts.iptablesCandidates ?? ["/usr/sbin/iptables", "/sbin/iptables"];
@@ -345,7 +361,7 @@ export class HelperCore {
     if (!free) throw err("vpn_port_in_use", `port ${port}/${proto} is already in use on the host`);
   }
 
-  async serverStart(input: ServerStartInput): Promise<{ state: SessionState; error: string | null }> {
+  async serverStart(input: ServerStartInput): Promise<{ state: SessionState; error: string | null; internet?: InternetPolicyResult }> {
     if (!isValidRef(input.serverId)) throw err("bad_ref", "invalid server id");
     const k = this.key("server", input.serverId);
     const existing = this.sessions.get(k);
@@ -387,17 +403,90 @@ export class HelperCore {
     // Its only script directive is `auth-user-pass-verify` pointing at the
     // helper's OWN authVerify.js (the backend never supplies a script path), so
     // it is a trusted, helper-controlled command — not user code.
+    // Internet policy: pin every active client to a fixed address (one
+    // client-config-dir file each; `ccd-exclusive` refuses anyone without one)
+    // so the firewall can allow or block each client by address.
+    let clientConfigDir: string | null = null;
+    let inetSpecs: FirewallSpec[] | null = null;
+    if (input.internetAccess) {
+      const clients = (input.clients ?? []).filter((c) => isSafeVpnUsername(c.username));
+      const ips = assignClientIps(input.subnet, clients.map((c) => c.username));
+      const netmask = cidrNetmask(input.subnet);
+      clientConfigDir = join(dir, "ccd");
+      await mkdir(clientConfigDir, { mode: 0o700 });
+      for (const c of clients) {
+        const ip = ips.get(c.username);
+        if (ip) await writeFile(join(clientConfigDir, c.username), clientIpCcd(ip, netmask), { mode: 0o600 });
+      }
+      const blocked = clients.filter((c) => !c.internetAccess).map((c) => ips.get(c.username)).filter((ip): ip is string => Boolean(ip));
+      inetSpecs = internetFirewallSpecs(input.subnet, blocked, `awamer-vpn-inet:${input.serverId}`);
+    }
+
     const config = assembleServerConfig({
       port: input.port, proto: input.proto, subnet: input.subnet, dns: input.dns,
       clientToClient: input.clientToClient, cipher: input.cipher,
       caCert: input.caCert, serverCert: input.serverCert, serverKey: input.serverKey,
       tlsCrypt: input.tlsCrypt, verifyCommand,
+      clientConfigDir, internetPolicy: inetSpecs !== null,
     });
     const cfgPath = join(dir, "server.conf");
     await writeFile(cfgPath, config, { mode: 0o600 });
 
     const env: NodeJS.ProcessEnv = { ...process.env, AWAMER_VPN_SERVER_ID: input.serverId };
-    return this.spawnTracked("server", input.serverId, dir, ["--config", cfgPath], env);
+    const result = await this.spawnTracked("server", input.serverId, dir, ["--config", cfgPath], env);
+    if (!inetSpecs || result.state !== "running") return result;
+    // Rules go in only once the server is up, so a firewall problem can never
+    // stop the VPN itself from starting; the outcome is reported to the caller.
+    const internet = await this.installInternetRules(input.serverId, inetSpecs);
+    return { ...result, internet };
+  }
+
+  // ---- internet policy firewall (tagged, removed on stop/exit) -----------
+  private fwArgs(spec: FirewallSpec, flag: "-I" | "-D"): string[] {
+    return [...(spec.table ? ["-t", spec.table] : []), flag, spec.chain, ...(flag === "-I" ? ["1"] : []), ...spec.rule];
+  }
+
+  private async removeRules(specs: FirewallSpec[]): Promise<void> {
+    for (const spec of specs) {
+      // Loop to clear duplicates left by an earlier crash; the tag makes these
+      // rules ours only, so nothing an administrator added is touched.
+      for (let i = 0; i < 16; i++) {
+        const del = await this.runFirewall(this.fwArgs(spec, "-D"));
+        if (del.code !== 0) break;
+      }
+    }
+  }
+
+  private async installInternetRules(serverId: string, specs: FirewallSpec[]): Promise<InternetPolicyResult> {
+    if (this.firewallBackend === "none" || this.firewallAvailable === false) {
+      this.log({ serverId }, "internet policy not applied: firewall backend unavailable");
+      return { applied: false, detail: "firewall backend unavailable — internet access is not routed" };
+    }
+    await this.removeRules(specs); // stale copies from a previous run
+    // Insert at the top, in reverse, so the final order equals `specs` and the
+    // rules are evaluated before any trailing DROP/REJECT the host may have.
+    const added: FirewallSpec[] = [];
+    for (const spec of [...specs].reverse()) {
+      const r = await this.runFirewall(this.fwArgs(spec, "-I"));
+      if (r.code !== 0) {
+        await this.removeRules(added);
+        this.log({ serverId, code: r.code }, "internet policy rule failed — rolled back");
+        return { applied: false, detail: r.code === 127 ? "iptables unavailable" : "iptables rule failed" };
+      }
+      added.push(spec);
+    }
+    const session = this.sessions.get(this.key("server", serverId));
+    if (!session || session.state !== "running") {
+      // Stopped while the rules were going in — take them out again.
+      await this.removeRules(specs);
+      return { applied: false, detail: "server stopped" };
+    }
+    session.inetRules = specs;
+    let detail = "applied";
+    const fwd = await readFile(this.ipForwardPath, "utf8").then((v) => v.trim()).catch(() => "");
+    if (fwd === "0") detail = "applied, but net.ipv4.ip_forward is 0 on the host — enable it for internet access to work";
+    this.log({ serverId, rules: specs.length }, "internet policy rules installed");
+    return { applied: true, detail };
   }
 
   private async spawnTracked(
@@ -505,6 +594,10 @@ export class HelperCore {
   }
 
   private async cleanup(s: Session): Promise<void> {
+    if (s.inetRules) {
+      const specs = s.inetRules; s.inetRules = undefined;
+      await this.removeRules(specs).catch(() => { /* best effort */ });
+    }
     if (!s.dir) return;
     const dir = s.dir; s.dir = "";
     // Removes the config + any auth/verify temp files (secret material).

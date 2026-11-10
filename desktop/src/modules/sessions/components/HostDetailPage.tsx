@@ -13,6 +13,7 @@ import {
 } from "../api/sessionsApi";
 import { useCan } from "@/shared/lib/permissions";
 import { useAuthStore } from "@/modules/auth/store/authStore";
+import { launchNativeRdp, rdpNativeAvailable } from "../api/rdpNative";
 
 const PROTOCOL_ICONS: Record<HostProtocol, string> = {
   ssh: "🔒", sftp: "📁", rdp: "🖥️", vnc: "📺",
@@ -191,6 +192,8 @@ export function HostDetailPage() {
                 ? "Browse, upload and download files over SFTP."
                 : host.protocol === "vnc"
                   ? "Open the remote desktop over VNC."
+                  : host.protocol === "rdp"
+                    ? "Open the remote desktop over RDP — in the app, or with your computer's own RDP client."
                   : host.protocol === "telnet"
                     ? "Open an interactive Telnet terminal."
                     : (host.protocol === "http" || host.protocol === "https")
@@ -218,6 +221,26 @@ export function HostDetailPage() {
             Open desktop
           </button>
         )}
+        {host.protocol === "rdp" && (
+          <>
+            {rdpNativeAvailable && (
+              <button
+                onClick={() => {
+                  launchNativeRdp({
+                    host: host.hostname, port: host.port,
+                    username: credential?.username ?? null, name: host.name,
+                  }).catch((e) => alert(e instanceof Error ? e.message : "could not launch the RDP client"));
+                }}
+                className="btn-ghost" title="Open with your computer's RDP client"
+              >
+                RDP client
+              </button>
+            )}
+            <button onClick={() => navigate(`/hosts/${host.id}/rdp`)} className="btn-primary" title="Open remote desktop in the app">
+              Open desktop
+            </button>
+          </>
+        )}
         {host.protocol === "telnet" && (
           <button onClick={() => navigate(`/hosts/${host.id}/telnet`)} className="btn-primary" title="Open Telnet terminal">
             Connect
@@ -232,7 +255,7 @@ export function HostDetailPage() {
             Open
           </a>
         )}
-        {!["ssh", "sftp", "vnc", "telnet", "http", "https"].includes(host.protocol) && (
+        {!["ssh", "sftp", "vnc", "rdp", "telnet", "http", "https"].includes(host.protocol) && (
           <span className="text-xs text-fg-muted">Not supported yet</span>
         )}
       </div>

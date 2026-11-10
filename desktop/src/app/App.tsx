@@ -41,6 +41,7 @@ const FoldersPage = lz(() => import("@/modules/sessions/components/FoldersPage")
 const SftpPage = lz(() => import("@/modules/sessions/components/SftpPage"), "SftpPage");
 const WebSftpPage = lz(() => import("@/modules/sessions/components/WebSftpPage"), "WebSftpPage");
 const VncPage = lz(() => import("@/modules/sessions/components/VncPage"), "VncPage");
+const RdpPage = lz(() => import("@/modules/sessions/components/RdpPage"), "RdpPage");
 const TelnetPage = lz(() => import("@/modules/sessions/components/TelnetPage"), "TelnetPage");
 const FilesPage = lz(() => import("@/modules/sessions/components/FilesPage"), "FilesPage");
 const NetworkPage = lz(() => import("@/modules/sessions/components/NetworkPage"), "NetworkPage");
@@ -103,6 +104,7 @@ export default function App() {
           <Route path="/hosts/:id/terminal" element={<TerminalRoute />} />
           <Route path="/hosts/:id/sftp" element={isTauri ? <SftpPage /> : <WebSftpPage />} />
           <Route path="/hosts/:id/vnc" element={<VncPage />} />
+          <Route path="/hosts/:id/rdp" element={<RdpPage />} />
           <Route path="/hosts/:id/telnet" element={<TelnetPage />} />
           <Route path="/terminal" element={<TerminalRoute />} />
           <Route path="/files" element={<FilesPage />} />

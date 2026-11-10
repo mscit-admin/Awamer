@@ -59,3 +59,28 @@ test("VPN server: PKI issuance, client cert chain, password verify, .ovpn, revok
   const counts = await repo.clientCounts([server.id]);
   assert.equal(counts.get(server.id) ?? 0, 0);
 });
+
+test("VPN-INET-DB-001: internet policy flags persist, are owner-scoped, and feed the helper view", { skip: dbSkip }, async () => {
+  const repo = new VpnServerRepository(getPool(), box, createArgon2(loadConfig()));
+  const owner = await seedUser("admin");
+  const other = await seedUser("admin");
+  created.push(owner, other);
+  const s = await repo.createServer(owner, { name: "inet", publicHost: "203.0.113.11", port: 20011, proto: "udp", subnet: "10.8.11.0/24", internetAccess: true });
+  assert.equal(s.internetAccess, true);
+  const allowed = await repo.createClient(owner, s.id, { name: "a", username: "inet-a", password: "S3cret!pw", internetAccess: true });
+  const blocked = await repo.createClient(owner, s.id, { name: "b", username: "inet-b", password: "S3cret!pw" });
+  assert.equal(allowed.internetAccess, true);
+  assert.equal(blocked.internetAccess, false, "defaults to blocked");
+
+  await repo.setClientInternet(owner, s.id, blocked.id, true);
+  await assert.rejects(() => repo.setClientInternet(other, s.id, blocked.id, false), /not found/i, "another user cannot change it");
+  const view = (await repo.clientNetworkView(s.id)).sort((x, y) => x.username.localeCompare(y.username));
+  assert.deepEqual(view, [
+    { username: "inet-a", internetAccess: true, revoked: false },
+    { username: "inet-b", internetAccess: true, revoked: false },
+  ]);
+  const off = await repo.updateServer(owner, s.id, { internetAccess: false });
+  assert.equal(off.internetAccess, false);
+  const unchanged = await repo.updateServer(owner, s.id, { description: "x" });
+  assert.equal(unchanged.internetAccess, false, "an unrelated edit keeps the flag");
+});

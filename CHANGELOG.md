@@ -11,6 +11,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — RDP viewer and VPN-server internet access (ported from the RDP / VPN-internet code line)
+- **In-app RDP** (`/hosts/:id/rdp`, web and desktop) through a guacd gateway
+  (`/api/v1/rdp`), rebuilt on the current session security model:
+  - **Ticket, not token:** a one-time ticket (`POST /api/v1/rdp/ticket`) goes in
+    the WebSocket URL, never the access token.
+  - **Checks:** live account state is checked again when the ticket is used, and
+    the session needs `sessions:connect` (existing permission; no new one).
+  - **Destination policy:** guacd connects to the policy-checked, resolved IP;
+    loopback, link-local and metadata addresses are refused.
+  - **Credentials:** the host credential is used server-side only.
+  - **Session control:** sessions register for revocation, and the client cannot
+    send its own `connect` before the handshake.
+  - **Allow-listed host RDP options:** no RD Gateway, drive redirection,
+    recording, `remote-app` or other file and path settings.
+  - **Keep-alive pings** are answered by the gateway.
+  - **Fixed:** the remote screen rendered behind the page and showed black
+    (Guacamole draws layers at z-index -1).
+- **Native RDP client** (desktop app): opens a generated `.rdp` file in
+  mstsc / Microsoft Remote Desktop / `xdg-open`. Host, user and domain are
+  checked so a line break cannot add `.rdp` settings. mstsc is started directly,
+  without `cmd /C start`.
+- **guacd** (`guacamole/guacd:1.5.5`) runs in the production compose on the
+  internal network only, with `cap_drop: ALL` and no-new-privileges.
+  `GUACD_HOST` and `GUACD_PORT` are new config values.
+- **VPN-server internet policy:**
+  - Server switch `internet_access`, plus per-client allow
+    (`POST /servers/:id/clients/:cid/internet`, under `vpn_server:manage`).
+  - Clients route through the server: allowed clients are NATed out, the others
+    reach only the VPN.
+  - The privileged helper validates the client list, pins each client to a fixed
+    address and installs tagged iptables rules after the server is up. The rules
+    are rolled back on failure and removed on stop or exit.
+  - New: `ccd-exclusive` refuses a client without a fixed address. Before, such a
+    client could take an allowed client's address and its internet access.
+  - A warning appears if IP forwarding is off on the host.
+  - Migration `032_vpn_server_internet` uses `IF NOT EXISTS`.
+- **Upgrade path for databases from that code line:**
+  `deploy/db/reconcile-migration-020.sql` corrects the one history row
+  (version 20 `vpn_server_internet` → `tenant_scope_shared`) after checking the
+  exact state. See `deploy/README.md`.
+- **Tests:**
+  - RDP: RDP-GW-001..008, RDP-OPT-001..003, and 4 Rust `.rdp` tests.
+  - VPN: VPN-INET-001..005, VPN-INET-HELPER-001..004, VPN-INET-DB-001.
+  - Upgrade path: MIG-RECONCILE-001..003.
+- **Verified live:**
+  - The web RDP page against real guacd 1.3 and xrdp: picture and keyboard,
+    with the ticket used once.
+  - The firewall rules against real iptables: order, idempotent, removed on stop.
+
 ### Added — terminal copy & paste
 - **Copy and paste work the same in every terminal** (browser SSH, desktop SSH, Telnet), through
   one shared layer (`TerminalClipboard`):

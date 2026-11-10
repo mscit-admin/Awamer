@@ -16,6 +16,7 @@ import { makeAuthMiddleware, requirePermission } from "../middleware/auth.js";
 import { DomainError } from "../domain/index.js";
 import {
   assembleClientOvpn, toVpnServerPublic, toVpnServerClientPublic, VPN_SERVER_CIPHERS,
+  isSafeVpnUsername,
 } from "../domain/vpnServer.js";
 
 interface Deps {
@@ -93,6 +94,7 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       subnet: z.string().regex(CIDR_RE, "subnet must be CIDR, e.g. 10.8.1.0/24").optional(),
       dns: z.string().max(253).regex(HOST_RE).nullable().optional(),
       client_to_client: z.boolean().optional(),
+      internet_access: z.boolean().optional(),
       // SEC-VPN-CFG-001: strict allowlist (was free text → config injection).
       cipher: z.enum(VPN_SERVER_CIPHERS).optional(),
     });
@@ -105,7 +107,7 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
         const s = await deps.servers.createServer(uid(req), {
           name: d.name, description: d.description ?? null, publicHost: d.public_host,
           port: d.port, autoAssignPort: d.auto_assign_port, proto: d.proto, subnet: d.subnet, dns: d.dns ?? null,
-          clientToClient: d.client_to_client, cipher: d.cipher,
+          clientToClient: d.client_to_client, internetAccess: d.internet_access, cipher: d.cipher,
         });
         await deps.audit.log({ userId: uid(req), action: "vpn_server_create", success: true, resourceType: "vpn_server", resourceId: s.id, details: { port: s.port, proto: s.proto, subnet: s.subnet } });
         // Open the host firewall for the assigned data port (audited, best-effort).
@@ -135,7 +137,8 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
         // a plain persist.
         const outcome = await deps.reconfig.reconfigure(uid(req), id, {
           description: d.description, publicHost: d.public_host, port: d.port, proto: d.proto,
-          subnet: d.subnet, dns: d.dns, clientToClient: d.client_to_client, cipher: d.cipher,
+          subnet: d.subnet, dns: d.dns, clientToClient: d.client_to_client,
+          internetAccess: d.internet_access, cipher: d.cipher,
         });
         switch (outcome.status) {
           case "updated":
@@ -210,6 +213,7 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       name: z.string().min(1).max(100),
       username: z.string().min(1).max(64).regex(/^[a-zA-Z0-9._-]+$/, "invalid username"),
       password: z.string().min(8).max(128).optional(),
+      internet_access: z.boolean().optional(),
     });
     app.post("/servers/:id/clients", async (req, reply) => {
       const serverId = (req.params as { id: string }).id;
@@ -217,7 +221,8 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
       if (!p.success) return reply.code(400).send({ error: { code: "validation_failed", message: p.error.message } });
       const password = p.data.password ?? randomBytes(12).toString("base64url");
       try {
-        const c = await deps.servers.createClient(uid(req), serverId, { name: p.data.name, username: p.data.username, password });
+        if (!isSafeVpnUsername(p.data.username)) return reply.code(400).send({ error: { code: "validation_failed", message: "invalid username" } });
+        const c = await deps.servers.createClient(uid(req), serverId, { name: p.data.name, username: p.data.username, password, internetAccess: p.data.internet_access });
         await deps.audit.log({ userId: uid(req), action: "vpn_server_client_create", success: true, resourceType: "vpn_server", resourceId: serverId, details: { client: c.id } });
         // Return the password once so the admin can hand it over (also stored, reveal-gated).
         return reply.code(201).send({ ...toVpnServerClientPublic(c), password });
@@ -233,6 +238,20 @@ export function makeVpnServerRoutes(deps: Deps): FastifyPluginAsync {
         await deps.servers.setClientRevoked(uid(req), id, cid, p.data.revoked);
         await deps.audit.log({ userId: uid(req), action: p.data.revoked ? "vpn_server_client_revoke" : "vpn_server_client_unrevoke", success: true, resourceType: "vpn_server", resourceId: id, details: { client: cid } });
         return reply.send({ ok: true, revoked: p.data.revoked });
+      } catch (e) { return fail(reply, e); }
+    });
+
+    // Per-client internet access (applies when the server's internet policy is
+    // on; takes effect at the next server start).
+    const internetSchema = z.object({ enabled: z.boolean() });
+    app.post("/servers/:id/clients/:cid/internet", async (req, reply) => {
+      const { id, cid } = req.params as { id: string; cid: string };
+      const p = internetSchema.safeParse(req.body);
+      if (!p.success) return reply.code(400).send({ error: { code: "validation_failed", message: p.error.message } });
+      try {
+        await deps.servers.setClientInternet(uid(req), id, cid, p.data.enabled);
+        await deps.audit.log({ userId: uid(req), action: p.data.enabled ? "vpn_server_client_internet_on" : "vpn_server_client_internet_off", success: true, resourceType: "vpn_server", resourceId: id, details: { client: cid } });
+        return reply.send({ ok: true, internet_access: p.data.enabled });
       } catch (e) { return fail(reply, e); }
     });
 

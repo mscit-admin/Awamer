@@ -9,7 +9,7 @@
 import net from "node:net";
 import { chmod } from "node:fs/promises";
 import type { HelperCore } from "./helperCore.js";
-import { isVpnServerCipher } from "../domain/vpnServer.js";
+import { isVpnServerCipher, isSafeVpnUsername } from "../domain/vpnServer.js";
 import {
   verifyRequest, signResponse, NonceCache, HelperAuthError,
   type HelperRequest, type HelperResponse, isValidRef,
@@ -53,11 +53,25 @@ export async function dispatch(core: HelperCore, req: HelperRequest): Promise<Re
       // scalars — the cipher must be on the allowlist (assembleServerConfig
       // re-checks every interpolated value as well).
       if (!isVpnServerCipher(p.cipher)) { const e = new Error("bad cipher") as Error & { code: string }; e.code = "bad_request"; throw e; }
+      // Internet policy: a strictly shaped client list (usernames become file
+      // names in the server's client-config-dir).
+      const bad = (m: string) => { const e = new Error(m) as Error & { code: string }; e.code = "bad_request"; return e; };
+      const internetAccess = p.internetAccess === true;
+      let clients: { username: string; internetAccess: boolean }[] = [];
+      if (p.clients !== undefined) {
+        if (!Array.isArray(p.clients) || p.clients.length > 4096) throw bad("bad clients");
+        clients = p.clients.map((c: unknown) => {
+          const o = c as { username?: unknown; internetAccess?: unknown } | null;
+          if (!o || typeof o !== "object" || !isSafeVpnUsername(o.username) || typeof o.internetAccess !== "boolean") throw bad("bad client");
+          return { username: o.username, internetAccess: o.internetAccess };
+        });
+      }
       return await core.serverStart({
         serverId: ref("serverId"), port: num("port"), proto,
         subnet: str("subnet")!, dns: (str("dns", false) ?? null),
         clientToClient: p.clientToClient === true, cipher: str("cipher")!,
         caCert: str("caCert")!, serverCert: str("serverCert")!, serverKey: str("serverKey")!, tlsCrypt: str("tlsCrypt")!,
+        internetAccess, clients,
       });
     }
     case "server_stop":

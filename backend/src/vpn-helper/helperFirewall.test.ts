@@ -143,3 +143,100 @@ test("runtime port-collision: serverStart rejects vpn_port_in_use when the port 
     code("vpn_port_in_use"),
   );
 });
+
+// ---- Internet policy on the helper (VPN-INET-HELPER-*) ---------------------
+import { mkdtemp, readFile, readdir, writeFile as writeFileFs, rm as rmFs } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+/** Fake spawn: openvpn becomes ready; iptables -D fails (nothing to delete), everything else succeeds. */
+function fakeSpawnAll(opts: { failInsert?: boolean } = {}) {
+  const ipt: string[][] = [];
+  const fn: SpawnFn = (cmd, args) => {
+    const stdout = new EventEmitter(), stderr = new EventEmitter(), ee = new EventEmitter() as any;
+    ee.stdout = stdout; ee.stderr = stderr; ee.kill = () => { setImmediate(() => ee.emit("exit", 0)); return true; }; ee.pid = 77;
+    if (cmd === "/usr/sbin/iptables") {
+      ipt.push(args);
+      const code = args.includes("-D") ? 1 : opts.failInsert && args.includes("-I") && ipt.filter((a) => a.includes("-I")).length >= 3 ? 1 : 0;
+      setImmediate(() => ee.emit("exit", code));
+    } else {
+      setImmediate(() => stdout.emit("data", Buffer.from("Initialization Sequence Completed\n")));
+    }
+    return ee as ChildLike;
+  };
+  return { fn, ipt };
+}
+const SERVER_INPUT = {
+  serverId: SID, port: 20001, proto: "udp" as const, subnet: "10.8.0.0/24", dns: null, clientToClient: false,
+  cipher: "AES-256-GCM", caCert: "CA", serverCert: "SC", serverKey: "SK", tlsCrypt: "TC",
+};
+
+test("VPN-INET-HELPER-001: policy on → per-client files, ccd-exclusive config and tagged rules; stop removes them", async () => {
+  const runtimeDir = await mkdtemp(join(tmpdir(), "awamer-inet-"));
+  const fwd = join(runtimeDir, "ip_forward"); await writeFileFs(fwd, "1\n");
+  const fk = fakeSpawnAll();
+  const c = core({ spawnFn: fk.fn, runtimeDir, openvpnPath: "/usr/sbin/openvpn", portProbe: async () => true, ipForwardPath: fwd });
+  const r = await c.serverStart({ ...SERVER_INPUT, internetAccess: true, clients: [
+    { username: "bob", internetAccess: false }, { username: "alice", internetAccess: true },
+  ] });
+  assert.equal(r.state, "running");
+  assert.deepEqual(r.internet, { applied: true, detail: "applied" });
+  const dir = join(runtimeDir, `server-${SID}`);
+  assert.deepEqual((await readdir(join(dir, "ccd"))).sort(), ["alice", "bob"]);
+  assert.equal(await readFile(join(dir, "ccd", "bob"), "utf8"), "ifconfig-push 10.8.0.3 255.255.255.0\n");
+  const conf = await readFile(join(dir, "server.conf"), "utf8");
+  assert.match(conf, /^ccd-exclusive$/m);
+  assert.match(conf, /^push "redirect-gateway def1 bypass-dhcp"$/m);
+  const inserts = fk.ipt.filter((a) => a.includes("-I"));
+  assert.ok(inserts.length >= 5 && inserts.every((a) => a.includes(`awamer-vpn-inet:${SID}`)), "all inserted rules are tagged");
+  assert.ok(inserts.some((a) => a.includes("10.8.0.3/32") && a.includes("DROP")), "bob (blocked) gets a DROP");
+  assert.ok(!inserts.some((a) => a.includes("10.8.0.2/32")), "alice (allowed) has no DROP");
+  const before = fk.ipt.length;
+  c.serverStop(SID);
+  await new Promise((res) => setTimeout(res, 50));
+  const deletes = fk.ipt.slice(before).filter((a) => a.includes("-D"));
+  assert.ok(deletes.length >= inserts.length && deletes.every((a) => a.includes(`awamer-vpn-inet:${SID}`)), "stop removes the tagged rules");
+  await rmFs(runtimeDir, { recursive: true, force: true });
+});
+
+test("VPN-INET-HELPER-002: a failing rule is rolled back and the VPN still runs", async () => {
+  const runtimeDir = await mkdtemp(join(tmpdir(), "awamer-inet-"));
+  const fk = fakeSpawnAll({ failInsert: true });
+  const c = core({ spawnFn: fk.fn, runtimeDir, openvpnPath: "/usr/sbin/openvpn", portProbe: async () => true, ipForwardPath: join(runtimeDir, "none") });
+  const r = await c.serverStart({ ...SERVER_INPUT, internetAccess: true, clients: [{ username: "bob", internetAccess: false }] });
+  assert.equal(r.state, "running");
+  assert.equal(r.internet?.applied, false);
+  const inserted = fk.ipt.filter((a) => a.includes("-I")).length;
+  const removed = fk.ipt.filter((a) => a.includes("-D")).length;
+  assert.ok(removed > 0 && inserted > 0, "rollback deletes what was inserted");
+  c.serverStop(SID);
+  await rmFs(runtimeDir, { recursive: true, force: true });
+});
+
+test("VPN-INET-HELPER-003: policy off → no client files, no routing push, no iptables calls", async () => {
+  const runtimeDir = await mkdtemp(join(tmpdir(), "awamer-inet-"));
+  const fk = fakeSpawnAll();
+  const c = core({ spawnFn: fk.fn, runtimeDir, openvpnPath: "/usr/sbin/openvpn", portProbe: async () => true });
+  const r = await c.serverStart({ ...SERVER_INPUT });
+  assert.equal(r.state, "running");
+  assert.equal(r.internet, undefined);
+  const conf = await readFile(join(runtimeDir, `server-${SID}`, "server.conf"), "utf8");
+  assert.doesNotMatch(conf, /ccd|redirect-gateway/);
+  assert.equal(fk.ipt.length, 0);
+  c.serverStop(SID);
+  await rmFs(runtimeDir, { recursive: true, force: true });
+});
+
+test("VPN-INET-HELPER-004: the IPC layer rejects a malformed client list before the core", async () => {
+  const { dispatch } = await import("./helperServer.js");
+  let called = false;
+  const fakeCore = { serverStart: async () => { called = true; return { state: "running", error: null }; } } as never;
+  const base = { ...SERVER_INPUT };
+  const req = (payload: Record<string, unknown>) => ({ op: "server_start", payload: { ...base, ...payload } }) as never;
+  for (const clients of [[{ username: "../x", internetAccess: true }], [{ username: "a" }], "x", new Array(4097).fill({ username: "a", internetAccess: true })]) {
+    await assert.rejects(() => dispatch(fakeCore, req({ internetAccess: true, clients })), code("bad_request"));
+  }
+  assert.equal(called, false);
+  await dispatch(fakeCore, req({ internetAccess: true, clients: [{ username: "alice", internetAccess: true }] }));
+  assert.equal(called, true);
+});

@@ -182,6 +182,24 @@ sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.prod
 sudo docker compose -f deploy/docker-compose.production.yml --env-file .env.production logs -f auth-service
 ```
 
+#### Upgrading a database that ran the RDP / VPN-internet code line
+
+If `migrate` stops with **"Migration version collision detected … Database
+migration: 20_vpn_server_internet"**, the database once ran the older code line
+that numbered its VPN-internet migration 20. That feature is now migration
+`032` (and the tenant columns of this line's `020` are re-applied by `023`), so
+the fix is to correct the one history row, after a backup:
+
+```bash
+docker exec -i netsphere-postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' \
+  < deploy/db/reconcile-migration-020.sql
+```
+
+The script checks the exact state first (version 20 = `vpn_server_internet`
+and its columns present) and otherwise stops without changing anything; it is
+a no-op once applied. Then run the update again; `migrate` applies the rest.
+
 ### Rotate JWT secrets
 
 If you suspect token leakage, rotate `JWT_ACCESS_SECRET` and

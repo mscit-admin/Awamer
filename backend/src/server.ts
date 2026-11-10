@@ -71,6 +71,7 @@ import { makeSshGateway } from "./ssh/gateway.js";
 import { makeSftpGateway } from "./ssh/sftpGateway.js";
 import { makeVncGateway } from "./vnc/gateway.js";
 import { makeTelnetGateway } from "./telnet/gateway.js";
+import { makeRdpGateway } from "./rdp/gateway.js";
 import { TunnelManager } from "./ssh/tunnelManager.js";
 import { HostKeyRepository } from "./ssh/hostKeys.js";
 import { makeTunnelRoutes } from "./routes/tunnels.js";
@@ -142,7 +143,7 @@ async function main() {
   const vpnManager = new VpnManager(log, vpnHelper);
   // Awamer-as-OpenVPN-server: PKI-backed server instances + their users.
   const vpnServers = new VpnServerRepository(pool, secretBox, argon2, cfg.vpnPortPolicy);
-  const vpnServerManager = new VpnServerManager(log, vpnHelper);
+  const vpnServerManager = new VpnServerManager(log, vpnHelper, (serverId) => vpnServers.clientNetworkView(serverId));
   // MULTI-VPN-ROLLBACK-001 — rollback-safe port/protocol reconfiguration.
   const vpnReconfig = new VpnReconfigurationService({
     servers: vpnServers, manager: vpnServerManager, audit, policy: cfg.vpnPortPolicy, log,
@@ -350,6 +351,11 @@ async function main() {
   await app.register(makeVncGateway({ sessions: activeSessions, users, jwt, hosts, history, log }), { prefix: "/api/v1/vnc" });
   // Browser Telnet gateway (WebSocket ↔ raw TCP relay).
   await app.register(makeTelnetGateway({ sessions: activeSessions, users, jwt, hosts, history, log }), { prefix: "/api/v1/telnet" });
+  // Browser/desktop RDP gateway (WebSocket ↔ guacd bridge).
+  await app.register(
+    makeRdpGateway({ sessions: activeSessions, users, jwt, hosts, credentials, history, guacd: { host: cfg.env.GUACD_HOST, port: cfg.env.GUACD_PORT }, log }),
+    { prefix: "/api/v1/rdp" },
+  );
   // Phase 5 — SSH port forwarding: server-managed local tunnels (REST) and a
   // per-user WebSocket TCP tunnel.
   await app.register(makeTunnelRoutes({ tunnels, users, jwt }), { prefix: "/api/v1/tunnels" });
