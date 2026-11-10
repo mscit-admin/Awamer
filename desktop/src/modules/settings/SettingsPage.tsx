@@ -130,6 +130,14 @@ function TerminalUiSettings() {
   const editButton = useTerminalPaste((s) => s.editButton);
   const setQuickButton = useTerminalPaste((s) => s.setQuickButton);
   const setEditButton = useTerminalPaste((s) => s.setEditButton);
+  const copyOnSelect = useTerminalPaste((s) => s.copyOnSelect);
+  const ctrlCCopies = useTerminalPaste((s) => s.ctrlCCopies);
+  const ctrlVPastes = useTerminalPaste((s) => s.ctrlVPastes);
+  const warnMultiline = useTerminalPaste((s) => s.warnMultiline);
+  const setCopyOnSelect = useTerminalPaste((s) => s.setCopyOnSelect);
+  const setCtrlCCopies = useTerminalPaste((s) => s.setCtrlCCopies);
+  const setCtrlVPastes = useTerminalPaste((s) => s.setCtrlVPastes);
+  const setWarnMultiline = useTerminalPaste((s) => s.setWarnMultiline);
   return (
     <div className="px-4 py-4">
       <label className="block text-xs text-fg-muted mb-1">Bottom spacing (px)</label>
@@ -144,6 +152,31 @@ function TerminalUiSettings() {
         OS taskbar. The status bar stays flush at the bottom. <span className="font-medium">0 = none</span>.
         Applies live; saved in this browser.
       </p>
+
+      <div className="mt-5 pt-4 border-t border-border">
+        <label className="block text-xs text-fg-muted mb-2">Copy &amp; paste</label>
+        <div className="space-y-2 max-w-xl">
+          <ToggleRow checked={copyOnSelect} onChange={setCopyOnSelect}
+            label="Copy selected text automatically"
+            hint="Selecting text with the mouse copies it to the clipboard right away." />
+          <ToggleRow checked={ctrlCCopies} onChange={setCtrlCCopies}
+            label="Ctrl+C copies when text is selected"
+            hint="With nothing selected, Ctrl+C still interrupts the running command. Ctrl+Shift+C always copies." />
+          <ToggleRow checked={ctrlVPastes} onChange={setCtrlVPastes}
+            label="Ctrl+V pastes"
+            hint="Turn off to send Ctrl+V to the shell instead. Ctrl+Shift+V and Shift+Insert always paste." />
+          <ToggleRow checked={warnMultiline} onChange={setWarnMultiline}
+            label="Review multi-line pastes before sending"
+            hint="Text with more than one line opens the paste box first, because each line can run as a command." />
+        </div>
+        <p className="text-2xs text-fg-muted mt-2">
+          Shortcuts: copy <span className="font-mono">Ctrl+Shift+C</span> / <span className="font-mono">Ctrl+Insert</span>,
+          paste <span className="font-mono">Ctrl+Shift+V</span> / <span className="font-mono">Shift+Insert</span>,
+          select all <span className="font-mono">Ctrl+Shift+A</span> (on macOS: <span className="font-mono">⌘C</span> / <span className="font-mono">⌘V</span> / <span className="font-mono">⌘A</span>).
+          Double-click selects a word, triple-click a line; hold <span className="font-mono">Shift</span> to select inside
+          programs that use the mouse (vim, htop, tmux).
+        </p>
+      </div>
 
       <div className="mt-5 pt-4 border-t border-border">
         <label className="block text-xs text-fg-muted mb-2">Mouse paste</label>
@@ -162,11 +195,24 @@ function TerminalUiSettings() {
         <p className="text-2xs text-fg-muted mt-2">
           Bind a mouse button to paste the clipboard into the terminal. <span className="font-medium">Immediately</span> pastes
           the clipboard as-is; <span className="font-medium">edit popup</span> opens a box to review/edit the text first.
-          The two actions use different buttons. The toolbar <span className="font-medium">Paste</span> button always opens
-          the edit popup. Left-click stays for selecting text. Saved in this browser.
+          The two actions use different buttons. When right-click is not bound, it opens a menu with Copy, Paste,
+          Paste and edit, Select all and Clear. <span className="font-medium">Tools → Paste…</span> always opens the edit
+          popup. Left-click stays for selecting text. Saved in this browser.
         </p>
       </div>
     </div>
+  );
+}
+
+function ToggleRow({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint: string }) {
+  return (
+    <label className="flex items-start gap-2 cursor-pointer">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 accent-accent" />
+      <span>
+        <span className="block text-sm text-fg">{label}</span>
+        <span className="block text-2xs text-fg-muted">{hint}</span>
+      </span>
+    </label>
   );
 }
 

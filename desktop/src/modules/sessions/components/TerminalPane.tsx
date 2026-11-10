@@ -12,6 +12,7 @@ import { useAuthStore } from "@/modules/auth/store/authStore";
 import { isTauri, DESKTOP_ONLY_MESSAGE } from "@/shared/lib/tauri";
 import { hostsApi, credentialsApi, type Host } from "../api/sessionsApi";
 import { vpnClient } from "../api/vpnApi";
+import { TerminalClipboard } from "./TerminalClipboard";
 import {
   useTerminalTabs,
   type TerminalTab,
@@ -47,6 +48,7 @@ export function TerminalPane({ tab }: { tab: TerminalTab }) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const [termObj, setTermObj] = useState<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const unlistenRef = useRef<UnlistenFn | null>(null);
   const connectedOnce = useRef(false);
@@ -132,6 +134,7 @@ export function TerminalPane({ tab }: { tab: TerminalTab }) {
 
     termRef.current = term;
     fitRef.current = fit;
+    setTermObj(term);
 
     term.onData((data) => {
       const sid = useTerminalTabs.getState().tabs.find(t => t.tabId === tab.tabId)?.sessionId;
@@ -154,6 +157,7 @@ export function TerminalPane({ tab }: { tab: TerminalTab }) {
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      setTermObj(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.phase]);
@@ -358,6 +362,7 @@ export function TerminalPane({ tab }: { tab: TerminalTab }) {
       <div className="flex-1 min-h-0 relative">
         {/* xterm always renders here when we've connected at least once */}
         <div ref={containerRef} className="absolute inset-0 p-2" />
+        <TerminalClipboard term={termObj} container={termObj ? containerRef.current : null} label={tab.label} />
         {/* Disconnected overlay when we have no xterm yet (e.g. rehydrated from previous session) */}
         {tab.phase === "disconnected" && !connectedOnce.current && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

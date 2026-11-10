@@ -21,9 +21,9 @@ import { useAuthStore } from "@/modules/auth/store/authStore";
 import { useTerminalTabs, type TerminalTab } from "../store/terminalTabsStore";
 import { useCommandHistoryPref } from "../store/commandHistoryPref";
 import { useTerminalUi } from "../store/terminalUiStore";
-import { useTerminalPaste } from "../store/terminalPastePref";
 import { commandHistoryApi } from "../api/commandHistoryApi";
 import { CommandHistoryPanel } from "./CommandHistoryPanel";
+import { TerminalClipboard, type TerminalClipboardHandle } from "./TerminalClipboard";
 import { NotesPanel } from "@/modules/notes/NotesPanel";
 import { AiAssistPanel } from "@/modules/ai/AiAssistPanel";
 import { sanitizeInsertedCommand } from "@/shared/lib/terminalInput";
@@ -185,8 +185,6 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const canHistory = useCan("command_history:read");
   const canAi = useCan("ai:use");
   const bottomGapPx = useTerminalUi((s) => s.bottomGapPx);
-  const quickPasteButton = useTerminalPaste((s) => s.quickButton);
-  const editPasteButton = useTerminalPaste((s) => s.editButton);
   const logoUrl = useBranding((s) => s.logoUrl);
   const terminalWatermark = useBranding((s) => s.terminalWatermark);
   const brandingLoaded = useBranding((s) => s.loaded);
@@ -199,6 +197,9 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  // State copy of the terminal so the copy/paste layer mounts once xterm exists.
+  const [termObj, setTermObj] = useState<Terminal | null>(null);
+  const clipRef = useRef<TerminalClipboardHandle | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   // Auto-reconnect on unexpected drops: count consecutive attempts + a pending timer.
@@ -232,8 +233,6 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
 
   const [showHistory, setShowHistory] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
-  const [pasteOpen, setPasteOpen] = useState(false);
-  const [pasteDraft, setPasteDraft] = useState("");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [showAi, setShowAi] = useState(false);
   const [aiQuestion, setAiQuestion] = useState<string | null>(null);
@@ -261,7 +260,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
       cursorBlink: true,
       // Transparent so the username watermark behind the canvas shows through.
       allowTransparency: true,
-      theme: { background: "rgba(0,0,0,0)" },
+      theme: { background: "rgba(0,0,0,0)", selectionBackground: "rgba(61,220,151,0.35)" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -269,6 +268,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
     term.open(containerRef.current);
     try { fit.fit(); } catch { /* not visible yet */ }
     termRef.current = term;
+    setTermObj(term);
     fitRef.current = fit;
 
     const onResize = () => {
@@ -300,25 +300,20 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
       if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
       term.dispose();
       termRef.current = null;
+      setTermObj(null);
     };
   }, []);
 
-  // Fullscreen: double-click the terminal to fill the screen; the browser's
-  // native Escape returns (so it never clashes with the shell's Esc key while
-  // not in fullscreen). Refit xterm whenever fullscreen toggles.
+  // Fullscreen (Tools → Fullscreen); the browser's native Escape returns.
+  // Double-click is left to the terminal, where it selects a word. Refit xterm
+  // whenever fullscreen toggles.
   useEffect(() => {
-    const el = containerRef.current;
-    const onDbl = () => {
-      if (!document.fullscreenElement) void rootRef.current?.requestFullscreen?.().catch(() => {});
-    };
     const onFsChange = () => {
       setIsFullscreen(document.fullscreenElement === rootRef.current);
       setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
     };
-    el?.addEventListener("dblclick", onDbl);
     document.addEventListener("fullscreenchange", onFsChange);
     return () => {
-      el?.removeEventListener("dblclick", onDbl);
       document.removeEventListener("fullscreenchange", onFsChange);
     };
   }, []);
@@ -545,69 +540,6 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
     termRef.current?.focus();
   }
 
-  // Send raw text straight to the shell (paste). Newlines are kept as-is, so a
-  // multi-line paste runs line by line — exactly what a real terminal paste does.
-  function pasteRaw(text: string) {
-    const ws = wsRef.current;
-    if (text && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(new TextEncoder().encode(text));
-    }
-    termRef.current?.focus();
-  }
-
-  // Read the clipboard and paste immediately (quick-paste mouse button).
-  async function quickPaste() {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) pasteRaw(text);
-    } catch { /* clipboard blocked — user can use the edit dialog / toolbar instead */ }
-  }
-
-  // Open the edit-before-paste popup, pre-filled with the clipboard (best effort;
-  // if the clipboard can't be read the user can paste/type into the box).
-  async function openPasteDialog() {
-    let text = "";
-    try { text = await navigator.clipboard.readText(); } catch { /* ignore */ }
-    setPasteDraft(text);
-    setPasteOpen(true);
-  }
-
-  function confirmPaste() {
-    pasteRaw(pasteDraft);
-    setPasteOpen(false);
-    setPasteDraft("");
-  }
-
-  // Bind the configured mouse buttons on the terminal surface. Middle = button 1
-  // (intercepted on mousedown + auxclick to suppress autoscroll); right = the
-  // contextmenu event (preventDefault suppresses the browser menu).
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const act = (which: "quick" | "edit") => { if (which === "quick") void quickPaste(); else void openPasteDialog(); };
-    const onMouseDown = (e: MouseEvent) => {
-      if (e.button !== 1) return; // middle only
-      if (quickPasteButton === "middle") { e.preventDefault(); act("quick"); }
-      else if (editPasteButton === "middle") { e.preventDefault(); act("edit"); }
-    };
-    const onAuxClick = (e: MouseEvent) => {
-      if (e.button === 1 && (quickPasteButton === "middle" || editPasteButton === "middle")) e.preventDefault();
-    };
-    const onContext = (e: MouseEvent) => {
-      if (quickPasteButton === "right") { e.preventDefault(); act("quick"); }
-      else if (editPasteButton === "right") { e.preventDefault(); act("edit"); }
-    };
-    el.addEventListener("mousedown", onMouseDown);
-    el.addEventListener("auxclick", onAuxClick);
-    el.addEventListener("contextmenu", onContext);
-    return () => {
-      el.removeEventListener("mousedown", onMouseDown);
-      el.removeEventListener("auxclick", onAuxClick);
-      el.removeEventListener("contextmenu", onContext);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quickPasteButton, editPasteButton]);
-
   return (
     <div ref={rootRef} className="flex flex-col h-full w-full bg-[#0b0e14]">
       {/* Terminal area — fills the space above the status bar. The user-adjustable
@@ -632,6 +564,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
         </div>
       )}
       <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2 pb-2" />
+      <TerminalClipboard ref={clipRef} term={termObj} container={termObj ? containerRef.current : null} label={tab.label} />
 
       {showAiHint && phase === "connected" && canAi && (
         <div className="absolute top-9 left-1/2 -translate-x-1/2 z-30 w-[min(92%,34rem)] rounded-lg border border-accent/30 bg-bg/95 backdrop-blur shadow-xl px-4 py-3 text-xs animate-fade-in">
@@ -694,7 +627,7 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
                     onClick={() => { setAiQuestion(null); setAiProvider(null); setShowAi(true); setToolsOpen(false); }} />
                 )}
                 <ToolItem icon={<ClipboardPaste className="size-3.5" />} label="Paste…"
-                  onClick={() => { void openPasteDialog(); setToolsOpen(false); }} />
+                  onClick={() => { clipRef.current?.openPasteReview(); setToolsOpen(false); }} />
                 <ToolItem icon={isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
                   label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
                   onClick={() => { toggleFullscreen(); setToolsOpen(false); }} />
@@ -746,45 +679,6 @@ export function WebTerminalPane({ tab, paneActions }: { tab: TerminalTab; paneAc
           onInsert={(cmd) => { insertCommand(cmd); setShowAi(false); setAiQuestion(null); setAiProvider(null); }}
           onClose={() => { setShowAi(false); setAiQuestion(null); setAiProvider(null); }}
         />
-      )}
-
-      {pasteOpen && (
-        <div className="absolute inset-0 z-20 grid place-items-center bg-bg/80 backdrop-blur-sm p-4">
-          <div className="card p-5 w-full max-w-lg">
-            <div className="flex items-center gap-2 mb-3">
-              <ClipboardPaste className="size-4 text-accent" />
-              <h2 className="text-base font-semibold">Paste to terminal</h2>
-            </div>
-            <p className="text-xs text-fg-muted mb-3">
-              Review or edit the text, then paste it into <span className="font-mono">{tab.label}</span>.
-              Each line runs as if typed.
-            </p>
-            <textarea
-              value={pasteDraft}
-              onChange={(e) => setPasteDraft(e.target.value)}
-              autoFocus
-              spellCheck={false}
-              rows={8}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") { e.preventDefault(); setPasteOpen(false); }
-                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); confirmPaste(); }
-              }}
-              placeholder="Paste here (Ctrl/Cmd+V), edit, then click Paste…"
-              className="input font-mono w-full resize-y text-xs leading-relaxed"
-            />
-            <div className="flex items-center justify-between mt-3">
-              <span className="text-2xs text-fg-muted">
-                {pasteDraft.length} chars · {pasteDraft ? pasteDraft.split("\n").length : 0} line(s) · Ctrl/Cmd+Enter to paste, Esc to cancel
-              </span>
-              <div className="flex items-center gap-2">
-                <button onClick={() => { setPasteOpen(false); setPasteDraft(""); }} className="btn-ghost text-sm">Cancel</button>
-                <button onClick={confirmPaste} disabled={!pasteDraft} className="btn-primary text-sm inline-flex gap-1">
-                  <ClipboardPaste className="size-3.5" /> Paste
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       {phase === "connecting" && (
