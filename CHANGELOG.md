@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — terminal copy & paste
+- **Copy and paste work the same in every terminal** (browser SSH, desktop SSH, Telnet), through
+  one shared layer (`TerminalClipboard`):
+  - **Copy:** select with the mouse (copied automatically), `Ctrl+Shift+C`, `Ctrl+Insert`, or
+    `Ctrl+C` while text is selected. With nothing selected, `Ctrl+C` still sends ^C.
+  - **Paste:** `Ctrl+V`, `Ctrl+Shift+V`, `Shift+Insert`, the middle button, or the menu.
+    Before, `Ctrl+V` sent ^V to the shell and there was no keyboard copy at all.
+  - **Select all:** `Ctrl+Shift+A`. On macOS `⌘C` / `⌘V` / `⌘A` work, and `Ctrl+C` is always ^C.
+  - **Right-click menu:** Copy, Paste, Paste and edit…, Select all, Clear scrollback.
+  - A "Copied N characters" toast confirms each copy.
+  - Shortcuts match the physical key, so they work with an Arabic or any other keyboard layout.
+- **Safer pastes.** Multi-line text opens the review box first; this can be turned off. Every
+  paste goes through `term.paste()`, so shells that use bracketed paste wait for Enter. Pasted
+  bracketed-paste markers (`ESC[200~` / `ESC[201~`) are removed so text cannot escape paste mode.
+- **New settings** under **Settings → Terminal**: automatic copy on select, Ctrl+C copies,
+  Ctrl+V pastes, and review of multi-line pastes (all on by default). Right-click now opens the
+  menu by default; saved preferences that bound it to the edit popup move to the menu, which
+  still offers Paste and edit….
+- **Changed:** double-clicking the browser terminal no longer switches to fullscreen; it selects
+  a word, and triple-click selects a line. Fullscreen stays under **Tools → Fullscreen**.
+- No server or permission changes.
+
 ### Security
 - **Email change requires re-authentication (SEC-EMAIL-001, ASVS V7.5.1).** Changing your
   own email through `PATCH /api/v1/users/me` needs a single-use step-up token minted for the

@@ -15,6 +15,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useAuthStore } from "@/modules/auth/store/authStore";
 import { hostsApi } from "../api/sessionsApi";
 import { useTerminalUi } from "../store/terminalUiStore";
+import { TerminalClipboard } from "./TerminalClipboard";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
@@ -37,6 +38,7 @@ export function TelnetPage() {
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  const [termObj, setTermObj] = useState<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -62,7 +64,7 @@ export function TelnetPage() {
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       cursorBlink: true,
       allowTransparency: true,
-      theme: { background: "rgba(0,0,0,0)" },
+      theme: { background: "rgba(0,0,0,0)", selectionBackground: "rgba(61,220,151,0.35)" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -70,9 +72,10 @@ export function TelnetPage() {
     try { fit.fit(); } catch { /* not visible yet */ }
     termRef.current = term;
     fitRef.current = fit;
+    setTermObj(term);
     const onResize = () => { try { fit.fit(); } catch { /* ignore */ } };
     window.addEventListener("resize", onResize);
-    return () => { window.removeEventListener("resize", onResize); term.dispose(); termRef.current = null; };
+    return () => { window.removeEventListener("resize", onResize); term.dispose(); termRef.current = null; setTermObj(null); };
   }, []);
 
   // (Re)connect.
@@ -131,6 +134,7 @@ export function TelnetPage() {
           </div>
         )}
         <div ref={containerRef} className="absolute inset-0 z-10 px-2 pt-2" style={{ paddingBottom: bottomGapPx }} />
+        <TerminalClipboard term={termObj} container={termObj ? containerRef.current : null} label={hostName || "host"} />
 
         {phase === "connecting" && (
           <div className="absolute inset-0 grid place-items-center bg-bg/60 backdrop-blur-sm z-20">
